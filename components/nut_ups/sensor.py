@@ -1,0 +1,99 @@
+import esphome.codegen as cg
+import esphome.config_validation as cv
+from esphome.components import sensor
+from esphome.const import (
+    CONF_ID,
+    CONF_TYPE,
+    DEVICE_CLASS_BATTERY,
+    DEVICE_CLASS_VOLTAGE,
+    DEVICE_CLASS_POWER_FACTOR,
+    DEVICE_CLASS_DURATION,
+    STATE_CLASS_MEASUREMENT,
+    UNIT_PERCENT,
+    UNIT_VOLT,
+    UNIT_MINUTE,
+    UNIT_HERTZ,
+)
+
+from . import nut_ups_ns, NutUpsComponent, CONF_NUT_UPS_ID
+
+DEPENDENCIES = ["nut_ups"]
+
+NutUpsSensor = nut_ups_ns.class_("NutUpsSensor", sensor.Sensor, cg.Component)
+
+SENSOR_TYPES = {
+    "battery_level": {
+        "unit": UNIT_PERCENT,
+        "device_class": DEVICE_CLASS_BATTERY,
+        "state_class": STATE_CLASS_MEASUREMENT,
+        "accuracy_decimals": 0,
+    },
+    "input_voltage": {
+        "unit": UNIT_VOLT,
+        "device_class": DEVICE_CLASS_VOLTAGE,
+        "state_class": STATE_CLASS_MEASUREMENT,
+        "accuracy_decimals": 1,
+    },
+    "output_voltage": {
+        "unit": UNIT_VOLT,
+        "device_class": DEVICE_CLASS_VOLTAGE,
+        "state_class": STATE_CLASS_MEASUREMENT,
+        "accuracy_decimals": 1,
+    },
+    "load_percent": {
+        "unit": UNIT_PERCENT,
+        "device_class": DEVICE_CLASS_POWER_FACTOR,
+        "state_class": STATE_CLASS_MEASUREMENT,
+        "accuracy_decimals": 0,
+    },
+    "runtime": {
+        "unit": UNIT_MINUTE,
+        "device_class": DEVICE_CLASS_DURATION,
+        "state_class": STATE_CLASS_MEASUREMENT,
+        "accuracy_decimals": 0,
+    },
+    "frequency": {
+        "unit": UNIT_HERTZ,
+        "state_class": STATE_CLASS_MEASUREMENT,
+        "accuracy_decimals": 1,
+    },
+}
+
+CONF_NUT_UPS_ID = "nut_ups_id"
+
+CONFIG_SCHEMA = sensor.sensor_schema(
+    NutUpsSensor,
+    accuracy_decimals=1,
+).extend(
+    {
+        cv.GenerateID(CONF_NUT_UPS_ID): cv.use_id(NutUpsComponent),
+        cv.Required(CONF_TYPE): cv.one_of(*SENSOR_TYPES, lower=True),
+    }
+)
+
+
+async def to_code(config):
+    parent = await cg.get_variable(config[CONF_NUT_UPS_ID])
+    var = await sensor.new_sensor(config)
+    await cg.register_component(var, config)
+    
+    sensor_type = config[CONF_TYPE]
+    cg.add(var.set_sensor_type(sensor_type))
+    cg.add(parent.register_sensor(var, sensor_type))
+    
+    # Apply sensor type specific configuration
+    if sensor_type in SENSOR_TYPES:
+        sensor_config = SENSOR_TYPES[sensor_type]
+        
+        # Override config with sensor type defaults if not specified
+        if "unit_of_measurement" not in config and "unit" in sensor_config:
+            cg.add(var.set_unit_of_measurement(sensor_config["unit"]))
+        
+        if "device_class" not in config and "device_class" in sensor_config:
+            cg.add(var.set_device_class(sensor_config["device_class"]))
+            
+        if "state_class" not in config and "state_class" in sensor_config:
+            cg.add(var.set_state_class(sensor_config["state_class"]))
+            
+        if "accuracy_decimals" not in config and "accuracy_decimals" in sensor_config:
+            cg.add(var.set_accuracy_decimals(sensor_config["accuracy_decimals"]))

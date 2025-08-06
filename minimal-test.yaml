@@ -108,11 +108,16 @@ binary_sensor:
     type: fault
     device_class: problem
 
-dashboard_card: |
-  type: entities
-  title: UPS Monitor
-  entities:
-    - entity: sensor.ups_battery_level
-      name: Battery Level
-    - entity: binary_sensor.ups_on_battery
-      name: On Battery
+# Text Sensors
+text_sensor:
+  - platform: nut_ups
+    nut_ups_id: ups_monitor
+    name: "UPS Status"
+    id: ups_status
+    type: status
+
+  - platform: nut_ups
+    nut_ups_id: ups_monitor
+    name: "UPS Model"
+    id: ups_model
+    type: model
