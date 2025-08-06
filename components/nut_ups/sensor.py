@@ -59,7 +59,6 @@ SENSOR_TYPES = {
     },
 }
 
-CONF_NUT_UPS_ID = "nut_ups_id"
 
 CONFIG_SCHEMA = sensor.sensor_schema(
     NutUpsSensor,
@@ -76,24 +75,24 @@ async def to_code(config):
     parent = await cg.get_variable(config[CONF_NUT_UPS_ID])
     var = await sensor.new_sensor(config)
     await cg.register_component(var, config)
-    
+
     sensor_type = config[CONF_TYPE]
     cg.add(var.set_sensor_type(sensor_type))
     cg.add(parent.register_sensor(var, sensor_type))
-    
+
     # Apply sensor type specific configuration
     if sensor_type in SENSOR_TYPES:
         sensor_config = SENSOR_TYPES[sensor_type]
-        
+
         # Override config with sensor type defaults if not specified
         if "unit_of_measurement" not in config and "unit" in sensor_config:
             cg.add(var.set_unit_of_measurement(sensor_config["unit"]))
-        
+
         if "device_class" not in config and "device_class" in sensor_config:
             cg.add(var.set_device_class(sensor_config["device_class"]))
-            
+
         if "state_class" not in config and "state_class" in sensor_config:
             cg.add(var.set_state_class(sensor_config["state_class"]))
-            
+
         if "accuracy_decimals" not in config and "accuracy_decimals" in sensor_config:
             cg.add(var.set_accuracy_decimals(sensor_config["accuracy_decimals"]))

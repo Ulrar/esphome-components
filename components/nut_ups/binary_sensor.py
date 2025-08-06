@@ -37,7 +37,6 @@ BINARY_SENSOR_TYPES = {
     },
 }
 
-CONF_NUT_UPS_ID = "nut_ups_id"
 
 CONFIG_SCHEMA = binary_sensor.binary_sensor_schema(NutUpsBinarySensor).extend(
     {
@@ -51,15 +50,15 @@ async def to_code(config):
     parent = await cg.get_variable(config[CONF_NUT_UPS_ID])
     var = await binary_sensor.new_binary_sensor(config)
     await cg.register_component(var, config)
-    
+
     sensor_type = config[CONF_TYPE]
     cg.add(var.set_sensor_type(sensor_type))
     cg.add(parent.register_binary_sensor(var, sensor_type))
-    
+
     # Apply sensor type specific configuration
     if sensor_type in BINARY_SENSOR_TYPES:
         sensor_config = BINARY_SENSOR_TYPES[sensor_type]
-        
+
         # Override config with sensor type defaults if not specified
         if "device_class" not in config and "device_class" in sensor_config:
             cg.add(var.set_device_class(sensor_config["device_class"]))

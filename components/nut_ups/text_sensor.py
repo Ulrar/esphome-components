@@ -21,7 +21,6 @@ TEXT_SENSOR_TYPES = [
     "firmware_version",
 ]
 
-CONF_NUT_UPS_ID = "nut_ups_id"
 
 CONFIG_SCHEMA = text_sensor.text_sensor_schema(NutUpsTextSensor).extend(
     {
@@ -35,7 +34,7 @@ async def to_code(config):
     parent = await cg.get_variable(config[CONF_NUT_UPS_ID])
     var = await text_sensor.new_text_sensor(config)
     await cg.register_component(var, config)
-    
+
     sensor_type = config[CONF_TYPE]
     cg.add(var.set_sensor_type(sensor_type))
     cg.add(parent.register_text_sensor(var, sensor_type))
