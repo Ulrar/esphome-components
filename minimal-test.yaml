@@ -1,0 +1,118 @@
+esphome:
+  name: nut-ups-monitor
+  friendly_name: "NUT UPS Monitor"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: arduino
+    version: recommended
+
+# Enable logging
+logger:
+  level: DEBUG
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "NUT-UPS-Monitor"
+    password: !secret ap_password
+
+captive_portal:
+web_server:
+
+# RGB LED for status indication
+light:
+  - platform: esp32_rmt_led_strip
+    rgb_order: GRB
+    pin: GPIO38
+    num_leds: 1
+    # rmt_channel: 0 @INFO: esp32_rmt_led_strip does manage the rmt channel
+    chipset: ws2812
+    name: "UPS Status LED"
+    id: status_led
+    effects:
+      - strobe:
+          name: "Critical Strobe"
+          colors:
+            - state: true
+              brightness: 100%
+              red: 100%
+              green: 0%
+              blue: 0%
+              duration: 250ms
+            - state: false
+              duration: 250ms
+
+# External components
+external_components:
+  - source:
+      type: local
+      path: components
+
+# NUT UPS Component
+nut_ups:
+  id: ups_monitor
+  simulation_mode: true # Set to false for production
+  update_interval: 5s
+  usb_vendor_id: 0x051d # APC vendor ID
+  usb_product_id: 0x0002 # Back-UPS ES series
+  protocol_timeout: 10s
+  auto_detect_protocol: true
+
+# Sensors
+sensor:
+  - platform: nut_ups
+    nut_ups_id: ups_monitor
+    name: "UPS Battery Level"
+    id: ups_battery_level
+    type: battery_level
+    unit_of_measurement: "%"
+    device_class: battery
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: nut_ups
+    nut_ups_id: ups_monitor
+    name: "UPS Runtime"
+    id: ups_runtime
+    type: runtime
+    unit_of_measurement: "min"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+
+# Binary Sensors
+binary_sensor:
+  - platform: nut_ups
+    nut_ups_id: ups_monitor
+    name: "UPS On Battery"
+    id: ups_on_battery
+    type: on_battery
+    device_class: battery
+
+  - platform: nut_ups
+    nut_ups_id: ups_monitor
+    name: "UPS Fault"
+    id: ups_fault
+    type: fault
+    device_class: problem
+
+dashboard_card: |
+  type: entities
+  title: UPS Monitor
+  entities:
+    - entity: sensor.ups_battery_level
+      name: Battery Level
+    - entity: binary_sensor.ups_on_battery
+      name: On Battery
