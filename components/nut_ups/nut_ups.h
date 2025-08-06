@@ -10,14 +10,23 @@
 
 #include <memory>
 #include <vector>
-#include <map>
+#include <unordered_map>
 #include <string>
+#include <atomic>
 
 #ifdef USE_ESP32
 #include "esp_err.h"
-#include "driver/usb_serial_jtag.h"
-#include "hal/usb_serial_jtag_hal.h"
-#include "soc/usb_pins.h"
+#include "usb/usb_host.h"
+#include "usb/usb_types_ch9.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
+
+// USB HID Class defines
+#ifndef USB_CLASS_HID
+#define USB_CLASS_HID 0x03
+#endif
+
 #endif
 
 namespace esphome
@@ -77,7 +86,18 @@ namespace esphome
     class NutUpsComponent : public PollingComponent
     {
     public:
-      NutUpsComponent() = default;
+      NutUpsComponent() : usb_device_{}, usb_mutex_(nullptr), usb_task_handle_(nullptr), 
+                          usb_host_initialized_(false), device_connected_(false) {
+#ifdef USE_ESP32
+        memset(&usb_device_, 0, sizeof(usb_device_));
+#endif
+      }
+      
+      ~NutUpsComponent() {
+#ifdef USE_ESP32
+        usb_deinit();
+#endif
+      }
 
       void setup() override;
       void update() override;
@@ -109,13 +129,13 @@ namespace esphome
       bool auto_detect_protocol_{true};
 
       bool connected_{false};
-      uint32_t last_successful_read_{0};
+      std::atomic<uint32_t> last_successful_read_{0};
       UpsData ups_data_;
 
       std::unique_ptr<UpsProtocolBase> active_protocol_;
-      std::map<std::string, sensor::Sensor *> sensors_;
-      std::map<std::string, binary_sensor::BinarySensor *> binary_sensors_;
-      std::map<std::string, text_sensor::TextSensor *> text_sensors_;
+      std::unordered_map<std::string, sensor::Sensor *> sensors_;
+      std::unordered_map<std::string, binary_sensor::BinarySensor *> binary_sensors_;
+      std::unordered_map<std::string, text_sensor::TextSensor *> text_sensors_;
 
       // Core methods
       bool initialize_usb();
@@ -131,9 +151,44 @@ namespace esphome
 
     protected:
 #ifdef USE_ESP32
+      // USB Host structures
+      struct UsbDevice {
+        usb_host_client_handle_t client_hdl;
+        usb_device_handle_t dev_hdl;
+        uint8_t dev_addr;
+        uint16_t vid;
+        uint16_t pid;
+        bool is_hid_device;
+        uint8_t interface_num;
+        uint8_t ep_in;
+        uint8_t ep_out;
+        uint16_t max_packet_size;
+      };
+
+      // USB Host member variables
+      UsbDevice usb_device_;
+      SemaphoreHandle_t usb_mutex_;
+      TaskHandle_t usb_task_handle_;
+      bool usb_host_initialized_;
+      bool device_connected_;
+
       // ESP32-specific USB handling
       esp_err_t usb_init();
       void usb_deinit();
+      esp_err_t usb_host_lib_init();
+      esp_err_t usb_client_register();
+      esp_err_t usb_device_open();
+      esp_err_t usb_device_enumerate();
+      bool usb_is_ups_device(const usb_device_desc_t *desc);
+      esp_err_t usb_claim_interface();
+      esp_err_t usb_get_endpoints();
+      
+      // USB communication
+      esp_err_t usb_transfer_sync(const std::vector<uint8_t> &data_out, std::vector<uint8_t> &data_in, uint32_t timeout_ms);
+      
+      // USB Host event handling
+      static void usb_host_lib_task(void *arg);
+      static void usb_client_event_callback(const usb_host_client_event_msg_t *event_msg, void *arg);
 #endif
     };
 

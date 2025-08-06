@@ -8,6 +8,15 @@
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "usb/usb_host.h"
+#include "usb/usb_types_ch9.h"
+#include <cstring>
+
+// USB HID Class defines
+#ifndef USB_CLASS_HID
+#define USB_CLASS_HID 0x03
+#endif
+
 #endif
 
 namespace esphome {
@@ -105,15 +114,17 @@ bool NutUpsComponent::initialize_usb() {
 #ifdef USE_ESP32
   ESP_LOGD(TAG, "Initializing USB communication...");
   
-  // Initialize USB host if not already done
-  // Note: This is a simplified approach - full USB Host implementation
-  // would require more extensive ESP-IDF USB Host library integration
-  
-  // For now, we'll use a basic approach that can be extended
   esp_err_t ret = usb_init();
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "USB initialization failed: %s", esp_err_to_name(ret));
     return false;
+  }
+  
+  // Try to enumerate and connect to UPS device
+  ret = usb_device_enumerate();
+  if (ret != ESP_OK) {
+    ESP_LOGW(TAG, "No UPS devices found during initial enumeration");
+    // Don't fail completely - device might be connected later
   }
   
   ESP_LOGI(TAG, "USB initialized successfully");
@@ -281,8 +292,26 @@ void NutUpsComponent::register_text_sensor(text_sensor::TextSensor *sens, const 
 
 bool NutUpsComponent::usb_write(const std::vector<uint8_t> &data) {
 #ifdef USE_ESP32
-  // Placeholder for actual USB write implementation
-  // This would use ESP-IDF USB Host APIs in a real implementation
+  if (!device_connected_ || data.empty()) {
+    return false;
+  }
+
+  // Take USB mutex for thread safety
+  if (xSemaphoreTake(usb_mutex_, pdMS_TO_TICKS(1000)) != pdTRUE) {
+    ESP_LOGW(TAG, "Failed to acquire USB mutex for write");
+    return false;
+  }
+
+  std::vector<uint8_t> dummy_response;
+  esp_err_t ret = usb_transfer_sync(data, dummy_response, 1000);
+  
+  xSemaphoreGive(usb_mutex_);
+  
+  if (ret != ESP_OK) {
+    ESP_LOGW(TAG, "USB write failed: %s", esp_err_to_name(ret));
+    return false;
+  }
+  
   ESP_LOGV(TAG, "USB Write: %d bytes", data.size());
   return true;
 #else
@@ -292,27 +321,441 @@ bool NutUpsComponent::usb_write(const std::vector<uint8_t> &data) {
 
 bool NutUpsComponent::usb_read(std::vector<uint8_t> &data, uint32_t timeout_ms) {
 #ifdef USE_ESP32
-  // Placeholder for actual USB read implementation
-  // This would use ESP-IDF USB Host APIs in a real implementation
-  ESP_LOGV(TAG, "USB Read with timeout: %u ms", timeout_ms);
-  data.clear();
+  if (!device_connected_) {
+    data.clear();
+    return false;
+  }
+
+  // Take USB mutex for thread safety  
+  if (xSemaphoreTake(usb_mutex_, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
+    ESP_LOGW(TAG, "Failed to acquire USB mutex for read");
+    data.clear();
+    return false;
+  }
+
+  std::vector<uint8_t> dummy_out;
+  esp_err_t ret = usb_transfer_sync(dummy_out, data, timeout_ms);
+  
+  xSemaphoreGive(usb_mutex_);
+  
+  if (ret != ESP_OK) {
+    ESP_LOGV(TAG, "USB read failed: %s", esp_err_to_name(ret));
+    data.clear();
+    return false;
+  }
+  
+  ESP_LOGV(TAG, "USB Read: %d bytes", data.size());
   return true;
 #else
+  data.clear();
   return false;
 #endif
 }
 
 #ifdef USE_ESP32
 esp_err_t NutUpsComponent::usb_init() {
-  // Placeholder for USB initialization
-  // In a real implementation, this would initialize the ESP32 USB Host
   ESP_LOGD(TAG, "Initializing USB Host...");
+  
+  if (usb_host_initialized_) {
+    ESP_LOGW(TAG, "USB Host already initialized");
+    return ESP_OK;
+  }
+  
+  // Create mutex for USB operations
+  usb_mutex_ = xSemaphoreCreateMutex();
+  if (!usb_mutex_) {
+    ESP_LOGE(TAG, "Failed to create USB mutex");
+    return ESP_ERR_NO_MEM;
+  }
+  
+  // Initialize USB Host Library
+  esp_err_t ret = usb_host_lib_init();
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "USB Host lib init failed: %s", esp_err_to_name(ret));
+    return ret;
+  }
+  
+  // Register USB client
+  ret = usb_client_register();
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "USB client register failed: %s", esp_err_to_name(ret));
+    return ret;
+  }
+  
+  usb_host_initialized_ = true;
+  ESP_LOGI(TAG, "USB Host initialized successfully");
   return ESP_OK;
 }
 
 void NutUpsComponent::usb_deinit() {
-  // Placeholder for USB cleanup
   ESP_LOGD(TAG, "Deinitializing USB Host...");
+  
+  if (!usb_host_initialized_) {
+    return;
+  }
+  
+  // Stop USB Host task
+  if (usb_task_handle_) {
+    vTaskDelete(usb_task_handle_);
+    usb_task_handle_ = nullptr;
+  }
+  
+  // Close USB device if connected
+  if (usb_device_.dev_hdl) {
+    usb_host_device_close(usb_device_.client_hdl, usb_device_.dev_hdl);
+    usb_device_.dev_hdl = nullptr;
+  }
+  
+  // Deregister USB client
+  if (usb_device_.client_hdl) {
+    usb_host_client_deregister(usb_device_.client_hdl);
+    usb_device_.client_hdl = nullptr;
+  }
+  
+  // Uninstall USB Host Library
+  usb_host_uninstall();
+  
+  // Delete mutex
+  if (usb_mutex_) {
+    vSemaphoreDelete(usb_mutex_);
+    usb_mutex_ = nullptr;
+  }
+  
+  usb_host_initialized_ = false;
+  device_connected_ = false;
+  
+  ESP_LOGI(TAG, "USB Host deinitialized");
+}
+
+esp_err_t NutUpsComponent::usb_host_lib_init() {
+  usb_host_config_t host_config = {
+    .skip_phy_setup = false,
+    .intr_flags = ESP_INTR_FLAG_LEVEL1,
+  };
+  
+  esp_err_t ret = usb_host_install(&host_config);
+  if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) { // ESP_ERR_INVALID_STATE means already initialized
+    return ret;
+  }
+  
+  // Create USB Host Library task
+  if (xTaskCreate(usb_host_lib_task, "usb_host", 4096, this, 5, &usb_task_handle_) != pdTRUE) {
+    ESP_LOGE(TAG, "Failed to create USB Host task");
+    return ESP_ERR_NO_MEM;
+  }
+  
+  return ESP_OK;
+}
+
+esp_err_t NutUpsComponent::usb_client_register() {
+  usb_host_client_config_t client_config = {
+    .is_synchronous = false,
+    .max_num_event_msg = 5,
+    .async = {
+      .client_event_callback = usb_client_event_callback,
+      .callback_arg = this,
+    }
+  };
+  
+  esp_err_t ret = usb_host_client_register(&client_config, &usb_device_.client_hdl);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "USB client register failed: %s", esp_err_to_name(ret));
+    return ret;
+  }
+  
+  return ESP_OK;
+}
+
+esp_err_t NutUpsComponent::usb_device_enumerate() {
+  ESP_LOGD(TAG, "Enumerating USB devices...");
+  
+  uint8_t dev_addr_list[10];
+  int num_dev = 10;
+  
+  esp_err_t ret = usb_host_device_addr_list_fill(num_dev, dev_addr_list, &num_dev);
+  if (ret != ESP_OK) {
+    return ret;
+  }
+  
+  ESP_LOGD(TAG, "Found %d USB devices", num_dev);
+  
+  for (int i = 0; i < num_dev; i++) {
+    usb_device_handle_t dev_hdl;
+    ret = usb_host_device_open(usb_device_.client_hdl, dev_addr_list[i], &dev_hdl);
+    if (ret != ESP_OK) {
+      continue;
+    }
+    
+    const usb_device_desc_t *dev_desc;
+    ret = usb_host_get_device_descriptor(dev_hdl, &dev_desc);
+    if (ret == ESP_OK && usb_is_ups_device(dev_desc)) {
+      // Found UPS device
+      usb_device_.dev_hdl = dev_hdl;
+      usb_device_.dev_addr = dev_addr_list[i];
+      usb_device_.vid = dev_desc->idVendor;
+      usb_device_.pid = dev_desc->idProduct;
+      
+      ESP_LOGI(TAG, "Found UPS device: VID=0x%04X, PID=0x%04X", usb_device_.vid, usb_device_.pid);
+      
+      // Claim interface and get endpoints
+      if (usb_claim_interface() == ESP_OK && usb_get_endpoints() == ESP_OK) {
+        device_connected_ = true;
+        return ESP_OK;
+      }
+    }
+    
+    usb_host_device_close(usb_device_.client_hdl, dev_hdl);
+  }
+  
+  return ESP_ERR_NOT_FOUND;
+}
+
+bool NutUpsComponent::usb_is_ups_device(const usb_device_desc_t *desc) {
+  // Check if this is a known UPS device
+  // Common UPS vendors: APC (0x051D), CyberPower (0x0764), Tripp Lite (0x09AE)
+  uint16_t vid = desc->idVendor;
+  uint16_t pid = desc->idProduct;
+  
+  ESP_LOGV(TAG, "Checking device: VID=0x%04X, PID=0x%04X", vid, pid);
+  
+  // Check configured VID/PID first
+  if (vid == usb_vendor_id_ && pid == usb_product_id_) {
+    ESP_LOGD(TAG, "Device matches configured VID/PID");
+    return true;
+  }
+  
+  // Check known UPS vendor IDs
+  switch (vid) {
+    case 0x051D: // APC
+    case 0x0764: // CyberPower  
+    case 0x09AE: // Tripp Lite
+    case 0x06DA: // MGE UPS Systems
+    case 0x0665: // Cypress (some UPS devices)
+      ESP_LOGD(TAG, "Recognized UPS vendor: 0x%04X", vid);
+      return true;
+    default:
+      break;
+  }
+  
+  // Check device class (some UPS devices use HID class)
+  if (desc->bDeviceClass == USB_CLASS_HID ||
+      (desc->bDeviceClass == 0 && desc->bDeviceSubClass == 0)) {
+    ESP_LOGV(TAG, "Device might be HID-compatible UPS");
+    return true; // Could be a HID UPS
+  }
+  
+  return false;
+}
+
+esp_err_t NutUpsComponent::usb_claim_interface() {
+  // Get active configuration
+  const usb_config_desc_t *config_desc;
+  esp_err_t ret = usb_host_get_active_config_descriptor(usb_device_.dev_hdl, &config_desc);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to get config descriptor: %s", esp_err_to_name(ret));
+    return ret;
+  }
+  
+  // Find HID interface
+  const usb_intf_desc_t *intf_desc = nullptr;
+  int offset = 0;
+  
+  for (int i = 0; i < config_desc->bNumInterfaces; i++) {
+    intf_desc = usb_parse_interface_descriptor(config_desc, i, 0, &offset);
+    if (intf_desc && intf_desc->bInterfaceClass == USB_CLASS_HID) {
+      usb_device_.interface_num = intf_desc->bInterfaceNumber;
+      usb_device_.is_hid_device = true;
+      break;
+    }
+  }
+  
+  if (!intf_desc) {
+    ESP_LOGE(TAG, "No HID interface found");
+    return ESP_ERR_NOT_FOUND;
+  }
+  
+  // Claim the interface
+  ret = usb_host_interface_claim(usb_device_.client_hdl, usb_device_.dev_hdl, 
+                                 usb_device_.interface_num, 0);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to claim interface: %s", esp_err_to_name(ret));
+    return ret;
+  }
+  
+  ESP_LOGD(TAG, "Claimed interface %d", usb_device_.interface_num);
+  return ESP_OK;
+}
+
+esp_err_t NutUpsComponent::usb_get_endpoints() {
+  // Get active configuration
+  const usb_config_desc_t *config_desc;
+  esp_err_t ret = usb_host_get_active_config_descriptor(usb_device_.dev_hdl, &config_desc);
+  if (ret != ESP_OK) {
+    return ret;
+  }
+  
+  // Find HID interface first
+  const usb_intf_desc_t *intf_desc = nullptr;
+  int intf_offset = 0;
+  
+  for (int i = 0; i < config_desc->bNumInterfaces; i++) {
+    intf_desc = usb_parse_interface_descriptor(config_desc, i, 0, &intf_offset);
+    if (intf_desc && intf_desc->bInterfaceClass == USB_CLASS_HID) {
+      break;
+    }
+  }
+  
+  if (!intf_desc) {
+    ESP_LOGE(TAG, "No HID interface found for endpoints");
+    return ESP_ERR_NOT_FOUND;
+  }
+  
+  // Find endpoints in the HID interface
+  int ep_index = 0;
+  const usb_ep_desc_t *ep_desc;
+  
+  while ((ep_desc = usb_parse_endpoint_descriptor_by_index(intf_desc, ep_index, 0, nullptr)) != nullptr) {
+    if (USB_EP_DESC_GET_EP_DIR(ep_desc)) { // IN endpoint
+      usb_device_.ep_in = ep_desc->bEndpointAddress;
+      usb_device_.max_packet_size = ep_desc->wMaxPacketSize;
+      ESP_LOGD(TAG, "Found IN endpoint: 0x%02X, max packet: %d", 
+               usb_device_.ep_in, usb_device_.max_packet_size);
+    } else { // OUT endpoint
+      usb_device_.ep_out = ep_desc->bEndpointAddress;
+      ESP_LOGD(TAG, "Found OUT endpoint: 0x%02X", usb_device_.ep_out);
+    }
+    ep_index++;
+  }
+  
+  if (usb_device_.ep_in == 0) {
+    ESP_LOGE(TAG, "No IN endpoint found");
+    return ESP_ERR_NOT_FOUND;
+  }
+  
+  return ESP_OK;
+}
+
+esp_err_t NutUpsComponent::usb_transfer_sync(const std::vector<uint8_t> &data_out, 
+                                             std::vector<uint8_t> &data_in, 
+                                             uint32_t timeout_ms) {
+  if (!device_connected_ || !usb_device_.dev_hdl) {
+    return ESP_ERR_INVALID_STATE;
+  }
+  
+  esp_err_t ret = ESP_OK;
+  
+  // Send data if provided
+  if (!data_out.empty() && usb_device_.ep_out != 0) {
+    usb_transfer_t *transfer_out;
+    ret = usb_host_transfer_alloc(data_out.size(), 0, &transfer_out);
+    if (ret != ESP_OK) {
+      return ret;
+    }
+    
+    transfer_out->device_handle = usb_device_.dev_hdl;
+    transfer_out->bEndpointAddress = usb_device_.ep_out;
+    transfer_out->callback = nullptr;
+    transfer_out->context = this;
+    transfer_out->num_bytes = data_out.size();
+    std::memcpy(transfer_out->data_buffer, data_out.data(), data_out.size());
+    
+    ret = usb_host_transfer_submit(transfer_out);
+    if (ret == ESP_OK) {
+      // Wait for completion
+      vTaskDelay(pdMS_TO_TICKS(timeout_ms));
+    }
+    
+    usb_host_transfer_free(transfer_out);
+    if (ret != ESP_OK) {
+      return ret;
+    }
+  }
+  
+  // Read data if IN endpoint exists
+  if (usb_device_.ep_in != 0) {
+    usb_transfer_t *transfer_in;
+    size_t buffer_size = std::max(static_cast<size_t>(64), static_cast<size_t>(usb_device_.max_packet_size));
+    ret = usb_host_transfer_alloc(buffer_size, 0, &transfer_in);
+    if (ret != ESP_OK) {
+      return ret;
+    }
+    
+    transfer_in->device_handle = usb_device_.dev_hdl;
+    transfer_in->bEndpointAddress = usb_device_.ep_in;
+    transfer_in->callback = nullptr;
+    transfer_in->context = this;
+    transfer_in->num_bytes = buffer_size;
+    
+    ret = usb_host_transfer_submit(transfer_in);
+    if (ret == ESP_OK) {
+      // Wait for completion
+      vTaskDelay(pdMS_TO_TICKS(timeout_ms));
+      
+      // Copy received data
+      if (transfer_in->actual_num_bytes > 0) {
+        data_in.resize(transfer_in->actual_num_bytes);
+        std::memcpy(data_in.data(), transfer_in->data_buffer, transfer_in->actual_num_bytes);
+      }
+    }
+    
+    usb_host_transfer_free(transfer_in);
+  }
+  
+  return ret;
+}
+
+void NutUpsComponent::usb_host_lib_task(void *arg) {
+  auto *component = static_cast<NutUpsComponent *>(arg);
+  
+  ESP_LOGD(TAG, "USB Host task started");
+  
+  while (component->usb_host_initialized_) {
+    uint32_t event_flags;
+    esp_err_t ret = usb_host_lib_handle_events(portMAX_DELAY, &event_flags);
+    
+    if (ret != ESP_OK) {
+      ESP_LOGW(TAG, "USB Host lib handle events error: %s", esp_err_to_name(ret));
+      continue;
+    }
+    
+    if (event_flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS) {
+      ESP_LOGD(TAG, "No USB clients");
+      usb_host_device_free_all();
+    }
+    
+    if (event_flags & USB_HOST_LIB_EVENT_FLAGS_ALL_FREE) {
+      ESP_LOGD(TAG, "All USB devices freed");
+    }
+    
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+  
+  ESP_LOGD(TAG, "USB Host task ended");
+  vTaskDelete(nullptr);
+}
+
+void NutUpsComponent::usb_client_event_callback(const usb_host_client_event_msg_t *event_msg, void *arg) {
+  auto *component = static_cast<NutUpsComponent *>(arg);
+  
+  switch (event_msg->event) {
+    case USB_HOST_CLIENT_EVENT_NEW_DEV:
+      ESP_LOGD(TAG, "New USB device connected: address %d", event_msg->new_dev.address);
+      // Trigger device enumeration
+      component->usb_device_enumerate();
+      break;
+      
+    case USB_HOST_CLIENT_EVENT_DEV_GONE:
+      ESP_LOGD(TAG, "USB device disconnected: handle %p", event_msg->dev_gone.dev_hdl);
+      if (component->usb_device_.dev_hdl == event_msg->dev_gone.dev_hdl) {
+        component->device_connected_ = false;
+        component->usb_device_.dev_hdl = nullptr;
+      }
+      break;
+      
+    default:
+      ESP_LOGV(TAG, "USB client event: %d", event_msg->event);
+      break;
+  }
 }
 #endif
 
