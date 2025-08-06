@@ -60,21 +60,43 @@ namespace esphome
       PROTOCOL_GENERIC_HID
     };
 
-    // UPS data structure
+    // UPS data structure with proper initialization
     struct UpsData
     {
-      float battery_level = NAN;
-      float input_voltage = NAN;
-      float output_voltage = NAN;
-      float load_percent = NAN;
-      float runtime_minutes = NAN;
-      float frequency = NAN;
-      uint32_t status_flags = UPS_STATUS_UNKNOWN;
-      std::string model = "";
-      std::string manufacturer = "";
-      std::string serial_number = "";
-      std::string firmware_version = "";
-      UpsProtocol detected_protocol = PROTOCOL_UNKNOWN;
+      float battery_level{NAN};
+      float input_voltage{NAN};
+      float output_voltage{NAN};
+      float load_percent{NAN};
+      float runtime_minutes{NAN};
+      float frequency{NAN};
+      uint32_t status_flags{UPS_STATUS_UNKNOWN};
+      std::string model{};
+      std::string manufacturer{};
+      std::string serial_number{};
+      std::string firmware_version{};
+      UpsProtocol detected_protocol{PROTOCOL_UNKNOWN};
+      
+      // Reset all data to default values
+      void reset() {
+        battery_level = NAN;
+        input_voltage = NAN;
+        output_voltage = NAN;
+        load_percent = NAN;
+        runtime_minutes = NAN;
+        frequency = NAN;
+        status_flags = UPS_STATUS_UNKNOWN;
+        model.clear();
+        manufacturer.clear();
+        serial_number.clear();
+        firmware_version.clear();
+        detected_protocol = PROTOCOL_UNKNOWN;
+      }
+      
+      // Check if core data is valid
+      bool is_valid() const {
+        return !std::isnan(battery_level) || !std::isnan(input_voltage) || 
+               !std::isnan(output_voltage) || status_flags != UPS_STATUS_UNKNOWN;
+      }
     };
 
     // Forward declarations
@@ -104,11 +126,17 @@ namespace esphome
       void dump_config() override;
       float get_setup_priority() const override { return setup_priority::DATA; }
 
-      // Configuration setters
+      // Configuration setters with validation
       void set_simulation_mode(bool simulation_mode) { simulation_mode_ = simulation_mode; }
-      void set_usb_vendor_id(uint16_t vendor_id) { usb_vendor_id_ = vendor_id; }
-      void set_usb_product_id(uint16_t product_id) { usb_product_id_ = product_id; }
-      void set_protocol_timeout(uint32_t timeout_ms) { protocol_timeout_ms_ = timeout_ms; }
+      void set_usb_vendor_id(uint16_t vendor_id) { 
+        if (vendor_id != 0) usb_vendor_id_ = vendor_id; 
+      }
+      void set_usb_product_id(uint16_t product_id) { 
+        if (product_id != 0) usb_product_id_ = product_id; 
+      }
+      void set_protocol_timeout(uint32_t timeout_ms) { 
+        protocol_timeout_ms_ = std::max(timeout_ms, static_cast<uint32_t>(5000)); // Min 5 seconds
+      }
       void set_auto_detect_protocol(bool auto_detect) { auto_detect_protocol_ = auto_detect; }
 
       // Data getters for sensors
@@ -178,7 +206,6 @@ namespace esphome
       void usb_deinit();
       esp_err_t usb_host_lib_init();
       esp_err_t usb_client_register();
-      esp_err_t usb_device_open();
       esp_err_t usb_device_enumerate();
       bool usb_is_ups_device(const usb_device_desc_t *desc);
       esp_err_t usb_claim_interface();

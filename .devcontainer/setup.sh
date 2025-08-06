@@ -20,9 +20,14 @@ cat > /etc/udev/rules.d/99-esphome-usb.rules << 'UDEV_EOF'
 SUBSYSTEM=="usb", ATTR{idVendor}=="303a", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="10c4", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", MODE="0666"
-SUBSYSTEM=="usb", ATTR{idVendor}=="051d", MODE="0666"
-SUBSYSTEM=="usb", ATTR{idVendor}=="0764", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="0403", MODE="0666"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0001", MODE="0666"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0463", MODE="0666"
+SUBSYSTEM=="usb", ATTR{idVendor}=="051d", MODE="0666"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0665", MODE="0666"
+SUBSYSTEM=="usb", ATTR{idVendor}=="06da", MODE="0666"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0764", MODE="0666"
+SUBSYSTEM=="usb", ATTR{idVendor}=="09ae", MODE="0666"
 UDEV_EOF
 
 # Create aliases
@@ -34,9 +39,9 @@ alias esphome-logs='esphome logs'
 alias esphome-dashboard='esphome dashboard /workspace'
 alias lsusb='lsusb -v'
 alias serialports='ls -la /dev/tty{USB,ACM}* 2>/dev/null || echo "No serial ports found"'
-alias build-component='cd /workspace && esphome compile configs/test-config.yaml'
-alias flash-test='cd /workspace && esphome upload configs/test-config.yaml'
-alias monitor='cd /workspace && esphome logs configs/test-config.yaml'
+alias build-component='cd /workspace && esphome compile full-test.yaml'
+alias flash-test='cd /workspace && esphome upload full-test.yaml'
+alias monitor='cd /workspace && esphome logs full-test.yaml'
 BASH_EOF
 
 # Welcome message

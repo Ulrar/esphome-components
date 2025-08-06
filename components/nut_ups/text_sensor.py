@@ -2,7 +2,6 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import text_sensor
 from esphome.const import (
-    CONF_ID,
     CONF_TYPE,
 )
 
@@ -14,7 +13,7 @@ NutUpsTextSensor = nut_ups_ns.class_("NutUpsTextSensor", text_sensor.TextSensor,
 
 TEXT_SENSOR_TYPES = [
     "model",
-    "manufacturer", 
+    "manufacturer",
     "status",
     "protocol",
     "serial_number",

@@ -1,4 +1,5 @@
 #include "nut_ups.h"
+#include "ups_vendors.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 
@@ -193,30 +194,62 @@ bool NutUpsComponent::detect_ups_protocol() {
 
 bool NutUpsComponent::read_ups_data() {
   if (!active_protocol_) {
+    ESP_LOGW(TAG, "No active protocol available for reading data");
     return false;
   }
   
-  return active_protocol_->read_data(ups_data_);
+  // Create temporary data structure to avoid corrupting existing data on failure
+  UpsData temp_data = ups_data_;
+  
+  if (active_protocol_->read_data(temp_data)) {
+    // Only update if we got valid data
+    if (temp_data.is_valid()) {
+      ups_data_ = temp_data;
+      return true;
+    } else {
+      ESP_LOGW(TAG, "Protocol returned invalid data");
+      return false;
+    }
+  }
+  
+  ESP_LOGV(TAG, "Failed to read data from protocol: %s", active_protocol_->get_protocol_name().c_str());
+  return false;
 }
 
 void NutUpsComponent::update_sensors() {
-  // Update numeric sensors
-  for (auto &pair : sensors_) {
-    const std::string &type = pair.first;
-    auto *sensor = pair.second;
+  // Update numeric sensors with validation
+  for (const auto &[type, sensor] : sensors_) {
+    if (!sensor) continue; // Safety check
     
-    if (type == "battery_level" && !std::isnan(ups_data_.battery_level)) {
-      sensor->publish_state(ups_data_.battery_level);
-    } else if (type == "input_voltage" && !std::isnan(ups_data_.input_voltage)) {
-      sensor->publish_state(ups_data_.input_voltage);
-    } else if (type == "output_voltage" && !std::isnan(ups_data_.output_voltage)) {
-      sensor->publish_state(ups_data_.output_voltage);
-    } else if (type == "load_percent" && !std::isnan(ups_data_.load_percent)) {
-      sensor->publish_state(ups_data_.load_percent);
-    } else if (type == "runtime" && !std::isnan(ups_data_.runtime_minutes)) {
-      sensor->publish_state(ups_data_.runtime_minutes);
-    } else if (type == "frequency" && !std::isnan(ups_data_.frequency)) {
-      sensor->publish_state(ups_data_.frequency);
+    float value = NAN;
+    
+    if (type == "battery_level") {
+      value = ups_data_.battery_level;
+    } else if (type == "input_voltage") {
+      value = ups_data_.input_voltage;
+    } else if (type == "output_voltage") {
+      value = ups_data_.output_voltage;
+    } else if (type == "load_percent") {
+      value = ups_data_.load_percent;
+    } else if (type == "runtime") {
+      value = ups_data_.runtime_minutes;
+    } else if (type == "frequency") {
+      value = ups_data_.frequency;
+    }
+    
+    // Only publish if value is valid and within reasonable bounds
+    if (!std::isnan(value)) {
+      // Add bounds checking for safety
+      if (type == "battery_level" && (value < 0.0f || value > 100.0f)) {
+        ESP_LOGW(TAG, "Battery level out of bounds: %.1f%%", value);
+        continue;
+      }
+      if (type == "load_percent" && (value < 0.0f || value > 100.0f)) {
+        ESP_LOGW(TAG, "Load percentage out of bounds: %.1f%%", value);
+        continue;
+      }
+      
+      sensor->publish_state(value);
     }
   }
   
@@ -523,37 +556,29 @@ esp_err_t NutUpsComponent::usb_device_enumerate() {
 }
 
 bool NutUpsComponent::usb_is_ups_device(const usb_device_desc_t *desc) {
-  // Check if this is a known UPS device
-  // Common UPS vendors: APC (0x051D), CyberPower (0x0764), Tripp Lite (0x09AE)
   uint16_t vid = desc->idVendor;
   uint16_t pid = desc->idProduct;
   
   ESP_LOGV(TAG, "Checking device: VID=0x%04X, PID=0x%04X", vid, pid);
   
-  // Check configured VID/PID first
+  // Check configured VID/PID first (highest priority)
   if (vid == usb_vendor_id_ && pid == usb_product_id_) {
     ESP_LOGD(TAG, "Device matches configured VID/PID");
     return true;
   }
   
-  // Check known UPS vendor IDs
-  switch (vid) {
-    case 0x051D: // APC
-    case 0x0764: // CyberPower  
-    case 0x09AE: // Tripp Lite
-    case 0x06DA: // MGE UPS Systems
-    case 0x0665: // Cypress (some UPS devices)
-      ESP_LOGD(TAG, "Recognized UPS vendor: 0x%04X", vid);
-      return true;
-    default:
-      break;
+  // Check against known UPS vendor list
+  if (is_known_ups_vendor(vid)) {
+    const char* vendor_name = get_ups_vendor_name(vid);
+    ESP_LOGD(TAG, "Recognized UPS vendor: %s (0x%04X)", vendor_name, vid);
+    return true;
   }
   
   // Check device class (some UPS devices use HID class)
   if (desc->bDeviceClass == USB_CLASS_HID ||
       (desc->bDeviceClass == 0 && desc->bDeviceSubClass == 0)) {
-    ESP_LOGV(TAG, "Device might be HID-compatible UPS");
-    return true; // Could be a HID UPS
+    ESP_LOGV(TAG, "Device might be HID-compatible UPS (unknown vendor)");
+    return true; // Could be a HID UPS from unknown vendor
   }
   
   return false;
@@ -651,16 +676,26 @@ esp_err_t NutUpsComponent::usb_transfer_sync(const std::vector<uint8_t> &data_ou
                                              std::vector<uint8_t> &data_in, 
                                              uint32_t timeout_ms) {
   if (!device_connected_ || !usb_device_.dev_hdl) {
+    ESP_LOGW(TAG, "USB device not connected for transfer");
     return ESP_ERR_INVALID_STATE;
   }
+  
+  // Validate timeout
+  timeout_ms = std::clamp(timeout_ms, static_cast<uint32_t>(100), static_cast<uint32_t>(30000)); // 100ms to 30s
   
   esp_err_t ret = ESP_OK;
   
   // Send data if provided
   if (!data_out.empty() && usb_device_.ep_out != 0) {
-    usb_transfer_t *transfer_out;
+    if (data_out.size() > usb_device_.max_packet_size * 4) { // Reasonable size check
+      ESP_LOGW(TAG, "Output data too large: %zu bytes", data_out.size());
+      return ESP_ERR_INVALID_SIZE;
+    }
+    
+    usb_transfer_t *transfer_out = nullptr;
     ret = usb_host_transfer_alloc(data_out.size(), 0, &transfer_out);
-    if (ret != ESP_OK) {
+    if (ret != ESP_OK || !transfer_out) {
+      ESP_LOGE(TAG, "Failed to allocate OUT transfer: %s", esp_err_to_name(ret));
       return ret;
     }
     
@@ -673,8 +708,9 @@ esp_err_t NutUpsComponent::usb_transfer_sync(const std::vector<uint8_t> &data_ou
     
     ret = usb_host_transfer_submit(transfer_out);
     if (ret == ESP_OK) {
-      // Wait for completion
-      vTaskDelay(pdMS_TO_TICKS(timeout_ms));
+      vTaskDelay(pdMS_TO_TICKS(std::min(timeout_ms, static_cast<uint32_t>(1000)))); // Max 1s for OUT
+    } else {
+      ESP_LOGW(TAG, "Failed to submit OUT transfer: %s", esp_err_to_name(ret));
     }
     
     usb_host_transfer_free(transfer_out);
@@ -685,10 +721,13 @@ esp_err_t NutUpsComponent::usb_transfer_sync(const std::vector<uint8_t> &data_ou
   
   // Read data if IN endpoint exists
   if (usb_device_.ep_in != 0) {
-    usb_transfer_t *transfer_in;
     size_t buffer_size = std::max(static_cast<size_t>(64), static_cast<size_t>(usb_device_.max_packet_size));
+    buffer_size = std::min(buffer_size, static_cast<size_t>(1024)); // Cap at 1KB
+    
+    usb_transfer_t *transfer_in = nullptr;
     ret = usb_host_transfer_alloc(buffer_size, 0, &transfer_in);
-    if (ret != ESP_OK) {
+    if (ret != ESP_OK || !transfer_in) {
+      ESP_LOGE(TAG, "Failed to allocate IN transfer: %s", esp_err_to_name(ret));
       return ret;
     }
     
@@ -700,14 +739,21 @@ esp_err_t NutUpsComponent::usb_transfer_sync(const std::vector<uint8_t> &data_ou
     
     ret = usb_host_transfer_submit(transfer_in);
     if (ret == ESP_OK) {
-      // Wait for completion
       vTaskDelay(pdMS_TO_TICKS(timeout_ms));
       
-      // Copy received data
-      if (transfer_in->actual_num_bytes > 0) {
+      // Copy received data with bounds checking
+      if (transfer_in->actual_num_bytes > 0 && 
+          transfer_in->actual_num_bytes <= buffer_size) {
         data_in.resize(transfer_in->actual_num_bytes);
         std::memcpy(data_in.data(), transfer_in->data_buffer, transfer_in->actual_num_bytes);
+        ESP_LOGV(TAG, "USB IN transfer received %d bytes", transfer_in->actual_num_bytes);
+      } else if (transfer_in->actual_num_bytes > buffer_size) {
+        ESP_LOGW(TAG, "USB IN transfer size mismatch: %d > %zu", 
+                 transfer_in->actual_num_bytes, buffer_size);
+        ret = ESP_ERR_INVALID_SIZE;
       }
+    } else {
+      ESP_LOGW(TAG, "Failed to submit IN transfer: %s", esp_err_to_name(ret));
     }
     
     usb_host_transfer_free(transfer_in);
