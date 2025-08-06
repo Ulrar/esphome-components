@@ -1,51 +1,66 @@
-esphome:
-  name: nut-ups-monitor
+substitutions:
+  name: nut-ups-monitor-full-test
   friendly_name: "NUT UPS Monitor"
+  timezone: "America/New_York"
+
+esphome:
+  name: "${name}"
+  friendly_name: "${friendly_name}"
+  comment: "Full test configuration for NUT UPS Component with ESP32-S3"
 
 esp32:
   board: esp32-s3-devkitc-1
+  flash_size: 16MB
   framework:
-    type: arduino
-    version: recommended
+    type: esp-idf
 
-# Enable logging
+# Enable logging with verbose output for debugging
 logger:
-  level: DEBUG
+  level: VERBOSE
+  logs:
+    nut_ups: DEBUG
 
 # Enable Home Assistant API
 api:
   encryption:
     key: !secret api_encryption_key
 
+# Enable OTA updates
 ota:
   - platform: esphome
     password: !secret ota_password
 
+# WiFi configuration
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
   ap:
-    ssid: "NUT-UPS-Monitor"
+    ssid: "${friendly_name} Fallback"
     password: !secret ap_password
 
+# Captive portal for easy WiFi setup
 captive_portal:
-web_server:
 
-# Time component
+# Optional web server for local monitoring
+web_server:
+  port: 80
+
+# Time component for accurate timestamps
 time:
   - platform: sntp
     id: sntp_time
+    timezone: "${timezone}"
 
-# RGB LED for status indication
+# RGB LED for UPS status indication (GPIO38 on ESP32-S3-DevKitC-1)
 light:
   - platform: esp32_rmt_led_strip
     rgb_order: GRB
     pin: GPIO38
     num_leds: 1
-    # rmt_channel: 0 @INFO: esp32_rmt_led_strip does manage the rmt channel
     chipset: ws2812
     name: "UPS Status LED"
-    id: status_led
+    id: ups_status_led
+    restore_mode: ALWAYS_OFF
     effects:
       - strobe:
           name: "Critical Strobe"
@@ -58,29 +73,54 @@ light:
               duration: 250ms
             - state: false
               duration: 250ms
+      - pulse:
+          name: "Battery Pulse"
+          transition_length: 1s
+          update_interval: 1s
+          min_brightness: 20%
+          max_brightness: 80%
+      - pulse:
+          name: "Normal Breathing"
+          transition_length: 2s
+          update_interval: 2s
+          min_brightness: 30%
+          max_brightness: 70%
+      - pulse:
+          name: "Battery Operation"
+          transition_length: 800ms
+          update_interval: 800ms
+          min_brightness: 40%
+          max_brightness: 90%
 
-# External components
+# External components - using local path for development
 external_components:
   - source:
       type: local
       path: components
 
-# NUT UPS Component
+# Main NUT UPS Component Configuration
 nut_ups:
   id: ups_monitor
-  simulation_mode: true # Set to false for production
-  update_interval: 5s
-  usb_vendor_id: 0x051d # APC vendor ID
-  usb_product_id: 0x0002 # Back-UPS ES series
-  protocol_timeout: 10s
-  auto_detect_protocol: true
+  update_interval: 10s
 
-# Sensors
+  # Hardware Configuration
+  usb_vendor_id: 0x051d # APC vendor ID (0x051d), CyberPower (0x0764)
+  usb_product_id: 0x0002 # APC Back-UPS ES series
+
+  # Protocol Configuration
+  auto_detect_protocol: true
+  protocol_timeout: 15s
+
+  # Development/Testing Configuration
+  simulation_mode: true # Set to false for production with real hardware
+
+# Numeric Sensors
 sensor:
+  # Essential UPS metrics
   - platform: nut_ups
     nut_ups_id: ups_monitor
-    name: "UPS Battery Level"
-    id: ups_battery_level
+    name: "Battery Level"
+    id: battery_level
     type: battery_level
     unit_of_measurement: "%"
     device_class: battery
@@ -89,8 +129,8 @@ sensor:
 
   - platform: nut_ups
     nut_ups_id: ups_monitor
-    name: "UPS Input Voltage"
-    id: ups_input_voltage
+    name: "Input Voltage"
+    id: input_voltage
     type: input_voltage
     unit_of_measurement: "V"
     device_class: voltage
@@ -99,8 +139,8 @@ sensor:
 
   - platform: nut_ups
     nut_ups_id: ups_monitor
-    name: "UPS Output Voltage"
-    id: ups_output_voltage
+    name: "Output Voltage"
+    id: output_voltage
     type: output_voltage
     unit_of_measurement: "V"
     device_class: voltage
@@ -109,8 +149,8 @@ sensor:
 
   - platform: nut_ups
     nut_ups_id: ups_monitor
-    name: "UPS Load"
-    id: ups_load
+    name: "Load Percentage"
+    id: load_percentage
     type: load_percent
     unit_of_measurement: "%"
     device_class: power_factor
@@ -119,8 +159,8 @@ sensor:
 
   - platform: nut_ups
     nut_ups_id: ups_monitor
-    name: "UPS Runtime"
-    id: ups_runtime
+    name: "Runtime Remaining"
+    id: runtime_remaining
     type: runtime
     unit_of_measurement: "min"
     device_class: duration
@@ -129,14 +169,48 @@ sensor:
 
   - platform: nut_ups
     nut_ups_id: ups_monitor
-    name: "UPS Frequency"
-    id: ups_frequency
+    name: "Input Frequency"
+    id: input_frequency
     type: frequency
     unit_of_measurement: "Hz"
     state_class: measurement
     accuracy_decimals: 1
 
-# Binary Sensors
+  # System sensors for monitoring ESP32 health
+  - platform: uptime
+    name: "Uptime"
+    id: uptime_sensor
+    update_interval: 60s
+
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    id: wifi_signal_sensor
+    update_interval: 60s
+
+  # Internal ESP32 temperature sensor
+  - platform: internal_temperature
+    name: "ESP32 Temperature"
+    id: esp32_temp
+    update_interval: 30s
+
+  # Power calculations
+  - platform: template
+    name: "UPS Load Power"
+    id: ups_load_power
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 1
+    lambda: |-
+      if (!std::isnan(id(output_voltage).state) && !std::isnan(id(load_percentage).state)) {
+        // Estimate power assuming typical UPS efficiency and load factor
+        float estimated_power = (id(output_voltage).state * id(load_percentage).state) / 100.0;
+        return estimated_power * 8.0; // Assume 8A max current for estimation
+      }
+      return NAN;
+    update_interval: 30s
+
+# Binary Sensors for UPS status
 binary_sensor:
   - platform: nut_ups
     nut_ups_id: ups_monitor
@@ -144,20 +218,32 @@ binary_sensor:
     id: ups_online
     type: online
     device_class: connectivity
+    on_press:
+      then:
+        - script.execute: power_restored
+    on_release:
+      then:
+        - logger.log:
+            format: "POWER OUTAGE: UPS switched to battery power"
+            level: WARN
 
   - platform: nut_ups
     nut_ups_id: ups_monitor
-    name: "UPS On Battery"
-    id: ups_on_battery
+    name: "On Battery Power"
+    id: on_battery
     type: on_battery
     device_class: battery
 
   - platform: nut_ups
     nut_ups_id: ups_monitor
-    name: "UPS Low Battery"
-    id: ups_low_battery
+    name: "Low Battery Warning"
+    id: low_battery
     type: low_battery
     device_class: battery
+    on_press:
+      then:
+        - script.execute: ups_shutdown_warning
+        - script.execute: notify_critical
 
   - platform: nut_ups
     nut_ups_id: ups_monitor
@@ -166,7 +252,37 @@ binary_sensor:
     type: fault
     device_class: problem
 
-# Text Sensors
+  - platform: nut_ups
+    nut_ups_id: ups_monitor
+    name: "Battery Charging"
+    id: battery_charging
+    type: charging
+    device_class: battery
+
+  - platform: nut_ups
+    nut_ups_id: ups_monitor
+    name: "Overload Warning"
+    id: overload_warning
+    type: overload
+    device_class: problem
+
+  # System binary sensors
+  - platform: status
+    name: "Device Status"
+    id: device_status
+
+  # Temperature warning
+  - platform: template
+    name: "High Temperature Warning"
+    id: high_temp_warning
+    device_class: heat
+    lambda: |-
+      if (!std::isnan(id(esp32_temp).state)) {
+        return id(esp32_temp).state > 70.0; // Warning at 70°C
+      }
+      return false;
+
+# Text Sensors for UPS information
 text_sensor:
   - platform: nut_ups
     nut_ups_id: ups_monitor
@@ -183,69 +299,150 @@ text_sensor:
   - platform: nut_ups
     nut_ups_id: ups_monitor
     name: "UPS Status"
-    id: ups_status
+    id: ups_status_text
     type: status
 
   - platform: nut_ups
     nut_ups_id: ups_monitor
-    name: "UPS Protocol"
+    name: "Detected Protocol"
     id: ups_protocol
     type: protocol
 
-# LED Status Automation using interval (most reliable approach)
+  # System text sensors
+  - platform: version
+    name: "ESPHome Version"
+    id: esphome_version
+
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+      id: ip_address
+    ssid:
+      name: "Connected SSID"
+      id: connected_ssid
+
+  # Last event timestamp
+  - platform: template
+    name: "Last UPS Event"
+    id: last_ups_event
+    lambda: |-
+      static std::string last_event = "System Started";
+      static bool last_online = true;
+      static bool last_low_battery = false;
+
+      if (id(ups_online).state != last_online) {
+        if (id(ups_online).state) {
+          last_event = "UPS Online";
+        } else {
+          last_event = "UPS Offline";
+        }
+        last_online = id(ups_online).state;
+      }
+
+      if (id(low_battery).state != last_low_battery) {
+        if (id(low_battery).state) {
+          last_event = "Low Battery Alert";
+        } else {
+          last_event = "Battery Level Normal";
+        }
+        last_low_battery = id(low_battery).state;
+      }
+
+      return last_event;
+
+# Advanced LED Status Control with Priorities
 interval:
-  - interval: 1s
+  - interval: 2s
     then:
       - lambda: |-
-          // Critical conditions (highest priority)
-          if (id(ups_low_battery).state || id(ups_fault).state) {
-            auto call = id(status_led).turn_on();
-            call.set_brightness(1.0);
+          // Advanced UPS status LED control with priorities
+
+          // Critical conditions (highest priority) - Red blinking
+          if (id(low_battery).state || id(ups_fault).state || id(overload_warning).state) {
+            auto call = id(ups_status_led).turn_on();
             call.set_effect("Critical Strobe");
             call.perform();
           }
-          // On battery (medium priority)
-          else if (id(ups_on_battery).state && !id(ups_low_battery).state) {
-            auto call = id(status_led).turn_on();
-            call.set_brightness(0.75);
-            call.set_rgb(1.0, 0.5, 0.0); // Orange
-            call.set_effect("None");
+          // Battery operation (medium priority) - Orange pulsing
+          else if (id(on_battery).state && !id(low_battery).state) {
+            auto call = id(ups_status_led).turn_on();
+            call.set_rgb(1.0, 0.6, 0.0); // Orange
+            call.set_effect("Battery Operation");
             call.perform();
           }
-          // Normal operation (online, not on battery)
-          else if (id(ups_online).state && !id(ups_on_battery).state && !id(ups_low_battery).state) {
-            auto call = id(status_led).turn_on();
-            call.set_brightness(0.5);
+          // Charging (low priority) - Yellow pulsing
+          else if (id(battery_charging).state && id(ups_online).state) {
+            auto call = id(ups_status_led).turn_on();
+            call.set_rgb(1.0, 1.0, 0.0); // Yellow
+            call.set_effect("Battery Pulse");
+            call.perform();
+          }
+          // Normal operation (online, not on battery) - Green breathing
+          else if (id(ups_online).state && !id(on_battery).state) {
+            auto call = id(ups_status_led).turn_on();
             call.set_rgb(0.0, 1.0, 0.0); // Green
-            call.set_effect("None");
+            call.set_effect("Normal Breathing");
             call.perform();
           }
-          // Offline (lowest priority)
+          // Offline/Unknown - LED off
           else {
-            auto call = id(status_led).turn_off();
+            auto call = id(ups_status_led).turn_off();
             call.perform();
           }
 
-# Home Assistant Dashboard Card Configuration (as comment for reference)
-# dashboard_card: |
-#   type: entities
-#   title: UPS Monitor
-#   entities:
-#     - entity: sensor.ups_battery_level
-#       name: Battery Level
-#     - entity: sensor.ups_input_voltage
-#       name: Input Voltage
-#     - entity: sensor.ups_output_voltage
-#       name: Output Voltage
-#     - entity: sensor.ups_load
-#       name: Load
-#     - entity: sensor.ups_runtime
-#       name: Runtime Remaining
-#     - entity: binary_sensor.ups_online
-#       name: Online Status
-#     - entity: binary_sensor.ups_on_battery
-#       name: On Battery
-#     - entity: text_sensor.ups_model
-#       name: Model
-#     - entity: text_sensor.ups_status
-#       name: Status
+# Automated scripts for notifications and actions
+script:
+  - id: notify_critical
+    then:
+      - logger.log:
+          format: "CRITICAL UPS EVENT: Battery=%.1f%%, Runtime=%.1f min, Status=%s"
+          args:
+            [
+              "id(battery_level).state",
+              "id(runtime_remaining).state",
+              "id(ups_status_text).state.c_str()",
+            ]
+          level: ERROR
+
+  - id: ups_shutdown_warning
+    then:
+      - logger.log:
+          format: "UPS SHUTDOWN WARNING: Battery critically low, runtime remaining: %.1f minutes"
+          args: ["id(runtime_remaining).state"]
+          level: WARN
+      # Add your shutdown logic here if needed
+
+  - id: power_restored
+    then:
+      - logger.log:
+          format: "POWER RESTORED: UPS back online, battery at %.1f%%"
+          args: ["id(battery_level).state"]
+          level: INFO
+
+# Home Assistant Dashboard Integration Helper
+# Uncomment and customize for your Home Assistant setup
+# homeassistant:
+#   service: notify.mobile_app_your_phone
+#   data:
+#     title: "UPS Alert"
+#     message: "UPS is running on battery power!"
+#   condition:
+#     - binary_sensor.is_on: on_battery
+#     - binary_sensor.is_off: low_battery
+
+# Example automation for critical battery
+# on_...:
+#   - platform: state
+#     entity_id: binary_sensor.low_battery
+#     to: "on"
+#     then:
+#       - script.execute: notify_critical
+
+# Development/Debug helpers
+debug:
+  update_interval: 30s
+
+# Enable safe mode for recovery
+safe_mode:
+  disabled: false
+# Note: Additional automations can be added in Home Assistant
