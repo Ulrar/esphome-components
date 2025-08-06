@@ -2,7 +2,6 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import binary_sensor
 from esphome.const import (
-    CONF_ID,
     CONF_TYPE,
     DEVICE_CLASS_CONNECTIVITY,
     DEVICE_CLASS_BATTERY,
@@ -14,7 +13,9 @@ from . import nut_ups_ns, NutUpsComponent, CONF_NUT_UPS_ID
 
 DEPENDENCIES = ["nut_ups"]
 
-NutUpsBinarySensor = nut_ups_ns.class_("NutUpsBinarySensor", binary_sensor.BinarySensor, cg.Component)
+NutUpsBinarySensor = nut_ups_ns.class_(
+    "NutUpsBinarySensor", binary_sensor.BinarySensor, cg.Component
+)
 
 BINARY_SENSOR_TYPES = {
     "online": {

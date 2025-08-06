@@ -9,7 +9,9 @@ from . import nut_ups_ns, NutUpsComponent, CONF_NUT_UPS_ID
 
 DEPENDENCIES = ["nut_ups"]
 
-NutUpsTextSensor = nut_ups_ns.class_("NutUpsTextSensor", text_sensor.TextSensor, cg.Component)
+NutUpsTextSensor = nut_ups_ns.class_(
+    "NutUpsTextSensor", text_sensor.TextSensor, cg.Component
+)
 
 TEXT_SENSOR_TYPES = [
     "model",

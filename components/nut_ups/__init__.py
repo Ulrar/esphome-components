@@ -36,15 +36,15 @@ def validate_usb_config(config):
     """Validate USB configuration with helpful warnings."""
     vendor_id = config.get(CONF_USB_VENDOR_ID, 0x051D)
     product_id = config.get(CONF_USB_PRODUCT_ID, 0x0002)
-    
+
     # Validate non-zero IDs
     if vendor_id == 0 or product_id == 0:
         raise cv.Invalid("USB vendor and product IDs must be non-zero")
-    
+
     # Warn about unknown vendor IDs
     if vendor_id not in KNOWN_VENDOR_IDS:
         raise cv.Invalid("Unknown vendor id")
-    
+
     return config
 
 
@@ -52,12 +52,16 @@ def validate_protocol_timeout(value):
     """Validate protocol timeout with reasonable bounds."""
     value = cv.positive_time_period_milliseconds(value)
     ms = value.total_milliseconds
-    
+
     if ms < 5000:
-        raise cv.Invalid("Protocol timeout must be at least 5 seconds for reliable communication")
+        raise cv.Invalid(
+            "Protocol timeout must be at least 5 seconds for reliable communication"
+        )
     if ms > 60000:
-        raise cv.Invalid("Protocol timeout must be at most 60 seconds to avoid blocking")
-    
+        raise cv.Invalid(
+            "Protocol timeout must be at most 60 seconds to avoid blocking"
+        )
+
     return value
 
 
@@ -65,27 +69,31 @@ def validate_update_interval(value):
     """Validate update interval for UPS monitoring."""
     value = cv.update_interval(value)
     ms = value.total_milliseconds
-    
+
     if ms < 5000:
         cg.global_ns.logger.LOGGER.warning(
             "Update interval less than 5 seconds may cause excessive USB traffic. "
             "Consider using 10s or higher for production."
         )
-    
+
     return value
 
 
 CONFIG_SCHEMA = cv.All(
-    cv.Schema({
-        cv.GenerateID(): cv.declare_id(NutUpsComponent),
-        cv.Optional(CONF_UPDATE_INTERVAL, default="30s"): validate_update_interval,
-        cv.Optional(CONF_SIMULATION_MODE, default=False): cv.boolean,
-        cv.Optional(CONF_USB_VENDOR_ID, default=0x051D): cv.hex_uint16_t,
-        cv.Optional(CONF_USB_PRODUCT_ID, default=0x0002): cv.hex_uint16_t,
-        cv.Optional(CONF_PROTOCOL_TIMEOUT, default="15s"): validate_protocol_timeout,
-        cv.Optional(CONF_AUTO_DETECT_PROTOCOL, default=True): cv.boolean,
-    }).extend(cv.COMPONENT_SCHEMA),
-    validate_usb_config
+    cv.Schema(
+        {
+            cv.GenerateID(): cv.declare_id(NutUpsComponent),
+            cv.Optional(CONF_UPDATE_INTERVAL, default="30s"): validate_update_interval,
+            cv.Optional(CONF_SIMULATION_MODE, default=False): cv.boolean,
+            cv.Optional(CONF_USB_VENDOR_ID, default=0x051D): cv.hex_uint16_t,
+            cv.Optional(CONF_USB_PRODUCT_ID, default=0x0002): cv.hex_uint16_t,
+            cv.Optional(
+                CONF_PROTOCOL_TIMEOUT, default="15s"
+            ): validate_protocol_timeout,
+            cv.Optional(CONF_AUTO_DETECT_PROTOCOL, default=True): cv.boolean,
+        }
+    ).extend(cv.COMPONENT_SCHEMA),
+    validate_usb_config,
 )
 
 
