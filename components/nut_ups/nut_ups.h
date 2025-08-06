@@ -130,6 +130,7 @@ namespace esphome
 
       bool connected_{false};
       std::atomic<uint32_t> last_successful_read_{0};
+      std::atomic<uint32_t> consecutive_failures_{0};
       UpsData ups_data_;
 
       std::unique_ptr<UpsProtocolBase> active_protocol_;

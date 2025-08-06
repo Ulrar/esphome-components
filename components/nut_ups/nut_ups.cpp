@@ -74,12 +74,24 @@ void NutUpsComponent::update() {
   
   if (read_ups_data()) {
     last_successful_read_ = millis();
+    consecutive_failures_ = 0;
     update_sensors();
   } else {
-    ESP_LOGW(TAG, "Failed to read UPS data");
+    consecutive_failures_++;
+    ESP_LOGW(TAG, "Failed to read UPS data (failure #%u)", consecutive_failures_.load());
+    
+    // Implement exponential backoff for retries
+    if (consecutive_failures_ >= 3) {
+      ESP_LOGE(TAG, "Multiple consecutive failures, attempting protocol re-detection");
+      if (!detect_ups_protocol()) {
+        ESP_LOGE(TAG, "Protocol re-detection failed");
+      }
+    }
+    
     if (millis() - last_successful_read_ > protocol_timeout_ms_) {
       ESP_LOGE(TAG, "UPS communication timeout, marking as disconnected");
       connected_ = false;
+      consecutive_failures_ = 0;
     }
   }
 }
