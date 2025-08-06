@@ -1,6 +1,7 @@
 esphome:
-  name: nut-ups-monitor
+  name: nut-ups-monitor-minimal-test
   friendly_name: "NUT UPS Monitor"
+  comment: "Full test configuration for NUT UPS Component with ESP32-S3"
 
 esp32:
   board: esp32-s3-devkitc-1
