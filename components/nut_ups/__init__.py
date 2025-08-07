@@ -19,13 +19,17 @@ CONF_NUT_UPS_ID = "nut_ups_id"
 
 # Known UPS vendor IDs for validation
 KNOWN_VENDOR_IDS = {
-    0x0001: "Fiskars",
+    0x0001: "Generic/Other",
     0x0463: "MGE Office Protection Systems",
+    0x050D: "Belkin",
     0x051D: "APC",
-    0x0665: "Cypress/Other",
-    0x06DA: "Phoenixtec Power",
+    0x05B8: "SVEN",
+    0x0665: "Cypress/Belkin",
+    0x06DA: "MGE UPS Systems",
     0x0764: "CyberPower",
+    0x0925: "Richcomm",
     0x09AE: "Tripp Lite",
+    0x09D6: "Micropower",
 }
 
 nut_ups_ns = cg.esphome_ns.namespace("nut_ups")

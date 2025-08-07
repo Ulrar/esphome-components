@@ -56,6 +56,7 @@ namespace esphome
     {
       PROTOCOL_UNKNOWN = 0,
       PROTOCOL_APC_SMART,
+      PROTOCOL_APC_HID,
       PROTOCOL_CYBERPOWER_HID,
       PROTOCOL_GENERIC_HID
     };
@@ -102,6 +103,7 @@ namespace esphome
     // Forward declarations
     class UpsProtocolBase;
     class ApcSmartProtocol;
+    class ApcHidProtocol;
     class CyberPowerProtocol;
     class GenericHidProtocol;
 

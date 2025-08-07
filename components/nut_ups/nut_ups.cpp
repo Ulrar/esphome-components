@@ -3,6 +3,9 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 
+// Include protocol implementations
+#include "apc_hid_protocol.h"
+
 #ifdef USE_ESP32
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -161,7 +164,18 @@ bool NutUpsComponent::detect_ups_protocol() {
     return false;
   }
   
-  // Try APC Smart Protocol first
+  // For APC devices (VID 0x051D), try HID protocol first (modern devices)
+  if (usb_vendor_id_ == 0x051D) {
+    auto apc_hid_protocol = std::make_unique<ApcHidProtocol>(this);
+    if (apc_hid_protocol->detect() && apc_hid_protocol->initialize()) {
+      active_protocol_ = std::move(apc_hid_protocol);
+      ups_data_.detected_protocol = PROTOCOL_APC_HID;
+      ESP_LOGI(TAG, "Detected APC HID Protocol");
+      return true;
+    }
+  }
+  
+  // Try APC Smart Protocol (legacy devices)
   auto apc_protocol = std::make_unique<ApcSmartProtocol>(this);
   if (apc_protocol->detect() && apc_protocol->initialize()) {
     active_protocol_ = std::move(apc_protocol);
