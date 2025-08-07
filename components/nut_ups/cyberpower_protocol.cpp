@@ -12,28 +12,63 @@ static const uint8_t CP_REPORT_ID_BATTERY_INFO = 0x02;
 static const uint8_t CP_REPORT_ID_VOLTAGE_INFO = 0x03;
 static const uint8_t CP_REPORT_ID_DEVICE_INFO = 0x04;
 
-// HID Usage Page definitions for UPS (Power Device)
+// HID Usage Page definitions for UPS (Power Device) - Based on NUT reference
 static const uint16_t HID_USAGE_PAGE_POWER_DEVICE = 0x84;
-static const uint16_t HID_USAGE_BATTERY_LEVEL = 0x66;
-static const uint16_t HID_USAGE_RUNTIME_TO_EMPTY = 0x68;
-static const uint16_t HID_USAGE_AC_PRESENT = 0x5A;
-static const uint16_t HID_USAGE_BATTERY_PRESENT = 0x5B;
+static const uint16_t HID_USAGE_PAGE_BATTERY = 0x85;
+static const uint16_t HID_USAGE_PAGE_UPS = 0x84;
+
+// Power Device Class HID Usages (from NUT cps-hid.c)
+static const uint16_t HID_USAGE_UPS_BATTERY_CHARGE = 0x66;
+static const uint16_t HID_USAGE_UPS_RUNTIME_TO_EMPTY = 0x68;
+static const uint16_t HID_USAGE_UPS_AC_PRESENT = 0x5A;
+static const uint16_t HID_USAGE_UPS_BATTERY_PRESENT = 0x5B;
+static const uint16_t HID_USAGE_UPS_CHARGING = 0x44;
+static const uint16_t HID_USAGE_UPS_DISCHARGING = 0x45;
+static const uint16_t HID_USAGE_UPS_NEED_REPLACEMENT = 0x4B;
+static const uint16_t HID_USAGE_UPS_FULLY_CHARGED = 0x49;
+static const uint16_t HID_USAGE_UPS_INPUT_VOLTAGE = 0x30;
+static const uint16_t HID_USAGE_UPS_OUTPUT_VOLTAGE = 0x31;
+static const uint16_t HID_USAGE_UPS_INPUT_FREQUENCY = 0x32;
+static const uint16_t HID_USAGE_UPS_PERCENT_LOAD = 0x35;
 
 bool CyberPowerProtocol::detect() {
   ESP_LOGD(CP_TAG, "Detecting CyberPower HID Protocol...");
   
-  // Try to get a HID device descriptor or basic report
+  // First try vendor/product ID detection (like NUT does)
+  // CyberPower vendor ID is 0x0764
+  if (parent_->get_usb_vendor_id() == 0x0764) {
+    ESP_LOGD(CP_TAG, "CyberPower vendor ID detected: 0x%04X", parent_->get_usb_vendor_id());
+    
+    // Try to get basic HID report to confirm communication
+    HidReport request;
+    request.report_id = CP_REPORT_ID_UPS_STATUS;
+    request.data = {0x00};
+    
+    HidReport response;
+    if (send_hid_report(request, response)) {
+      ESP_LOGD(CP_TAG, "CyberPower HID communication confirmed");
+      return true;
+    }
+  }
+  
+  // Fallback: try device info request for unknown devices
   HidReport request;
   request.report_id = CP_REPORT_ID_DEVICE_INFO;
-  request.data = {0x00}; // Basic device info request
+  request.data = {0x00};
   
   HidReport response;
   if (send_hid_report(request, response)) {
-    ESP_LOGD(CP_TAG, "CyberPower HID response received");
-    return true;
+    // Check if response contains CyberPower identifiers
+    std::string info = bytes_to_string(response.data);
+    if (info.find("CP") != std::string::npos || 
+        info.find("CYBER") != std::string::npos ||
+        info.find("CyberPower") != std::string::npos) {
+      ESP_LOGD(CP_TAG, "CyberPower device identified from response");
+      return true;
+    }
   }
   
-  ESP_LOGD(CP_TAG, "No CyberPower HID response");
+  ESP_LOGD(CP_TAG, "No CyberPower HID Protocol detected");
   return false;
 }
 
@@ -214,15 +249,19 @@ bool CyberPowerProtocol::parse_battery_report(const HidReport &report, UpsData &
   uint16_t battery_level_raw = report.data[0] | (report.data[1] << 8);
   uint16_t runtime_raw = report.data[2] | (report.data[3] << 8);
   
-  // Battery level is typically 0-100 or 0-1000 scale
+  // Battery level validation with clamping (NUT-style approach)
+  float battery_level;
   if (battery_level_raw <= 100) {
-    data.battery_level = static_cast<float>(battery_level_raw);
+    battery_level = static_cast<float>(battery_level_raw);
   } else if (battery_level_raw <= 1000) {
-    data.battery_level = static_cast<float>(battery_level_raw) / 10.0f;
+    battery_level = static_cast<float>(battery_level_raw) / 10.0f;
   } else {
-    ESP_LOGW(CP_TAG, "Invalid battery level: %u", battery_level_raw);
-    data.battery_level = NAN;
+    ESP_LOGW(CP_TAG, "Battery level out of range: %u", battery_level_raw);
+    battery_level = static_cast<float>(battery_level_raw) / 10.0f; // Try scaling anyway
   }
+  
+  // Clamp to valid range (0-100%) like NUT does
+  data.battery_level = std::max(0.0f, std::min(100.0f, battery_level));
   
   // Runtime is typically in seconds or minutes
   if (runtime_raw < 3600) { // Assume minutes if < 3600
@@ -247,20 +286,44 @@ bool CyberPowerProtocol::parse_voltage_report(const HidReport &report, UpsData &
   uint16_t load_raw = report.data[4] | (report.data[5] << 8);
   uint16_t frequency_raw = report.data[6] | (report.data[7] << 8);
   
-  // Convert raw values to actual units
-  data.input_voltage = static_cast<float>(input_voltage_raw) / 10.0f;
-  data.output_voltage = static_cast<float>(output_voltage_raw) / 10.0f;
+  // Convert raw values to actual units with NUT-style validation
+  float input_voltage = static_cast<float>(input_voltage_raw) / 10.0f;
+  float output_voltage = static_cast<float>(output_voltage_raw) / 10.0f;
   
-  // Load can be in percentage or watts - assume percentage if <= 100
-  if (load_raw <= 100) {
-    data.load_percent = static_cast<float>(load_raw);
+  // Voltage range validation (80-300V like NUT does)
+  if (input_voltage >= 80.0f && input_voltage <= 300.0f) {
+    data.input_voltage = input_voltage;
   } else {
-    // Convert watts to percentage (assuming 1000W max capacity)
-    data.load_percent = static_cast<float>(load_raw) / 10.0f;
+    ESP_LOGW(CP_TAG, "Input voltage out of range: %.1fV", input_voltage);
+    data.input_voltage = NAN;
   }
   
-  // Frequency is typically in 0.1 Hz units
-  data.frequency = static_cast<float>(frequency_raw) / 10.0f;
+  if (output_voltage >= 80.0f && output_voltage <= 300.0f) {
+    data.output_voltage = output_voltage;
+  } else {
+    ESP_LOGW(CP_TAG, "Output voltage out of range: %.1fV", output_voltage);
+    data.output_voltage = NAN;
+  }
+  
+  // Load percentage validation with clamping (like NUT does)
+  if (load_raw <= 100) {
+    data.load_percent = static_cast<float>(load_raw);
+  } else if (load_raw <= 1000) {
+    // Some models report in 0.1% units
+    data.load_percent = static_cast<float>(load_raw) / 10.0f;
+  } else {
+    ESP_LOGW(CP_TAG, "Load value out of range: %u", load_raw);
+    data.load_percent = std::max(0.0f, std::min(100.0f, static_cast<float>(load_raw) / 10.0f));
+  }
+  
+  // Frequency validation (NUT expects 47-53 Hz typically)
+  float frequency = static_cast<float>(frequency_raw) / 10.0f;
+  if (frequency >= 40.0f && frequency <= 70.0f) {
+    data.frequency = frequency;
+  } else {
+    ESP_LOGW(CP_TAG, "Frequency out of range: %.1f Hz", frequency);
+    data.frequency = NAN;
+  }
   
   ESP_LOGV(CP_TAG, "Input: %.1fV, Output: %.1fV, Load: %.1f%%, Freq: %.1fHz", 
            data.input_voltage, data.output_voltage, data.load_percent, data.frequency);

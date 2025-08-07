@@ -145,6 +145,10 @@ namespace esphome
       const UpsData &get_ups_data() const { return ups_data_; }
       bool is_connected() const { return connected_; }
       std::string get_protocol_name() const;
+      
+      // USB device info getters
+      uint16_t get_usb_vendor_id() const { return usb_vendor_id_; }
+      uint16_t get_usb_product_id() const { return usb_product_id_; }
 
       // Sensor registration methods
       void register_sensor(sensor::Sensor *sens, const std::string &type);
