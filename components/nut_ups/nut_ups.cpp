@@ -82,7 +82,9 @@ void NutUpsComponent::update() {
     update_sensors();
   } else {
     consecutive_failures_++;
-    ESP_LOGW(TAG, "Failed to read UPS data (failure #%u)", consecutive_failures_);
+    if (should_log_error(protocol_error_limiter_)) {
+      ESP_LOGW(TAG, "Failed to read UPS data (failure #%u)", consecutive_failures_);
+    }
     
     // Implement limited retry logic with exponential backoff
     if (consecutive_failures_ >= 3 && consecutive_failures_ <= max_consecutive_failures_) {
@@ -150,6 +152,41 @@ bool NutUpsComponent::initialize_usb() {
 #else
   return false;
 #endif
+}
+
+bool NutUpsComponent::should_log_error(ErrorRateLimit& limiter) {
+  uint32_t now = millis();
+  
+  // Check if we're past the rate limit window
+  if (now - limiter.last_error_time > ErrorRateLimit::RATE_LIMIT_MS) {
+    // Reset the limiter for new time window
+    if (limiter.suppressed_count > 0) {
+      // Log how many errors we suppressed in the previous window
+      ESP_LOGW(TAG, "Suppressed %u similar error messages in the last %u ms", 
+               limiter.suppressed_count, ErrorRateLimit::RATE_LIMIT_MS);
+      limiter.suppressed_count = 0;
+    }
+    limiter.error_count = 0;
+    limiter.last_error_time = now;
+  }
+  
+  limiter.error_count++;
+  
+  // Allow first few errors in burst, then rate limit
+  if (limiter.error_count <= ErrorRateLimit::MAX_BURST) {
+    return true;
+  }
+  
+  // Rate limit subsequent errors
+  limiter.suppressed_count++;
+  return false;
+}
+
+void NutUpsComponent::log_suppressed_errors(ErrorRateLimit& limiter) {
+  if (limiter.suppressed_count > 0) {
+    ESP_LOGW(TAG, "Suppressed %u similar error messages", limiter.suppressed_count);
+    limiter.suppressed_count = 0;
+  }
 }
 
 bool NutUpsComponent::detect_ups_protocol() {
@@ -371,7 +408,9 @@ bool NutUpsComponent::usb_write(const std::vector<uint8_t> &data) {
 
   // Take USB mutex for thread safety
   if (xSemaphoreTake(usb_mutex_, pdMS_TO_TICKS(1000)) != pdTRUE) {
-    ESP_LOGW(TAG, "Failed to acquire USB mutex for write");
+    if (should_log_error(usb_error_limiter_)) {
+      ESP_LOGW(TAG, "Failed to acquire USB mutex for write");
+    }
     return false;
   }
 
@@ -387,7 +426,9 @@ bool NutUpsComponent::usb_write(const std::vector<uint8_t> &data) {
   xSemaphoreGive(usb_mutex_);
   
   if (ret != ESP_OK) {
-    ESP_LOGW(TAG, "USB write failed: %s", esp_err_to_name(ret));
+    if (should_log_error(usb_error_limiter_)) {
+      ESP_LOGW(TAG, "USB write failed: %s", esp_err_to_name(ret));
+    }
     return false;
   }
   
@@ -404,7 +445,9 @@ bool NutUpsComponent::usb_read(std::vector<uint8_t> &data, uint32_t timeout_ms) 
   
   // Take USB mutex for thread safety  
   if (xSemaphoreTake(usb_mutex_, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
-    ESP_LOGW(TAG, "Failed to acquire USB mutex for read");
+    if (should_log_error(usb_error_limiter_)) {
+      ESP_LOGW(TAG, "Failed to acquire USB mutex for read");
+    }
     return false;
   }
 
@@ -420,7 +463,9 @@ bool NutUpsComponent::usb_read(std::vector<uint8_t> &data, uint32_t timeout_ms) 
   xSemaphoreGive(usb_mutex_);
   
   if (ret != ESP_OK) {
-    ESP_LOGV(TAG, "USB read failed: %s", esp_err_to_name(ret));
+    if (should_log_error(usb_error_limiter_)) {
+      ESP_LOGW(TAG, "USB read failed: %s", esp_err_to_name(ret));
+    }
     data.clear();
     return false;
   }
@@ -586,9 +631,13 @@ esp_err_t NutUpsComponent::usb_device_enumerate() {
           device_connected_ = true;
           return ESP_OK;
         }
-        ESP_LOGW(TAG, "Failed to get USB endpoints: %s", esp_err_to_name(endpoint_ret));
+        if (should_log_error(usb_error_limiter_)) {
+          ESP_LOGW(TAG, "Failed to get USB endpoints: %s", esp_err_to_name(endpoint_ret));
+        }
       } else {
-        ESP_LOGW(TAG, "Failed to claim USB interface: %s", esp_err_to_name(claim_ret));
+        if (should_log_error(usb_error_limiter_)) {
+          ESP_LOGW(TAG, "Failed to claim USB interface: %s", esp_err_to_name(claim_ret));
+        }
       }
       
       // Clean up on failure

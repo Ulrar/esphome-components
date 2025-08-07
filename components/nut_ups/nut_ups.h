@@ -119,6 +119,9 @@ namespace esphome
       
       ~NutUpsComponent() {
 #ifdef USE_ESP32
+        // Log any remaining suppressed errors before cleanup
+        log_suppressed_errors(usb_error_limiter_);
+        log_suppressed_errors(protocol_error_limiter_);
         usb_deinit();
 #endif
       }
@@ -173,6 +176,17 @@ namespace esphome
       uint32_t max_consecutive_failures_{5};  // Limit re-detection attempts
       UpsData ups_data_;
       mutable std::mutex data_mutex_;  // Protect ups_data_ access
+      
+      // Error rate limiting to prevent log spam
+      struct ErrorRateLimit {
+        uint32_t last_error_time{0};
+        uint32_t error_count{0};
+        uint32_t suppressed_count{0};
+        static constexpr uint32_t RATE_LIMIT_MS = 5000;  // 5 seconds between repeated errors
+        static constexpr uint32_t MAX_BURST = 3;         // Allow 3 errors before rate limiting
+      };
+      ErrorRateLimit usb_error_limiter_;
+      ErrorRateLimit protocol_error_limiter_;
 
       std::unique_ptr<UpsProtocolBase> active_protocol_;
       std::unordered_map<std::string, sensor::Sensor *> sensors_;
@@ -185,6 +199,10 @@ namespace esphome
       bool read_ups_data();
       void update_sensors();
       void simulate_ups_data();
+      
+      // Error rate limiting helpers
+      bool should_log_error(ErrorRateLimit& limiter);
+      void log_suppressed_errors(ErrorRateLimit& limiter);
 
     public:
       // USB communication methods (accessible by protocol classes)
