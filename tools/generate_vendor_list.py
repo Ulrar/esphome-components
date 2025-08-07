@@ -122,12 +122,15 @@ def update_scan_usb_vendors(scan_usb_path, vendors):
 
     # Find and replace the UPS devices grep line
     new_line = f'lsusb | grep -iE "({vendor_pattern})"'
-    
+
     # Replace the grep line in the UPS devices section
     import re
-    ups_section_pattern = r'(# Auto-generated from ups_vendors\.h\necho "UPS devices:"\n)lsusb \| grep -iE "\([^"]*\)"'
+    ups_section_pattern = (
+        r'(# Auto-generated from ups_vendors\.h\necho "UPS devices:"\n)'
+        r'lsusb \| grep -iE "\([^"]*\)"'
+    )
     replacement = rf'\1{new_line}'
-    
+
     new_content = re.sub(ups_section_pattern, replacement, content)
     
     if new_content != content:
@@ -135,12 +138,14 @@ def update_scan_usb_vendors(scan_usb_path, vendors):
             f.write(new_content)
         return True
     else:
-        print(f"Warning: Could not find UPS devices section in {scan_usb_path}")
+        print(
+            f"Warning: Could not find UPS devices section in {scan_usb_path}"
+        )
         return False
 
 
 def main():
-    """Main function to update __init__.py, setup.sh, and scan-usb.sh with current vendor list."""
+    """Update __init__.py, setup.sh, and scan-usb.sh with vendor list."""
     script_dir = Path(__file__).parent
     component_dir = script_dir.parent / "components" / "nut_ups"
     header_path = component_dir / "ups_vendors.h"
@@ -169,7 +174,10 @@ def main():
         pattern = r"KNOWN_VENDOR_IDS = \{[^}]*\}"
         if re.search(pattern, content, re.DOTALL):
             new_content = re.sub(
-                pattern, python_code.split("\n", 2)[2], content, flags=re.DOTALL
+                pattern,
+                python_code.split("\n", 2)[2],
+                content,
+                flags=re.DOTALL,
             )
 
             with open(init_path, "w") as f:
@@ -187,9 +195,8 @@ def main():
     udev_rules = generate_udev_rules(vendors)
     if update_udev_rules_in_setup_sh(setup_path, udev_rules):
         print(f"✅ Updated udev rules in {setup_path}")
-        print(
-            f"   Added {len([r for r in udev_rules if 'UPS' not in r])} standard + {len(vendors)} UPS vendor rules"
-        )
+        esp_rules = len([r for r in udev_rules if 'UPS' not in r])
+        print(f"   Added {esp_rules} standard + {len(vendors)} UPS vendor rules")
 
     # Update scan-usb.sh vendor list
     if update_scan_usb_vendors(scan_usb_path, vendors):

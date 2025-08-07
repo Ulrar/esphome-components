@@ -23,11 +23,15 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="0403", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="0001", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="0463", MODE="0666"
+SUBSYSTEM=="usb", ATTR{idVendor}=="050d", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="051d", MODE="0666"
+SUBSYSTEM=="usb", ATTR{idVendor}=="05b8", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="0665", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="06da", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="0764", MODE="0666"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0925", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="09ae", MODE="0666"
+SUBSYSTEM=="usb", ATTR{idVendor}=="09d6", MODE="0666"
 UDEV_EOF
 
 # Create aliases
