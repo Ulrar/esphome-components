@@ -213,6 +213,8 @@ void ApcHidProtocol::parse_battery_report(const HidReport &report, UpsData &data
   if (battery_raw <= 100) {
     data.battery_level = static_cast<float>(battery_raw);
     ESP_LOGV(APC_HID_TAG, "Battery Level: %.1f%%", data.battery_level);
+  } else {
+    ESP_LOGW(APC_HID_TAG, "Battery level out of range: %u", battery_raw);
   }
   
   // Runtime remaining (typically at offset 2-3, 16-bit value, minutes)
@@ -243,15 +245,27 @@ void ApcHidProtocol::parse_voltage_report(const HidReport &report, UpsData &data
   uint16_t input_voltage_raw = (report.data[1] << 8) | report.data[0];
   if (input_voltage_raw > 0) {
     // Most APC devices report voltage in tenths of volts
-    data.input_voltage = static_cast<float>(input_voltage_raw) / 10.0f;
-    ESP_LOGV(APC_HID_TAG, "Input Voltage: %.1fV", data.input_voltage);
+    float voltage = static_cast<float>(input_voltage_raw) / 10.0f;
+    // Sanity check - typical UPS voltages are between 80-300V
+    if (voltage >= 80.0f && voltage <= 300.0f) {
+      data.input_voltage = voltage;
+      ESP_LOGV(APC_HID_TAG, "Input Voltage: %.1fV", data.input_voltage);
+    } else {
+      ESP_LOGW(APC_HID_TAG, "Input voltage out of range: %.1fV", voltage);
+    }
   }
   
   // Output voltage (typically at offset 2-3, 16-bit value)
   uint16_t output_voltage_raw = (report.data[3] << 8) | report.data[2];
   if (output_voltage_raw > 0) {
-    data.output_voltage = static_cast<float>(output_voltage_raw) / 10.0f;
-    ESP_LOGV(APC_HID_TAG, "Output Voltage: %.1fV", data.output_voltage);
+    float voltage = static_cast<float>(output_voltage_raw) / 10.0f;
+    // Sanity check - typical UPS voltages are between 80-300V
+    if (voltage >= 80.0f && voltage <= 300.0f) {
+      data.output_voltage = voltage;
+      ESP_LOGV(APC_HID_TAG, "Output Voltage: %.1fV", data.output_voltage);
+    } else {
+      ESP_LOGW(APC_HID_TAG, "Output voltage out of range: %.1fV", voltage);
+    }
   }
   
   // Line frequency (if available, typically at offset 4-5)
@@ -275,6 +289,10 @@ void ApcHidProtocol::parse_power_report(const HidReport &report, UpsData &data) 
   if (load_raw <= 100) {
     data.load_percent = static_cast<float>(load_raw);
     ESP_LOGV(APC_HID_TAG, "Load: %.1f%%", data.load_percent);
+  } else {
+    ESP_LOGW(APC_HID_TAG, "Load percentage out of range: %u", load_raw);
+    // Clamp to valid range like Smart Protocol does
+    data.load_percent = std::max(0.0f, std::min(100.0f, static_cast<float>(load_raw)));
   }
   
   // Apparent power (if available, typically at offset 2-3)
