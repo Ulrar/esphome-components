@@ -121,7 +121,6 @@ def update_scan_usb_vendors(scan_usb_path, vendors):
     vendor_pattern = "|".join(vendor_ids)
 
     # Find and replace the UPS devices grep line
-    old_pattern = r'lsusb \| grep -iE "\([^"]*\)"'
     new_line = f'lsusb | grep -iE "({vendor_pattern})"'
     
     # Replace the grep line in the UPS devices section
