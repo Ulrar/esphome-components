@@ -6,6 +6,9 @@
 // Include protocol implementations
 #include "apc_hid_protocol.h"
 
+#include <functional>
+#include <cmath>
+
 #ifdef USE_ESP32
 #include "driver/gpio.h"
 #include "esp_log.h"
@@ -31,10 +34,29 @@ void NutUpsComponent::setup() {
   
   if (simulation_mode_) {
     ESP_LOGW(TAG, "Running in simulation mode - no actual UPS communication");
+    
+    // Initialize simulation data consistently 
+    {
+      std::lock_guard<std::mutex> lock(data_mutex_);
+      ups_data_.detected_protocol = PROTOCOL_APC_SMART;
+      ups_data_.manufacturer = "Simulated";
+      ups_data_.model = "Virtual UPS Pro";
+      ups_data_.serial_number = "SIM123456789";
+      ups_data_.firmware_version = "1.0.0-SIM";
+      
+      // Initialize with reasonable default values
+      ups_data_.battery_level = 85.0f;
+      ups_data_.input_voltage = 120.0f;
+      ups_data_.output_voltage = 118.0f;
+      ups_data_.load_percent = 45.0f;
+      ups_data_.runtime_minutes = 35.0f;
+      ups_data_.frequency = 60.0f;
+      ups_data_.status_flags = UPS_STATUS_ONLINE | UPS_STATUS_CHARGING;
+    }
+    
     connected_ = true;
-    ups_data_.detected_protocol = PROTOCOL_APC_SMART;
-    ups_data_.manufacturer = "Simulated";
-    ups_data_.model = "Virtual UPS";
+    last_successful_read_ = millis();
+    ESP_LOGI(TAG, "Simulation mode initialized successfully");
     return;
   }
   
@@ -203,45 +225,159 @@ bool NutUpsComponent::detect_ups_protocol() {
     return false;
   }
   
-  // For APC devices (VID 0x051D), try HID protocol first (modern devices)
-  if (usb_vendor_id_ == 0x051D) {
-    auto apc_hid_protocol = std::make_unique<ApcHidProtocol>(this);
-    if (apc_hid_protocol->detect() && apc_hid_protocol->initialize()) {
-      active_protocol_ = std::move(apc_hid_protocol);
-      ups_data_.detected_protocol = PROTOCOL_APC_HID;
-      ESP_LOGI(TAG, "Detected APC HID Protocol");
+  // Get the actual USB device vendor/product IDs (may differ from configured defaults)
+  uint16_t detected_vid = usb_vendor_id_;
+  uint16_t detected_pid = usb_product_id_;
+  
+#ifdef USE_ESP32
+  // Try to get actual device IDs if USB device is connected
+  if (device_connected_ && usb_device_.dev_hdl) {
+    detected_vid = usb_device_.vid;
+    detected_pid = usb_device_.pid;
+  }
+#endif
+  
+  // Log vendor information for debugging
+  if (is_known_ups_vendor(detected_vid)) {
+    const char* vendor_name = get_ups_vendor_name(detected_vid);
+    ESP_LOGD(TAG, "Detected known UPS vendor: %s (0x%04X)", vendor_name, detected_vid);
+  } else {
+    ESP_LOGD(TAG, "Unknown vendor ID: 0x%04X (trying generic protocols)", detected_vid);
+  }
+  
+  // Vendor-specific protocol detection with retry logic
+  std::vector<std::pair<std::string, std::function<bool()>>> protocol_attempts;
+  
+  // Build protocol detection list based on vendor ID
+  switch (detected_vid) {
+    case 0x051D: // APC
+      ESP_LOGD(TAG, "APC device detected, trying HID first, then Smart protocol");
+      protocol_attempts.push_back({"APC HID", [this]() {
+        auto protocol = std::make_unique<ApcHidProtocol>(this);
+        if (protocol->detect() && protocol->initialize()) {
+          active_protocol_ = std::move(protocol);
+          ups_data_.detected_protocol = PROTOCOL_APC_HID;
+          return true;
+        }
+        return false;
+      }});
+      protocol_attempts.push_back({"APC Smart", [this]() {
+        auto protocol = std::make_unique<ApcSmartProtocol>(this);
+        if (protocol->detect() && protocol->initialize()) {
+          active_protocol_ = std::move(protocol);
+          ups_data_.detected_protocol = PROTOCOL_APC_SMART;
+          return true;
+        }
+        return false;
+      }});
+      break;
+      
+    case 0x0764: // CyberPower
+      ESP_LOGD(TAG, "CyberPower device detected, trying CyberPower HID protocol");
+      protocol_attempts.push_back({"CyberPower HID", [this]() {
+        auto protocol = std::make_unique<CyberPowerProtocol>(this);
+        if (protocol->detect() && protocol->initialize()) {
+          active_protocol_ = std::move(protocol);
+          ups_data_.detected_protocol = PROTOCOL_CYBERPOWER_HID;
+          return true;
+        }
+        return false;
+      }});
+      break;
+      
+    case 0x09AE: // Tripp Lite
+    case 0x06DA: // MGE UPS Systems (now Eaton)
+    case 0x0463: // MGE Office Protection Systems
+    case 0x050D: // Belkin
+    case 0x0665: // Cypress/Belkin
+      ESP_LOGD(TAG, "Known UPS vendor detected (0x%04X), trying Generic HID", detected_vid);
+      protocol_attempts.push_back({"Generic HID", [this]() {
+        auto protocol = std::make_unique<GenericHidProtocol>(this);
+        if (protocol->detect() && protocol->initialize()) {
+          active_protocol_ = std::move(protocol);
+          ups_data_.detected_protocol = PROTOCOL_GENERIC_HID;
+          return true;
+        }
+        return false;
+      }});
+      break;
+      
+    default:
+      // Unknown vendor - try all protocols with enhanced detection
+      ESP_LOGD(TAG, "Unknown vendor (0x%04X), trying all protocols", detected_vid);
+      protocol_attempts.push_back({"APC HID", [this]() {
+        auto protocol = std::make_unique<ApcHidProtocol>(this);
+        if (protocol->detect() && protocol->initialize()) {
+          active_protocol_ = std::move(protocol);
+          ups_data_.detected_protocol = PROTOCOL_APC_HID;
+          return true;
+        }
+        return false;
+      }});
+      protocol_attempts.push_back({"APC Smart", [this]() {
+        auto protocol = std::make_unique<ApcSmartProtocol>(this);
+        if (protocol->detect() && protocol->initialize()) {
+          active_protocol_ = std::move(protocol);
+          ups_data_.detected_protocol = PROTOCOL_APC_SMART;
+          return true;
+        }
+        return false;
+      }});
+      protocol_attempts.push_back({"CyberPower HID", [this]() {
+        auto protocol = std::make_unique<CyberPowerProtocol>(this);
+        if (protocol->detect() && protocol->initialize()) {
+          active_protocol_ = std::move(protocol);
+          ups_data_.detected_protocol = PROTOCOL_CYBERPOWER_HID;
+          return true;
+        }
+        return false;
+      }});
+      break;
+  }
+  
+  // Always add Generic HID as final fallback
+  protocol_attempts.push_back({"Generic HID", [this]() {
+    auto protocol = std::make_unique<GenericHidProtocol>(this);
+    if (protocol->detect() && protocol->initialize()) {
+      active_protocol_ = std::move(protocol);
+      ups_data_.detected_protocol = PROTOCOL_GENERIC_HID;
       return true;
+    }
+    return false;
+  }});
+  
+  // Try each protocol with timeout and retry logic
+  for (const auto& attempt : protocol_attempts) {
+    ESP_LOGD(TAG, "Trying %s protocol...", attempt.first.c_str());
+    
+    // Attempt detection with timeout
+    uint32_t start_time = millis();
+    bool success = false;
+    
+    // Try detection with rate limiting
+    if (!should_log_error(protocol_error_limiter_)) {
+      ESP_LOGV(TAG, "Protocol detection rate limited, skipping %s", attempt.first.c_str());
+      continue;
+    }
+    
+    success = attempt.second();
+    
+    uint32_t detection_time = millis() - start_time;
+    
+    if (success) {
+      ESP_LOGI(TAG, "Successfully detected %s protocol (took %ums)", 
+               attempt.first.c_str(), detection_time);
+      return true;
+    } else {
+      ESP_LOGD(TAG, "%s protocol detection failed (took %ums)", 
+               attempt.first.c_str(), detection_time);
+      
+      // Small delay between attempts to prevent overwhelming the device
+      vTaskDelay(pdMS_TO_TICKS(100));
     }
   }
   
-  // Try APC Smart Protocol (legacy devices)
-  auto apc_protocol = std::make_unique<ApcSmartProtocol>(this);
-  if (apc_protocol->detect() && apc_protocol->initialize()) {
-    active_protocol_ = std::move(apc_protocol);
-    ups_data_.detected_protocol = PROTOCOL_APC_SMART;
-    ESP_LOGI(TAG, "Detected APC Smart Protocol");
-    return true;
-  }
-  
-  // Try CyberPower HID Protocol
-  auto cyberpower_protocol = std::make_unique<CyberPowerProtocol>(this);
-  if (cyberpower_protocol->detect() && cyberpower_protocol->initialize()) {
-    active_protocol_ = std::move(cyberpower_protocol);
-    ups_data_.detected_protocol = PROTOCOL_CYBERPOWER_HID;
-    ESP_LOGI(TAG, "Detected CyberPower HID Protocol");
-    return true;
-  }
-  
-  // Try Generic HID Protocol as fallback
-  auto generic_protocol = std::make_unique<GenericHidProtocol>(this);
-  if (generic_protocol->detect() && generic_protocol->initialize()) {
-    active_protocol_ = std::move(generic_protocol);
-    ups_data_.detected_protocol = PROTOCOL_GENERIC_HID;
-    ESP_LOGI(TAG, "Detected Generic HID Protocol");
-    return true;
-  }
-  
-  ESP_LOGE(TAG, "No compatible UPS protocol detected");
+  ESP_LOGE(TAG, "No compatible UPS protocol detected for vendor 0x%04X", detected_vid);
   return false;
 }
 
@@ -366,26 +502,61 @@ void NutUpsComponent::simulate_ups_data() {
   static uint32_t sim_counter = 0;
   sim_counter++;
   
-  // Simulate realistic UPS data that changes over time
-  ups_data_.battery_level = 85.0f + sin(sim_counter * 0.01f) * 10.0f;
-  ups_data_.input_voltage = 120.0f + sin(sim_counter * 0.02f) * 5.0f;
-  ups_data_.output_voltage = 118.0f + sin(sim_counter * 0.015f) * 3.0f;
-  ups_data_.load_percent = 45.0f + sin(sim_counter * 0.005f) * 15.0f;
-  ups_data_.runtime_minutes = 35.0f + sin(sim_counter * 0.003f) * 10.0f;
-  ups_data_.frequency = 60.0f + sin(sim_counter * 0.1f) * 0.2f;
-  
-  // Simulate status changes
-  if (sim_counter % 1000 < 800) {
-    ups_data_.status_flags = UPS_STATUS_ONLINE | UPS_STATUS_CHARGING;
-  } else if (sim_counter % 1000 < 950) {
-    ups_data_.status_flags = UPS_STATUS_ON_BATTERY;
-  } else {
-    ups_data_.status_flags = UPS_STATUS_ON_BATTERY | UPS_STATUS_LOW_BATTERY;
+  // Create simulation data with thread safety
+  {
+    std::lock_guard<std::mutex> lock(data_mutex_);
+    
+    // Simulate realistic UPS data that changes over time with bounds checking
+    float battery_calc = 85.0f + sin(sim_counter * 0.01f) * 10.0f;
+    ups_data_.battery_level = battery_calc < 0.0f ? 0.0f : (battery_calc > 100.0f ? 100.0f : battery_calc);
+    
+    float input_calc = 120.0f + sin(sim_counter * 0.02f) * 5.0f;
+    ups_data_.input_voltage = input_calc < 80.0f ? 80.0f : (input_calc > 140.0f ? 140.0f : input_calc);
+    
+    float output_calc = 118.0f + sin(sim_counter * 0.015f) * 3.0f;
+    ups_data_.output_voltage = output_calc < 80.0f ? 80.0f : (output_calc > 130.0f ? 130.0f : output_calc);
+    
+    float load_calc = 45.0f + sin(sim_counter * 0.005f) * 15.0f;
+    ups_data_.load_percent = load_calc < 0.0f ? 0.0f : (load_calc > 100.0f ? 100.0f : load_calc);
+    
+    float runtime_calc = 35.0f + sin(sim_counter * 0.003f) * 10.0f;
+    ups_data_.runtime_minutes = runtime_calc < 0.0f ? 0.0f : (runtime_calc > 999.0f ? 999.0f : runtime_calc);
+    
+    float freq_calc = 60.0f + sin(sim_counter * 0.1f) * 0.2f;
+    ups_data_.frequency = freq_calc < 58.0f ? 58.0f : (freq_calc > 62.0f ? 62.0f : freq_calc);
+    
+    // Simulate realistic status changes with transitions
+    uint32_t cycle_pos = sim_counter % 1000;
+    if (cycle_pos < 750) {
+      ups_data_.status_flags = UPS_STATUS_ONLINE | UPS_STATUS_CHARGING;
+    } else if (cycle_pos < 900) {
+      ups_data_.status_flags = UPS_STATUS_ON_BATTERY;
+    } else if (cycle_pos < 980) {
+      ups_data_.status_flags = UPS_STATUS_ON_BATTERY | UPS_STATUS_LOW_BATTERY;
+    } else {
+      // Simulate brief connection loss for testing resilience
+      ups_data_.status_flags = UPS_STATUS_FAULT;
+    }
+    
+    // Keep device info consistent
+    ups_data_.manufacturer = "Simulated";
+    ups_data_.model = "Virtual UPS Pro";
+    ups_data_.serial_number = "SIM123456789";
+    ups_data_.firmware_version = "1.0.0-SIM";
   }
   
-  // Keep simulated device info
-  ups_data_.manufacturer = "Simulated";
-  ups_data_.model = "Virtual UPS Pro";
+  // Occasionally simulate connection issues for testing (very rare)
+  if (sim_counter % 10000 == 9999) {
+    ESP_LOGD(TAG, "Simulating temporary connection loss");
+    connected_ = false;
+  } else if (sim_counter % 10000 == 5) {
+    if (!connected_) {
+      ESP_LOGD(TAG, "Simulating connection restoration");
+      connected_ = true;
+      last_successful_read_ = millis();
+      consecutive_failures_ = 0;
+    }
+  }
 }
 
 void NutUpsComponent::register_sensor(sensor::Sensor *sens, const std::string &type) {
