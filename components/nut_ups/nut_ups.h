@@ -303,6 +303,9 @@ namespace esphome
       bool read_data(UpsData &data) override;
       UpsProtocol get_protocol_type() const override { return PROTOCOL_GENERIC_HID; }
       std::string get_protocol_name() const override { return "Generic HID"; }
+      
+    private:
+      bool parse_generic_report(const std::vector<uint8_t>& response, UpsData& data);
     };
 
   } // namespace nut_ups
