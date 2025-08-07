@@ -12,7 +12,7 @@
 #include <vector>
 #include <unordered_map>
 #include <string>
-#include <atomic>
+#include <mutex>
 
 #ifdef USE_ESP32
 #include "esp_err.h"
@@ -137,12 +137,17 @@ namespace esphome
         if (product_id != 0) usb_product_id_ = product_id; 
       }
       void set_protocol_timeout(uint32_t timeout_ms) { 
-        protocol_timeout_ms_ = std::max(timeout_ms, static_cast<uint32_t>(5000)); // Min 5 seconds
+        // Bound timeout between 5 seconds and 5 minutes for safety
+        protocol_timeout_ms_ = std::max(static_cast<uint32_t>(5000), 
+                                       std::min(timeout_ms, static_cast<uint32_t>(300000)));
       }
       void set_auto_detect_protocol(bool auto_detect) { auto_detect_protocol_ = auto_detect; }
 
-      // Data getters for sensors
-      const UpsData &get_ups_data() const { return ups_data_; }
+      // Data getters for sensors (thread-safe)
+      UpsData get_ups_data() const { 
+        std::lock_guard<std::mutex> lock(data_mutex_);
+        return ups_data_; 
+      }
       bool is_connected() const { return connected_; }
       std::string get_protocol_name() const;
       
@@ -163,9 +168,11 @@ namespace esphome
       bool auto_detect_protocol_{true};
 
       bool connected_{false};
-      std::atomic<uint32_t> last_successful_read_{0};
-      std::atomic<uint32_t> consecutive_failures_{0};
+      uint32_t last_successful_read_{0};
+      uint32_t consecutive_failures_{0};
+      uint32_t max_consecutive_failures_{5};  // Limit re-detection attempts
       UpsData ups_data_;
+      mutable std::mutex data_mutex_;  // Protect ups_data_ access
 
       std::unique_ptr<UpsProtocolBase> active_protocol_;
       std::unordered_map<std::string, sensor::Sensor *> sensors_;

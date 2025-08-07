@@ -82,14 +82,16 @@ void NutUpsComponent::update() {
     update_sensors();
   } else {
     consecutive_failures_++;
-    ESP_LOGW(TAG, "Failed to read UPS data (failure #%u)", consecutive_failures_.load());
+    ESP_LOGW(TAG, "Failed to read UPS data (failure #%u)", consecutive_failures_);
     
-    // Implement exponential backoff for retries
-    if (consecutive_failures_ >= 3) {
+    // Implement limited retry logic with exponential backoff
+    if (consecutive_failures_ >= 3 && consecutive_failures_ <= max_consecutive_failures_) {
       ESP_LOGE(TAG, "Multiple consecutive failures, attempting protocol re-detection");
       if (!detect_ups_protocol()) {
         ESP_LOGE(TAG, "Protocol re-detection failed");
       }
+    } else if (consecutive_failures_ > max_consecutive_failures_) {
+      ESP_LOGE(TAG, "Maximum re-detection attempts reached, giving up");
     }
     
     if (millis() - last_successful_read_ > protocol_timeout_ms_) {
@@ -213,11 +215,16 @@ bool NutUpsComponent::read_ups_data() {
   }
   
   // Create temporary data structure to avoid corrupting existing data on failure
-  UpsData temp_data = ups_data_;
+  UpsData temp_data;
+  {
+    std::lock_guard<std::mutex> lock(data_mutex_);
+    temp_data = ups_data_;
+  }
   
   if (active_protocol_->read_data(temp_data)) {
     // Only update if we got valid data
     if (temp_data.is_valid()) {
+      std::lock_guard<std::mutex> lock(data_mutex_);
       ups_data_ = temp_data;
       return true;
     } else {
@@ -231,6 +238,13 @@ bool NutUpsComponent::read_ups_data() {
 }
 
 void NutUpsComponent::update_sensors() {
+  // Create local copy of data under lock to minimize lock time
+  UpsData local_data;
+  {
+    std::lock_guard<std::mutex> lock(data_mutex_);
+    local_data = ups_data_;
+  }
+  
   // Update numeric sensors with validation
   for (const auto &[type, sensor] : sensors_) {
     if (!sensor) continue; // Safety check
@@ -238,17 +252,17 @@ void NutUpsComponent::update_sensors() {
     float value = NAN;
     
     if (type == "battery_level") {
-      value = ups_data_.battery_level;
+      value = local_data.battery_level;
     } else if (type == "input_voltage") {
-      value = ups_data_.input_voltage;
+      value = local_data.input_voltage;
     } else if (type == "output_voltage") {
-      value = ups_data_.output_voltage;
+      value = local_data.output_voltage;
     } else if (type == "load_percent") {
-      value = ups_data_.load_percent;
+      value = local_data.load_percent;
     } else if (type == "runtime") {
-      value = ups_data_.runtime_minutes;
+      value = local_data.runtime_minutes;
     } else if (type == "frequency") {
-      value = ups_data_.frequency;
+      value = local_data.frequency;
     }
     
     // Only publish if value is valid and within reasonable bounds
@@ -273,17 +287,17 @@ void NutUpsComponent::update_sensors() {
     auto *sensor = pair.second;
     
     if (type == "online") {
-      sensor->publish_state(ups_data_.status_flags & UPS_STATUS_ONLINE);
+      sensor->publish_state(local_data.status_flags & UPS_STATUS_ONLINE);
     } else if (type == "on_battery") {
-      sensor->publish_state(ups_data_.status_flags & UPS_STATUS_ON_BATTERY);
+      sensor->publish_state(local_data.status_flags & UPS_STATUS_ON_BATTERY);
     } else if (type == "low_battery") {
-      sensor->publish_state(ups_data_.status_flags & UPS_STATUS_LOW_BATTERY);
+      sensor->publish_state(local_data.status_flags & UPS_STATUS_LOW_BATTERY);
     } else if (type == "fault") {
-      sensor->publish_state(ups_data_.status_flags & UPS_STATUS_FAULT);
+      sensor->publish_state(local_data.status_flags & UPS_STATUS_FAULT);
     } else if (type == "overload") {
-      sensor->publish_state(ups_data_.status_flags & UPS_STATUS_OVERLOAD);
+      sensor->publish_state(local_data.status_flags & UPS_STATUS_OVERLOAD);
     } else if (type == "charging") {
-      sensor->publish_state(ups_data_.status_flags & UPS_STATUS_CHARGING);
+      sensor->publish_state(local_data.status_flags & UPS_STATUS_CHARGING);
     }
   }
   
@@ -292,19 +306,19 @@ void NutUpsComponent::update_sensors() {
     const std::string &type = pair.first;
     auto *sensor = pair.second;
     
-    if (type == "model" && !ups_data_.model.empty()) {
-      sensor->publish_state(ups_data_.model);
-    } else if (type == "manufacturer" && !ups_data_.manufacturer.empty()) {
-      sensor->publish_state(ups_data_.manufacturer);
+    if (type == "model" && !local_data.model.empty()) {
+      sensor->publish_state(local_data.model);
+    } else if (type == "manufacturer" && !local_data.manufacturer.empty()) {
+      sensor->publish_state(local_data.manufacturer);
     } else if (type == "protocol") {
       sensor->publish_state(get_protocol_name());
     } else if (type == "status") {
       std::string status_str = "";
-      if (ups_data_.status_flags & UPS_STATUS_ONLINE) status_str += "Online ";
-      if (ups_data_.status_flags & UPS_STATUS_ON_BATTERY) status_str += "OnBattery ";
-      if (ups_data_.status_flags & UPS_STATUS_LOW_BATTERY) status_str += "LowBattery ";
-      if (ups_data_.status_flags & UPS_STATUS_CHARGING) status_str += "Charging ";
-      if (ups_data_.status_flags & UPS_STATUS_FAULT) status_str += "Fault ";
+      if (local_data.status_flags & UPS_STATUS_ONLINE) status_str += "Online ";
+      if (local_data.status_flags & UPS_STATUS_ON_BATTERY) status_str += "OnBattery ";
+      if (local_data.status_flags & UPS_STATUS_LOW_BATTERY) status_str += "LowBattery ";
+      if (local_data.status_flags & UPS_STATUS_CHARGING) status_str += "Charging ";
+      if (local_data.status_flags & UPS_STATUS_FAULT) status_str += "Fault ";
       if (status_str.empty()) status_str = "Unknown";
       sensor->publish_state(status_str);
     }
@@ -351,13 +365,19 @@ void NutUpsComponent::register_text_sensor(text_sensor::TextSensor *sens, const 
 
 bool NutUpsComponent::usb_write(const std::vector<uint8_t> &data) {
 #ifdef USE_ESP32
-  if (!device_connected_ || data.empty()) {
+  if (data.empty()) {
     return false;
   }
 
   // Take USB mutex for thread safety
   if (xSemaphoreTake(usb_mutex_, pdMS_TO_TICKS(1000)) != pdTRUE) {
     ESP_LOGW(TAG, "Failed to acquire USB mutex for write");
+    return false;
+  }
+
+  // Check connection status inside mutex to prevent race conditions
+  if (!device_connected_) {
+    xSemaphoreGive(usb_mutex_);
     return false;
   }
 
@@ -371,7 +391,7 @@ bool NutUpsComponent::usb_write(const std::vector<uint8_t> &data) {
     return false;
   }
   
-  ESP_LOGV(TAG, "USB Write: %d bytes", data.size());
+  ESP_LOGV(TAG, "USB Write: %zu bytes", data.size());
   return true;
 #else
   return false;
@@ -380,15 +400,17 @@ bool NutUpsComponent::usb_write(const std::vector<uint8_t> &data) {
 
 bool NutUpsComponent::usb_read(std::vector<uint8_t> &data, uint32_t timeout_ms) {
 #ifdef USE_ESP32
-  if (!device_connected_) {
-    data.clear();
-    return false;
-  }
-
+  data.clear();
+  
   // Take USB mutex for thread safety  
   if (xSemaphoreTake(usb_mutex_, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
     ESP_LOGW(TAG, "Failed to acquire USB mutex for read");
-    data.clear();
+    return false;
+  }
+
+  // Check connection status inside mutex to prevent race conditions
+  if (!device_connected_) {
+    xSemaphoreGive(usb_mutex_);
     return false;
   }
 
@@ -403,7 +425,7 @@ bool NutUpsComponent::usb_read(std::vector<uint8_t> &data, uint32_t timeout_ms) 
     return false;
   }
   
-  ESP_LOGV(TAG, "USB Read: %d bytes", data.size());
+  ESP_LOGV(TAG, "USB Read: %zu bytes", data.size());
   return true;
 #else
   data.clear();
@@ -497,8 +519,8 @@ esp_err_t NutUpsComponent::usb_host_lib_init() {
     return ret;
   }
   
-  // Create USB Host Library task
-  if (xTaskCreate(usb_host_lib_task, "usb_host", 4096, this, 5, &usb_task_handle_) != pdTRUE) {
+  // Create USB Host Library task with larger stack size for safety
+  if (xTaskCreate(usb_host_lib_task, "usb_host", 8192, this, 5, &usb_task_handle_) != pdTRUE) {
     ESP_LOGE(TAG, "Failed to create USB Host task");
     return ESP_ERR_NO_MEM;
   }
@@ -557,12 +579,24 @@ esp_err_t NutUpsComponent::usb_device_enumerate() {
       ESP_LOGI(TAG, "Found UPS device: VID=0x%04X, PID=0x%04X", usb_device_.vid, usb_device_.pid);
       
       // Claim interface and get endpoints
-      if (usb_claim_interface() == ESP_OK && usb_get_endpoints() == ESP_OK) {
-        device_connected_ = true;
-        return ESP_OK;
+      esp_err_t claim_ret = usb_claim_interface();
+      if (claim_ret == ESP_OK) {
+        esp_err_t endpoint_ret = usb_get_endpoints();
+        if (endpoint_ret == ESP_OK) {
+          device_connected_ = true;
+          return ESP_OK;
+        }
+        ESP_LOGW(TAG, "Failed to get USB endpoints: %s", esp_err_to_name(endpoint_ret));
+      } else {
+        ESP_LOGW(TAG, "Failed to claim USB interface: %s", esp_err_to_name(claim_ret));
       }
+      
+      // Clean up on failure
+      usb_device_.dev_hdl = nullptr;
+      usb_device_.dev_addr = 0;
     }
     
+    // Close device handle if we opened it but didn't use it
     usb_host_device_close(usb_device_.client_hdl, dev_hdl);
   }
   
