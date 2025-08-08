@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "🚀 Setting up ESPHome NUT UPS Development Environment..."
+echo "🚀 Setting up ESPHome Component Development Environment..."
 
 # Update and install packages
 apt-get update
@@ -15,13 +15,15 @@ pip install --upgrade pip black flake8 pylint mypy pytest jupyter ipython platfo
 # Update ESPHome
 pip install --upgrade esphome
 
+# Claude Code - MCP server
+claude mcp add code npx "@steipete/claude-code-mcp" "/workspace"
+
 # Set up USB permissions
 cat > /etc/udev/rules.d/99-esphome-usb.rules << 'UDEV_EOF'
 SUBSYSTEM=="usb", ATTR{idVendor}=="303a", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="10c4", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="1a86", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="0403", MODE="0666"
-SUBSYSTEM=="usb", ATTR{idVendor}=="0001", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="0463", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="050d", MODE="0666"
 SUBSYSTEM=="usb", ATTR{idVendor}=="051d", MODE="0666"
@@ -46,15 +48,17 @@ alias serialports='ls -la /dev/tty{USB,ACM}* 2>/dev/null || echo "No serial port
 alias build-component='cd /workspace && esphome compile full-test.yaml'
 alias flash-test='cd /workspace && esphome upload full-test.yaml'
 alias monitor='cd /workspace && esphome logs full-test.yaml'
+alias dclaude='claude --dangerously-skip-permissions'
 BASH_EOF
 
 # Welcome message
 cat > /tmp/WELCOME.md << 'WELCOME_EOF'
-# 🎉 ESPHome NUT UPS Development Environment Ready!
+# 🎉 ESPHome Component Development Environment Ready!
 
 ## Quick Commands
 - `esphome-dashboard` - Start web dashboard
 - `./tools/scan-usb.sh` - Check USB devices
+- `./tools/generate_vendor_list.py` - Generate UPS Vendor List
 - `build-component` - Build test config
 - `flash-test` - Flash to device
 - `monitor` - View logs
@@ -62,5 +66,5 @@ cat > /tmp/WELCOME.md << 'WELCOME_EOF'
 Happy coding! 🚀
 WELCOME_EOF
 
-echo "✅ Development environment setup complete!"
+echo "✅ Development environment setup complete!\n\n"
 cat /tmp/WELCOME.md

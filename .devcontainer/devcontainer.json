@@ -1,6 +1,8 @@
 {
-  "name": "ESPHome NUT UPS Development",
-  "image": "ghcr.io/esphome/esphome:latest",
+  "name": "ESPHome Component Development",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
   "features": {
     "ghcr.io/devcontainers/features/git:1": {},
     "ghcr.io/devcontainers/features/github-cli:1": {},
@@ -21,7 +23,7 @@
     "--device=/dev/bus/usb:/dev/bus/usb:rwm"
   ],
   "workspaceFolder": "/workspace",
-  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "postCreateCommand": "sudo bash .devcontainer/setup.sh",
   "customizations": {
     "vscode": {
       "extensions": [
@@ -72,7 +74,7 @@
     "PLATFORMIO_CORE_DIR": "/workspace/.platformio"
   },
   "init": true,
-  "remoteUser": "root",
+  "remoteUser": "esphome",
   "capAdd": [
     "SYS_RAWIO",
     "SYS_ADMIN"
