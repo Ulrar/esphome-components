@@ -111,7 +111,7 @@ tools/
 └── README.md               # Tools documentation
 
 .vscode/
-└── tasks.json              # VSCode development tasks
+├── tasks.json              # VSCode development tasks
 ```
 
 ### Development Tools

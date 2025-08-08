@@ -1,10 +1,12 @@
 # Development Tools
 
-This folder contains development tools for the UPS HID ESPHome component.
+This folder contains development tools for ESP32 ESPHome component development, including debugging utilities and vendor management tools.
 
-## scan-usb.sh
+## USB Device Management
 
-This script lists esp and ups releated usb devices.
+### scan-usb.sh
+
+Lists ESP32, UPS, and related USB devices connected to the system. Useful for identifying device paths and vendor/product IDs during development.
 
 ## generate_vendor_list.py
 
@@ -13,6 +15,7 @@ This script keeps the UPS vendor ID lists synchronized between C++, scripts and 
 ### Purpose
 
 The UPS HID component maintains a list of known UPS vendor IDs in two places:
+
 - `components/ups_hid/ups_vendors.h` (C++ runtime code)
 - `components/ups_hid/__init__.py` (Python configuration validation)
 
@@ -21,12 +24,14 @@ This script extracts the vendor list from the C++ header file and updates the Py
 ### Usage
 
 #### Command Line
+
 ```bash
 cd /workspace
 python3 tools/generate_vendor_list.py
 ```
 
 #### VSCode Task
+
 1. Open the Command Palette (`Ctrl+Shift+P` or `Cmd+Shift+P`)
 2. Type "Tasks: Run Task"
 3. Select "Generate UPS Vendor List"
@@ -36,6 +41,7 @@ Or use the keyboard shortcut `Ctrl+Shift+P` -> "Tasks: Run Build Task" and selec
 ### When to Run
 
 Run this script whenever you:
+
 1. Add new UPS vendor IDs to `components/ups_hid/ups_vendors.h`
 2. Modify existing vendor information
 3. Want to ensure the C++ and Python lists are synchronized
@@ -43,6 +49,7 @@ Run this script whenever you:
 ### Output
 
 The script will:
+
 - Parse the C++ header file for vendor definitions
 - Extract vendor IDs, names, and descriptions
 - Update the `KNOWN_VENDOR_IDS` dictionary in `__init__.py`
@@ -62,9 +69,11 @@ To add a new UPS vendor:
 
 1. Edit `components/ups_hid/ups_vendors.h`
 2. Add a new entry to the `KNOWN_UPS_VENDORS` array:
+
    ```cpp
    {0x1234, "New Vendor", "New Vendor Description"},
    ```
+
 3. Run the generate_vendor_list.py script to update the Python file
 4. Compile and test the component
 
