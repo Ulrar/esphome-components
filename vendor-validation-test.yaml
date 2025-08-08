@@ -16,7 +16,7 @@ esp32:
 logger:
   level: VERBOSE
   logs:
-    nut_ups: DEBUG
+    ups_hid: DEBUG
 
 api:
   encryption:
@@ -36,30 +36,30 @@ external_components:
       path: components
 
 # Test with unknown vendor ID to trigger validation warning
-nut_ups:
+ups_hid:
   id: ups_monitor
   update_interval: 30s
-  usb_vendor_id: 0x9999  # Unknown vendor ID - should trigger warning
+  usb_vendor_id: 0x9999 # Unknown vendor ID - should trigger warning
   usb_product_id: 0x0001
   auto_detect_protocol: true
   protocol_timeout: 15s
   simulation_mode: true
 
 sensor:
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "Battery Level"
     type: battery_level
     unit_of_measurement: "%"
 
 binary_sensor:
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "UPS Online"
     type: online
 
 text_sensor:
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "UPS Status"
     type: status

@@ -9,12 +9,12 @@ from esphome.const import (
     DEVICE_CLASS_POWER,
 )
 
-from . import nut_ups_ns, NutUpsComponent, CONF_NUT_UPS_ID
+from . import ups_hid_ns, UpsHidComponent, CONF_UPS_HID_ID
 
-DEPENDENCIES = ["nut_ups"]
+DEPENDENCIES = ["ups_hid"]
 
-NutUpsBinarySensor = nut_ups_ns.class_(
-    "NutUpsBinarySensor", binary_sensor.BinarySensor, cg.Component
+UpsHidBinarySensor = ups_hid_ns.class_(
+    "UpsHidBinarySensor", binary_sensor.BinarySensor, cg.Component
 )
 
 BINARY_SENSOR_TYPES = {
@@ -39,16 +39,16 @@ BINARY_SENSOR_TYPES = {
 }
 
 
-CONFIG_SCHEMA = binary_sensor.binary_sensor_schema(NutUpsBinarySensor).extend(
+CONFIG_SCHEMA = binary_sensor.binary_sensor_schema(UpsHidBinarySensor).extend(
     {
-        cv.GenerateID(CONF_NUT_UPS_ID): cv.use_id(NutUpsComponent),
+        cv.GenerateID(CONF_UPS_HID_ID): cv.use_id(UpsHidComponent),
         cv.Required(CONF_TYPE): cv.one_of(*BINARY_SENSOR_TYPES, lower=True),
     }
 )
 
 
 async def to_code(config):
-    parent = await cg.get_variable(config[CONF_NUT_UPS_ID])
+    parent = await cg.get_variable(config[CONF_UPS_HID_ID])
     var = await binary_sensor.new_binary_sensor(config)
     await cg.register_component(var, config)
 

@@ -5,12 +5,12 @@ from esphome.const import (
     CONF_TYPE,
 )
 
-from . import nut_ups_ns, NutUpsComponent, CONF_NUT_UPS_ID
+from . import ups_hid_ns, UpsHidComponent, CONF_UPS_HID_ID
 
-DEPENDENCIES = ["nut_ups"]
+DEPENDENCIES = ["ups_hid"]
 
-NutUpsTextSensor = nut_ups_ns.class_(
-    "NutUpsTextSensor", text_sensor.TextSensor, cg.Component
+UpsHidTextSensor = ups_hid_ns.class_(
+    "UpsHidTextSensor", text_sensor.TextSensor, cg.Component
 )
 
 TEXT_SENSOR_TYPES = [
@@ -23,16 +23,16 @@ TEXT_SENSOR_TYPES = [
 ]
 
 
-CONFIG_SCHEMA = text_sensor.text_sensor_schema(NutUpsTextSensor).extend(
+CONFIG_SCHEMA = text_sensor.text_sensor_schema(UpsHidTextSensor).extend(
     {
-        cv.GenerateID(CONF_NUT_UPS_ID): cv.use_id(NutUpsComponent),
+        cv.GenerateID(CONF_UPS_HID_ID): cv.use_id(UpsHidComponent),
         cv.Required(CONF_TYPE): cv.one_of(*TEXT_SENSOR_TYPES, lower=True),
     }
 )
 
 
 async def to_code(config):
-    parent = await cg.get_variable(config[CONF_NUT_UPS_ID])
+    parent = await cg.get_variable(config[CONF_UPS_HID_ID])
     var = await text_sensor.new_text_sensor(config)
     await cg.register_component(var, config)
 

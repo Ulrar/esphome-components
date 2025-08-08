@@ -3,17 +3,17 @@
 
 namespace esphome
 {
-  namespace nut_ups
+  namespace ups_hid
   {
 
-    static const char *const TXT_TAG = "nut_ups.text_sensor";
+    static const char *const TXT_TAG = "ups_hid.text_sensor";
 
-    void NutUpsTextSensor::dump_config()
+    void UpsHidTextSensor::dump_config()
     {
-      ESP_LOGCONFIG(TXT_TAG, "NUT UPS Text Sensor:");
+      ESP_LOGCONFIG(TXT_TAG, "UPS HID Text Sensor:");
       ESP_LOGCONFIG(TXT_TAG, "  Type: %s", sensor_type_.c_str());
       LOG_TEXT_SENSOR("  ", "Text Sensor", this);
     }
 
-  } // namespace nut_ups
+  } // namespace ups_hid
 } // namespace esphome

@@ -1,10 +1,10 @@
-#include "nut_ups.h"
+#include "ups_hid.h"
 #include "esphome/core/log.h"
 
 namespace esphome {
-namespace nut_ups {
+namespace ups_hid {
 
-static const char *const GEN_TAG = "nut_ups.generic";
+static const char *const GEN_TAG = "ups_hid.generic";
 
 // Standard HID Usage Pages (based on NUT usbhid-ups.c)
 static const uint16_t HID_USAGE_PAGE_POWER_DEVICE = 0x84;
@@ -231,5 +231,5 @@ bool GenericHidProtocol::parse_generic_report(const std::vector<uint8_t>& respon
   return found_data;
 }
 
-}  // namespace nut_ups
+}  // namespace ups_hid
 }  // namespace esphome

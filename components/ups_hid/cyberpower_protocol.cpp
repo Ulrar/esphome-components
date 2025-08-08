@@ -1,10 +1,10 @@
-#include "nut_ups.h"
+#include "ups_hid.h"
 #include "esphome/core/log.h"
 
 namespace esphome {
-namespace nut_ups {
+namespace ups_hid {
 
-static const char *const CP_TAG = "nut_ups.cyberpower";
+static const char *const CP_TAG = "ups_hid.cyberpower";
 
 // CyberPower HID Report IDs and data structures
 static const uint8_t CP_REPORT_ID_UPS_STATUS = 0x01;
@@ -357,5 +357,5 @@ bool CyberPowerProtocol::parse_device_info_report(const HidReport &report, UpsDa
   return true;
 }
 
-}  // namespace nut_ups
+}  // namespace ups_hid
 }  // namespace esphome

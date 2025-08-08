@@ -4,9 +4,9 @@
 #include <cstring>
 
 namespace esphome {
-namespace nut_ups {
+namespace ups_hid {
 
-static const char *const APC_HID_TAG = "nut_ups.apc_hid";
+static const char *const APC_HID_TAG = "ups_hid.apc_hid";
 
 // APC HID Usage Pages and Usage IDs (based on NUT project research)
 static const uint16_t APC_USAGE_PAGE_UPS = 0x84;
@@ -38,7 +38,7 @@ static std::string convert_apc_date(uint32_t apc_date) {
 }
 
 // APC HID Protocol implementation
-ApcHidProtocol::ApcHidProtocol(NutUpsComponent *parent) : UpsProtocolBase(parent) {}
+ApcHidProtocol::ApcHidProtocol(UpsHidComponent *parent) : UpsProtocolBase(parent) {}
 
 bool ApcHidProtocol::detect() {
   ESP_LOGD(APC_HID_TAG, "Detecting APC HID Protocol...");
@@ -339,5 +339,5 @@ void ApcHidProtocol::parse_device_info_report(const HidReport &report) {
   }
 }
 
-} // namespace nut_ups
+} // namespace ups_hid
 } // namespace esphome

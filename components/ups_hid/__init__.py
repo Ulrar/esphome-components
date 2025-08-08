@@ -1,4 +1,4 @@
-"""NUT UPS Component for ESPHome - Enhanced validation and configuration."""
+"""UPS HID Component for ESPHome - Enhanced validation and configuration."""
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
@@ -15,11 +15,10 @@ CONF_USB_VENDOR_ID = "usb_vendor_id"
 CONF_USB_PRODUCT_ID = "usb_product_id"
 CONF_PROTOCOL_TIMEOUT = "protocol_timeout"
 CONF_AUTO_DETECT_PROTOCOL = "auto_detect_protocol"
-CONF_NUT_UPS_ID = "nut_ups_id"
+CONF_UPS_HID_ID = "ups_hid_id"
 
 # Known UPS vendor IDs for validation
 KNOWN_VENDOR_IDS = {
-    0x0001: "Generic/Other",
     0x0463: "MGE Office Protection Systems",
     0x050D: "Belkin",
     0x051D: "APC",
@@ -32,8 +31,8 @@ KNOWN_VENDOR_IDS = {
     0x09D6: "Micropower",
 }
 
-nut_ups_ns = cg.esphome_ns.namespace("nut_ups")
-NutUpsComponent = nut_ups_ns.class_("NutUpsComponent", cg.PollingComponent)
+ups_hid_ns = cg.esphome_ns.namespace("ups_hid")
+UpsHidComponent = ups_hid_ns.class_("UpsHidComponent", cg.PollingComponent)
 
 
 def validate_usb_config(config):
@@ -70,7 +69,7 @@ def validate_protocol_timeout(value):
 
 
 def validate_update_interval(value):
-    """Validate update interval for UPS monitoring."""
+    """Validate update interval for UPS HID monitoring."""
     value = cv.update_interval(value)
     ms = value.total_milliseconds
 
@@ -86,7 +85,7 @@ def validate_update_interval(value):
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
-            cv.GenerateID(): cv.declare_id(NutUpsComponent),
+            cv.GenerateID(): cv.declare_id(UpsHidComponent),
             cv.Optional(CONF_UPDATE_INTERVAL, default="30s"): validate_update_interval,
             cv.Optional(CONF_SIMULATION_MODE, default=False): cv.boolean,
             cv.Optional(CONF_USB_VENDOR_ID, default=0x051D): cv.hex_uint16_t,

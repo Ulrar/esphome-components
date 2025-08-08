@@ -1,4 +1,4 @@
-#include "nut_ups.h"
+#include "ups_hid.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/hal.h"
@@ -7,10 +7,10 @@
 
 namespace esphome
 {
-  namespace nut_ups
+  namespace ups_hid
   {
 
-    static const char *const APC_TAG = "nut_ups.apc";
+    static const char *const APC_TAG = "ups_hid.apc";
 
     // APC Smart Protocol Commands
     static const char APC_CMD_STATUS = 'Q';         // Status inquiry
@@ -483,5 +483,5 @@ namespace esphome
       return flags;
     }
 
-  } // namespace nut_ups
+  } // namespace ups_hid
 } // namespace esphome

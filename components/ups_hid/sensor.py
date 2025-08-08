@@ -14,11 +14,11 @@ from esphome.const import (
     UNIT_HERTZ,
 )
 
-from . import nut_ups_ns, NutUpsComponent, CONF_NUT_UPS_ID
+from . import ups_hid_ns, UpsHidComponent, CONF_UPS_HID_ID
 
-DEPENDENCIES = ["nut_ups"]
+DEPENDENCIES = ["ups_hid"]
 
-NutUpsSensor = nut_ups_ns.class_("NutUpsSensor", sensor.Sensor, cg.Component)
+UpsHidSensor = ups_hid_ns.class_("UpsHidSensor", sensor.Sensor, cg.Component)
 
 SENSOR_TYPES = {
     "battery_level": {
@@ -60,18 +60,18 @@ SENSOR_TYPES = {
 
 
 CONFIG_SCHEMA = sensor.sensor_schema(
-    NutUpsSensor,
+    UpsHidSensor,
     accuracy_decimals=1,
 ).extend(
     {
-        cv.GenerateID(CONF_NUT_UPS_ID): cv.use_id(NutUpsComponent),
+        cv.GenerateID(CONF_UPS_HID_ID): cv.use_id(UpsHidComponent),
         cv.Required(CONF_TYPE): cv.one_of(*SENSOR_TYPES, lower=True),
     }
 )
 
 
 async def to_code(config):
-    parent = await cg.get_variable(config[CONF_NUT_UPS_ID])
+    parent = await cg.get_variable(config[CONF_UPS_HID_ID])
     var = await sensor.new_sensor(config)
     await cg.register_component(var, config)
 

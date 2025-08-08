@@ -1,4 +1,4 @@
-#include "nut_ups.h"
+#include "ups_hid.h"
 #include "ups_vendors.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
@@ -27,10 +27,10 @@
 #endif
 
 namespace esphome {
-namespace nut_ups {
+namespace ups_hid {
 
-void NutUpsComponent::setup() {
-  ESP_LOGCONFIG(TAG, "Setting up NUT UPS Component...");
+void UpsHidComponent::setup() {
+  ESP_LOGCONFIG(TAG, "Setting up UPS HID Component...");
   
   if (simulation_mode_) {
     ESP_LOGW(TAG, "Running in simulation mode - no actual UPS communication");
@@ -76,12 +76,12 @@ void NutUpsComponent::setup() {
   connected_ = true;
   ESP_LOGI(TAG, "Successfully connected to UPS using %s", get_protocol_name().c_str());
 #else
-  ESP_LOGE(TAG, "NUT UPS component requires ESP32 platform");
+  ESP_LOGE(TAG, "UPS HID component requires ESP32 platform");
   mark_failed();
 #endif
 }
 
-void NutUpsComponent::update() {
+void UpsHidComponent::update() {
   if (simulation_mode_) {
     simulate_ups_data();
     update_sensors();
@@ -126,8 +126,8 @@ void NutUpsComponent::update() {
   }
 }
 
-void NutUpsComponent::dump_config() {
-  ESP_LOGCONFIG(TAG, "NUT UPS Component:");
+void UpsHidComponent::dump_config() {
+  ESP_LOGCONFIG(TAG, "UPS HID Component:");
   ESP_LOGCONFIG(TAG, "  Simulation Mode: %s", simulation_mode_ ? "YES" : "NO");
   ESP_LOGCONFIG(TAG, "  USB Vendor ID: 0x%04X", usb_vendor_id_);
   ESP_LOGCONFIG(TAG, "  USB Product ID: 0x%04X", usb_product_id_);
@@ -145,14 +145,14 @@ void NutUpsComponent::dump_config() {
   }
 }
 
-std::string NutUpsComponent::get_protocol_name() const {
+std::string UpsHidComponent::get_protocol_name() const {
   if (active_protocol_) {
     return active_protocol_->get_protocol_name();
   }
   return "Unknown";
 }
 
-bool NutUpsComponent::initialize_usb() {
+bool UpsHidComponent::initialize_usb() {
 #ifdef USE_ESP32
   ESP_LOGD(TAG, "Initializing USB communication...");
   
@@ -176,7 +176,7 @@ bool NutUpsComponent::initialize_usb() {
 #endif
 }
 
-bool NutUpsComponent::should_log_error(ErrorRateLimit& limiter) {
+bool UpsHidComponent::should_log_error(ErrorRateLimit& limiter) {
   uint32_t now = millis();
   
   // Check if we're past the rate limit window
@@ -204,14 +204,14 @@ bool NutUpsComponent::should_log_error(ErrorRateLimit& limiter) {
   return false;
 }
 
-void NutUpsComponent::log_suppressed_errors(ErrorRateLimit& limiter) {
+void UpsHidComponent::log_suppressed_errors(ErrorRateLimit& limiter) {
   if (limiter.suppressed_count > 0) {
     ESP_LOGW(TAG, "Suppressed %u similar error messages", limiter.suppressed_count);
     limiter.suppressed_count = 0;
   }
 }
 
-bool NutUpsComponent::detect_ups_protocol() {
+bool UpsHidComponent::detect_ups_protocol() {
   ESP_LOGD(TAG, "Detecting UPS protocol...");
   
   if (!auto_detect_protocol_) {
@@ -381,7 +381,7 @@ bool NutUpsComponent::detect_ups_protocol() {
   return false;
 }
 
-bool NutUpsComponent::read_ups_data() {
+bool UpsHidComponent::read_ups_data() {
   if (!active_protocol_) {
     ESP_LOGW(TAG, "No active protocol available for reading data");
     return false;
@@ -410,7 +410,7 @@ bool NutUpsComponent::read_ups_data() {
   return false;
 }
 
-void NutUpsComponent::update_sensors() {
+void UpsHidComponent::update_sensors() {
   // Create local copy of data under lock to minimize lock time
   UpsData local_data;
   {
@@ -498,7 +498,7 @@ void NutUpsComponent::update_sensors() {
   }
 }
 
-void NutUpsComponent::simulate_ups_data() {
+void UpsHidComponent::simulate_ups_data() {
   static uint32_t sim_counter = 0;
   sim_counter++;
   
@@ -559,19 +559,19 @@ void NutUpsComponent::simulate_ups_data() {
   }
 }
 
-void NutUpsComponent::register_sensor(sensor::Sensor *sens, const std::string &type) {
+void UpsHidComponent::register_sensor(sensor::Sensor *sens, const std::string &type) {
   sensors_[type] = sens;
 }
 
-void NutUpsComponent::register_binary_sensor(binary_sensor::BinarySensor *sens, const std::string &type) {
+void UpsHidComponent::register_binary_sensor(binary_sensor::BinarySensor *sens, const std::string &type) {
   binary_sensors_[type] = sens;
 }
 
-void NutUpsComponent::register_text_sensor(text_sensor::TextSensor *sens, const std::string &type) {
+void UpsHidComponent::register_text_sensor(text_sensor::TextSensor *sens, const std::string &type) {
   text_sensors_[type] = sens;
 }
 
-bool NutUpsComponent::usb_write(const std::vector<uint8_t> &data) {
+bool UpsHidComponent::usb_write(const std::vector<uint8_t> &data) {
 #ifdef USE_ESP32
   if (data.empty()) {
     return false;
@@ -610,7 +610,7 @@ bool NutUpsComponent::usb_write(const std::vector<uint8_t> &data) {
 #endif
 }
 
-bool NutUpsComponent::usb_read(std::vector<uint8_t> &data, uint32_t timeout_ms) {
+bool UpsHidComponent::usb_read(std::vector<uint8_t> &data, uint32_t timeout_ms) {
 #ifdef USE_ESP32
   data.clear();
   
@@ -650,7 +650,7 @@ bool NutUpsComponent::usb_read(std::vector<uint8_t> &data, uint32_t timeout_ms) 
 }
 
 #ifdef USE_ESP32
-esp_err_t NutUpsComponent::usb_init() {
+esp_err_t UpsHidComponent::usb_init() {
   ESP_LOGD(TAG, "Initializing USB Host...");
   
   if (usb_host_initialized_) {
@@ -684,7 +684,7 @@ esp_err_t NutUpsComponent::usb_init() {
   return ESP_OK;
 }
 
-void NutUpsComponent::usb_deinit() {
+void UpsHidComponent::usb_deinit() {
   ESP_LOGD(TAG, "Deinitializing USB Host...");
   
   if (!usb_host_initialized_) {
@@ -724,7 +724,7 @@ void NutUpsComponent::usb_deinit() {
   ESP_LOGI(TAG, "USB Host deinitialized");
 }
 
-esp_err_t NutUpsComponent::usb_host_lib_init() {
+esp_err_t UpsHidComponent::usb_host_lib_init() {
   usb_host_config_t host_config = {
     .skip_phy_setup = false,
     .intr_flags = ESP_INTR_FLAG_LEVEL1,
@@ -744,7 +744,7 @@ esp_err_t NutUpsComponent::usb_host_lib_init() {
   return ESP_OK;
 }
 
-esp_err_t NutUpsComponent::usb_client_register() {
+esp_err_t UpsHidComponent::usb_client_register() {
   usb_host_client_config_t client_config = {
     .is_synchronous = false,
     .max_num_event_msg = 5,
@@ -763,7 +763,7 @@ esp_err_t NutUpsComponent::usb_client_register() {
   return ESP_OK;
 }
 
-esp_err_t NutUpsComponent::usb_device_enumerate() {
+esp_err_t UpsHidComponent::usb_device_enumerate() {
   ESP_LOGD(TAG, "Enumerating USB devices...");
   
   uint8_t dev_addr_list[10];
@@ -823,7 +823,7 @@ esp_err_t NutUpsComponent::usb_device_enumerate() {
   return ESP_ERR_NOT_FOUND;
 }
 
-bool NutUpsComponent::usb_is_ups_device(const usb_device_desc_t *desc) {
+bool UpsHidComponent::usb_is_ups_device(const usb_device_desc_t *desc) {
   uint16_t vid = desc->idVendor;
   uint16_t pid = desc->idProduct;
   
@@ -852,7 +852,7 @@ bool NutUpsComponent::usb_is_ups_device(const usb_device_desc_t *desc) {
   return false;
 }
 
-esp_err_t NutUpsComponent::usb_claim_interface() {
+esp_err_t UpsHidComponent::usb_claim_interface() {
   // Get active configuration
   const usb_config_desc_t *config_desc;
   esp_err_t ret = usb_host_get_active_config_descriptor(usb_device_.dev_hdl, &config_desc);
@@ -891,7 +891,7 @@ esp_err_t NutUpsComponent::usb_claim_interface() {
   return ESP_OK;
 }
 
-esp_err_t NutUpsComponent::usb_get_endpoints() {
+esp_err_t UpsHidComponent::usb_get_endpoints() {
   // Get active configuration
   const usb_config_desc_t *config_desc;
   esp_err_t ret = usb_host_get_active_config_descriptor(usb_device_.dev_hdl, &config_desc);
@@ -940,7 +940,7 @@ esp_err_t NutUpsComponent::usb_get_endpoints() {
   return ESP_OK;
 }
 
-esp_err_t NutUpsComponent::usb_transfer_sync(const std::vector<uint8_t> &data_out, 
+esp_err_t UpsHidComponent::usb_transfer_sync(const std::vector<uint8_t> &data_out, 
                                              std::vector<uint8_t> &data_in, 
                                              uint32_t timeout_ms) {
   if (!device_connected_ || !usb_device_.dev_hdl) {
@@ -1030,8 +1030,8 @@ esp_err_t NutUpsComponent::usb_transfer_sync(const std::vector<uint8_t> &data_ou
   return ret;
 }
 
-void NutUpsComponent::usb_host_lib_task(void *arg) {
-  auto *component = static_cast<NutUpsComponent *>(arg);
+void UpsHidComponent::usb_host_lib_task(void *arg) {
+  auto *component = static_cast<UpsHidComponent *>(arg);
   
   ESP_LOGD(TAG, "USB Host task started");
   
@@ -1060,8 +1060,8 @@ void NutUpsComponent::usb_host_lib_task(void *arg) {
   vTaskDelete(nullptr);
 }
 
-void NutUpsComponent::usb_client_event_callback(const usb_host_client_event_msg_t *event_msg, void *arg) {
-  auto *component = static_cast<NutUpsComponent *>(arg);
+void UpsHidComponent::usb_client_event_callback(const usb_host_client_event_msg_t *event_msg, void *arg) {
+  auto *component = static_cast<UpsHidComponent *>(arg);
   
   switch (event_msg->event) {
     case USB_HOST_CLIENT_EVENT_NEW_DEV:
@@ -1105,5 +1105,5 @@ std::string UpsProtocolBase::bytes_to_string(const std::vector<uint8_t> &data) {
   return result;
 }
 
-}  // namespace nut_ups
+}  // namespace ups_hid
 }  // namespace esphome

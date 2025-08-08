@@ -1,12 +1,12 @@
 substitutions:
-  name: nut-ups-monitor-full-test
-  friendly_name: "NUT UPS Monitor"
+  name: ups-hid-monitor-full-test
+  friendly_name: "UPS HID Monitor"
   timezone: "America/New_York"
 
 esphome:
   name: "${name}"
   friendly_name: "${friendly_name}"
-  comment: "Full test configuration for NUT UPS Component with ESP32-S3"
+  comment: "Full test configuration for UPS HID Component with ESP32-S3"
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -18,7 +18,7 @@ esp32:
 logger:
   level: VERBOSE
   logs:
-    nut_ups: DEBUG
+    ups_hid: DEBUG
 
 # Enable Home Assistant API
 api:
@@ -98,8 +98,8 @@ external_components:
       type: local
       path: components
 
-# Main NUT UPS Component Configuration
-nut_ups:
+# Main UPS HID Component Configuration
+ups_hid:
   id: ups_monitor
   update_interval: 10s
 
@@ -117,8 +117,8 @@ nut_ups:
 # Numeric Sensors
 sensor:
   # Essential UPS metrics
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "Battery Level"
     id: battery_level
     type: battery_level
@@ -127,8 +127,8 @@ sensor:
     state_class: measurement
     accuracy_decimals: 0
 
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "Input Voltage"
     id: input_voltage
     type: input_voltage
@@ -137,8 +137,8 @@ sensor:
     state_class: measurement
     accuracy_decimals: 1
 
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "Output Voltage"
     id: output_voltage
     type: output_voltage
@@ -147,8 +147,8 @@ sensor:
     state_class: measurement
     accuracy_decimals: 1
 
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "Load Percentage"
     id: load_percentage
     type: load_percent
@@ -157,8 +157,8 @@ sensor:
     state_class: measurement
     accuracy_decimals: 0
 
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "Runtime Remaining"
     id: runtime_remaining
     type: runtime
@@ -167,8 +167,8 @@ sensor:
     state_class: measurement
     accuracy_decimals: 0
 
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "Input Frequency"
     id: input_frequency
     type: frequency
@@ -212,8 +212,8 @@ sensor:
 
 # Binary Sensors for UPS status
 binary_sensor:
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "UPS Online"
     id: ups_online
     type: online
@@ -227,15 +227,15 @@ binary_sensor:
             format: "POWER OUTAGE: UPS switched to battery power"
             level: WARN
 
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "On Battery Power"
     id: on_battery
     type: on_battery
     device_class: battery
 
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "Low Battery Warning"
     id: low_battery
     type: low_battery
@@ -245,22 +245,22 @@ binary_sensor:
         - script.execute: ups_shutdown_warning
         - script.execute: notify_critical
 
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "UPS Fault"
     id: ups_fault
     type: fault
     device_class: problem
 
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "Battery Charging"
     id: battery_charging
     type: charging
     device_class: battery
 
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "Overload Warning"
     id: overload_warning
     type: overload
@@ -284,26 +284,26 @@ binary_sensor:
 
 # Text Sensors for UPS information
 text_sensor:
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "UPS Model"
     id: ups_model
     type: model
 
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "UPS Manufacturer"
     id: ups_manufacturer
     type: manufacturer
 
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "UPS Status"
     id: ups_status_text
     type: status
 
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "Detected Protocol"
     id: ups_protocol
     type: protocol

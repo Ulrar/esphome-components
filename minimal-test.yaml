@@ -1,7 +1,7 @@
 esphome:
-  name: nut-ups-monitor-minimal-test
-  friendly_name: "NUT UPS Monitor"
-  comment: "Full test configuration for NUT UPS Component with ESP32-S3"
+  name: ups-hid-monitor-minimal-test
+  friendly_name: "UPS HID Monitor"
+  comment: "Full test configuration for UPS HID Component with ESP32-S3"
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -26,7 +26,7 @@ wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
   ap:
-    ssid: "NUT-UPS-Monitor"
+    ssid: "UPS-HID-Monitor"
     password: !secret ap_password
 
 captive_portal:
@@ -61,8 +61,8 @@ external_components:
       type: local
       path: components
 
-# NUT UPS Component
-nut_ups:
+# UPS HID Component
+ups_hid:
   id: ups_monitor
   simulation_mode: true # Set to false for production
   update_interval: 5s
@@ -73,8 +73,8 @@ nut_ups:
 
 # Sensors
 sensor:
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "UPS Battery Level"
     id: ups_battery_level
     type: battery_level
@@ -83,8 +83,8 @@ sensor:
     state_class: measurement
     accuracy_decimals: 0
 
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "UPS Runtime"
     id: ups_runtime
     type: runtime
@@ -95,15 +95,15 @@ sensor:
 
 # Binary Sensors
 binary_sensor:
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "UPS On Battery"
     id: ups_on_battery
     type: on_battery
     device_class: battery
 
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "UPS Fault"
     id: ups_fault
     type: fault
@@ -111,14 +111,14 @@ binary_sensor:
 
 # Text Sensors
 text_sensor:
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "UPS Status"
     id: ups_status
     type: status
 
-  - platform: nut_ups
-    nut_ups_id: ups_monitor
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     name: "UPS Model"
     id: ups_model
     type: model

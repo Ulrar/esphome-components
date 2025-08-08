@@ -31,10 +31,10 @@
 
 namespace esphome
 {
-  namespace nut_ups
+  namespace ups_hid
   {
 
-    static const char *const TAG = "nut_ups";
+    static const char *const TAG = "ups_hid";
 
     // UPS status flags
     enum UpsStatus
@@ -107,17 +107,17 @@ namespace esphome
     class CyberPowerProtocol;
     class GenericHidProtocol;
 
-    class NutUpsComponent : public PollingComponent
+    class UpsHidComponent : public PollingComponent
     {
     public:
-      NutUpsComponent() : usb_device_{}, usb_mutex_(nullptr), usb_task_handle_(nullptr), 
+      UpsHidComponent() : usb_device_{}, usb_mutex_(nullptr), usb_task_handle_(nullptr), 
                           usb_host_initialized_(false), device_connected_(false) {
 #ifdef USE_ESP32
         memset(&usb_device_, 0, sizeof(usb_device_));
 #endif
       }
       
-      ~NutUpsComponent() {
+      ~UpsHidComponent() {
 #ifdef USE_ESP32
         // Log any remaining suppressed errors before cleanup
         log_suppressed_errors(usb_error_limiter_);
@@ -255,7 +255,7 @@ namespace esphome
     class UpsProtocolBase
     {
     public:
-      explicit UpsProtocolBase(NutUpsComponent *parent) : parent_(parent) {}
+      explicit UpsProtocolBase(UpsHidComponent *parent) : parent_(parent) {}
       virtual ~UpsProtocolBase() = default;
 
       virtual bool detect() = 0;
@@ -265,7 +265,7 @@ namespace esphome
       virtual std::string get_protocol_name() const = 0;
 
     protected:
-      NutUpsComponent *parent_;
+      UpsHidComponent *parent_;
 
       bool send_command(const std::vector<uint8_t> &cmd, std::vector<uint8_t> &response, uint32_t timeout_ms = 1000);
       std::string bytes_to_string(const std::vector<uint8_t> &data);
@@ -275,7 +275,7 @@ namespace esphome
     class ApcSmartProtocol : public UpsProtocolBase
     {
     public:
-      explicit ApcSmartProtocol(NutUpsComponent *parent) : UpsProtocolBase(parent) {}
+      explicit ApcSmartProtocol(UpsHidComponent *parent) : UpsProtocolBase(parent) {}
 
       bool detect() override;
       bool initialize() override;
@@ -294,7 +294,7 @@ namespace esphome
     class CyberPowerProtocol : public UpsProtocolBase
     {
     public:
-      explicit CyberPowerProtocol(NutUpsComponent *parent) : UpsProtocolBase(parent) {}
+      explicit CyberPowerProtocol(UpsHidComponent *parent) : UpsProtocolBase(parent) {}
 
       bool detect() override;
       bool initialize() override;
@@ -321,7 +321,7 @@ namespace esphome
     class GenericHidProtocol : public UpsProtocolBase
     {
     public:
-      explicit GenericHidProtocol(NutUpsComponent *parent) : UpsProtocolBase(parent) {}
+      explicit GenericHidProtocol(UpsHidComponent *parent) : UpsProtocolBase(parent) {}
 
       bool detect() override;
       bool initialize() override;
@@ -333,5 +333,5 @@ namespace esphome
       bool parse_generic_report(const std::vector<uint8_t>& response, UpsData& data);
     };
 
-  } // namespace nut_ups
+  } // namespace ups_hid
 } // namespace esphome

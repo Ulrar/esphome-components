@@ -1,14 +1,14 @@
 #pragma once
 
-#include "nut_ups.h"
+#include "ups_hid.h"
 
 namespace esphome {
-namespace nut_ups {
+namespace ups_hid {
 
 // APC HID Protocol implementation for modern APC UPS devices
 class ApcHidProtocol : public UpsProtocolBase {
 public:
-  explicit ApcHidProtocol(NutUpsComponent *parent);
+  explicit ApcHidProtocol(UpsHidComponent *parent);
   
   bool detect() override;
   bool initialize() override;
@@ -36,5 +36,5 @@ private:
   void parse_device_info_report(const HidReport &report);
 };
 
-} // namespace nut_ups
+} // namespace ups_hid
 } // namespace esphome
