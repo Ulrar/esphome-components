@@ -1,6 +1,6 @@
 # Development Tools
 
-This folder contains development tools for the NUT UPS ESPHome component.
+This folder contains development tools for the UPS HID ESPHome component.
 
 ## scan-usb.sh
 
@@ -12,9 +12,9 @@ This script keeps the UPS vendor ID lists synchronized between C++, scripts and 
 
 ### Purpose
 
-The NUT UPS component maintains a list of known UPS vendor IDs in two places:
-- `components/nut_ups/ups_vendors.h` (C++ runtime code)
-- `components/nut_ups/__init__.py` (Python configuration validation)
+The UPS HID component maintains a list of known UPS vendor IDs in two places:
+- `components/ups_hid/ups_vendors.h` (C++ runtime code)
+- `components/ups_hid/__init__.py` (Python configuration validation)
 
 This script extracts the vendor list from the C++ header file and updates the Python file to ensure they stay in sync.
 
@@ -36,7 +36,7 @@ Or use the keyboard shortcut `Ctrl+Shift+P` -> "Tasks: Run Build Task" and selec
 ### When to Run
 
 Run this script whenever you:
-1. Add new UPS vendor IDs to `components/nut_ups/ups_vendors.h`
+1. Add new UPS vendor IDs to `components/ups_hid/ups_vendors.h`
 2. Modify existing vendor information
 3. Want to ensure the C++ and Python lists are synchronized
 
@@ -51,16 +51,16 @@ The script will:
 ### Example Output
 
 ```
-Parsing vendors from /workspace/components/nut_ups/ups_vendors.h...
+Parsing vendors from /workspace/components/ups_hid/ups_vendors.h...
 Found 7 vendors
-Updated /workspace/components/nut_ups/__init__.py
+Updated /workspace/components/ups_hid/__init__.py
 ```
 
 ## Adding New Vendors
 
 To add a new UPS vendor:
 
-1. Edit `components/nut_ups/ups_vendors.h`
+1. Edit `components/ups_hid/ups_vendors.h`
 2. Add a new entry to the `KNOWN_UPS_VENDORS` array:
    ```cpp
    {0x1234, "New Vendor", "New Vendor Description"},

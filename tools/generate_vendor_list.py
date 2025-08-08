@@ -13,16 +13,23 @@ def parse_vendor_header(header_path):
     vendors = {}
 
     with open(header_path, "r") as f:
-        content = f.read()
+        lines = f.readlines()
 
-    # Find the KNOWN_UPS_VENDORS array
+    # Find and parse only uncommented entries in KNOWN_UPS_VENDORS array
     pattern = r'\{0x([0-9A-Fa-f]+),\s*"([^"]+)",\s*"([^"]+)"\}'
-    matches = re.findall(pattern, content)
-
-    for match in matches:
-        vendor_id_str, name, description = match
-        vendor_id = int(vendor_id_str, 16)
-        vendors[vendor_id] = {"name": name, "description": description}
+    
+    for line in lines:
+        # Skip commented lines (starting with // or /* or whitespace + //)
+        stripped_line = line.strip()
+        if stripped_line.startswith('//') or stripped_line.startswith('/*'):
+            continue
+            
+        # Look for vendor entries in uncommented lines only
+        match = re.search(pattern, line)
+        if match:
+            vendor_id_str, name, description = match.groups()
+            vendor_id = int(vendor_id_str, 16)
+            vendors[vendor_id] = {"name": name, "description": description}
 
     return vendors
 
@@ -114,40 +121,40 @@ def update_scan_usb_vendors(scan_usb_path, vendors):
         return False
 
     with open(scan_usb_path, "r") as f:
-        content = f.read()
+        lines = f.readlines()
 
     # Generate the vendor ID pattern for grep
     vendor_ids = [f"{vid:04x}" for vid in sorted(vendors.keys())]
     vendor_pattern = "|".join(vendor_ids)
 
     # Find and replace the UPS devices grep line
-    new_line = f'lsusb | grep -iE "({vendor_pattern})"'
+    new_line = f'lsusb | grep -iE "({vendor_pattern})" || echo "No UPS devices found"\n'
 
-    # Replace the grep line in the UPS devices section
-    import re
-    ups_section_pattern = (
-        r'(# Auto-generated from ups_vendors\.h\necho "UPS devices:"\n)'
-        r'lsusb \| grep -iE "\([^"]*\)"'
-    )
-    replacement = rf'\1{new_line}'
+    # Find the line that contains the UPS vendor grep pattern
+    found_line = False
+    for i, line in enumerate(lines):
+        # Look for the line after "UPS devices:" that contains lsusb | grep -iE
+        if (i > 0 and 
+            "UPS devices:" in lines[i-1] and 
+            line.strip().startswith("lsusb | grep -iE") and 
+            "UPS devices found" in line):
+            lines[i] = new_line
+            found_line = True
+            break
 
-    new_content = re.sub(ups_section_pattern, replacement, content)
-    
-    if new_content != content:
+    if found_line:
         with open(scan_usb_path, "w") as f:
-            f.write(new_content)
+            f.writelines(lines)
         return True
     else:
-        print(
-            f"Warning: Could not find UPS devices section in {scan_usb_path}"
-        )
+        print(f"Warning: Could not find UPS devices grep line in {scan_usb_path}")
         return False
 
 
 def main():
     """Update __init__.py, setup.sh, and scan-usb.sh with vendor list."""
     script_dir = Path(__file__).parent
-    component_dir = script_dir.parent / "components" / "nut_ups"
+    component_dir = script_dir.parent / "components" / "ups_hid"
     header_path = component_dir / "ups_vendors.h"
     init_path = component_dir / "__init__.py"
     setup_path = script_dir.parent / ".devcontainer" / "setup.sh"
