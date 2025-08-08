@@ -3,12 +3,6 @@ set -e
 
 echo "🚀 Setting up ESPHome Component Development Environment..."
 
-# Update and install packages
-apt-get update
-apt-get install -y \
-    usbutils libusb-1.0-0-dev libudev-dev build-essential cmake ninja-build \
-    git wget curl tree vim nano htop tmux screen jq socat minicom picocom udev
-
 # Install Python tools
 pip install --upgrade pip black flake8 pylint mypy pytest jupyter ipython platformio
 
@@ -16,7 +10,8 @@ pip install --upgrade pip black flake8 pylint mypy pytest jupyter ipython platfo
 pip install --upgrade esphome
 
 # Claude Code - MCP server
-claude mcp add code npx "@steipete/claude-code-mcp" "/workspace"
+sudo -u esphome bash -c "curl -fsSL https://claude.ai/install.sh | bash -s latest"
+sudo -u esphome bash -c "~/.local/bin/claude mcp add code npx \"@steipete/claude-code-mcp\" \"/workspace\""
 
 # Set up USB permissions
 cat > /etc/udev/rules.d/99-esphome-usb.rules << 'UDEV_EOF'
@@ -37,7 +32,8 @@ SUBSYSTEM=="usb", ATTR{idVendor}=="09d6", MODE="0666"
 UDEV_EOF
 
 # Create aliases
-cat >> ~/.bashrc << 'BASH_EOF'
+cat >> /home/esphome/.bashrc << BASH_EOF
+export PATH=~/.local/bin/:\$PATH
 alias esphome-config='esphome config'
 alias esphome-compile='esphome compile'
 alias esphome-upload='esphome upload'
