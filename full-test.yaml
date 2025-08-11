@@ -78,7 +78,7 @@ light:
       - pulse:
           name: "Battery Pulse"
           transition_length: 1s
-          update_interval: 2s
+          update_interval: 1s
           min_brightness: 20%
           max_brightness: 80%
       - pulse:
@@ -117,7 +117,7 @@ ups_hid:
   protocol_timeout: 15s
 
   # Development/Testing Configuration
-  simulation_mode: false # Set to false for production with real hardware
+  simulation_mode: true # Set to false for production with real hardware
 
 # Numeric Sensors
 sensor:
@@ -357,7 +357,7 @@ text_sensor:
 
 # Advanced LED Status Control with Priorities
 interval:
-  - interval: 3s
+  - interval: 2s
     then:
       - lambda: |-
           // Advanced UPS status LED control with priorities
