@@ -18,7 +18,7 @@ A production-ready ESPHome component for monitoring UPS devices via USB connecti
 
 - **ESP32-S3-DevKitC-1 v1.1** with USB OTG support
 - **UPS device** with USB monitoring port
-- **RGB LED** (optional, connected to GPIO38)
+- **RGB LED** (optional, connected to GPIO48)
 - **USB cable** (UPS to ESP32-S3)
 
 ### Basic Configuration
@@ -27,8 +27,110 @@ A production-ready ESPHome component for monitoring UPS devices via USB connecti
 # example.yaml
 esphome:
   name: ups-monitor
-  platform: ESP32
+
+esp32:
   board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+# Enable logging
+logger:
+  level: DEBUG
+  baud_rate: 115200
+  hardware_uart: UART0
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+# Enable OTA updates
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# WiFi configuration
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "UPS-Monitor Fallback"
+    password: !secret ap_password
+
+# Captive portal for WiFi setup
+captive_portal:
+
+# Optional web server
+web_server:
+
+# Optional: RGB status LED with effects (configured separately)
+light:
+  - platform: esp32_rmt_led_strip
+    rgb_order: GRB
+    pin: GPIO48
+    num_leds: 1
+    chipset: ws2812
+    name: "UPS Status LED"
+    id: ups_status_led
+    restore_mode: ALWAYS_OFF
+    effects:
+      # Critical conditions - Fast red strobe (unmistakable emergency pattern)
+      - strobe:
+          name: "Critical Alert"
+          colors:
+            - state: true
+              brightness: 100%
+              red: 100%
+              green: 0%
+              blue: 0%
+              duration: 150ms
+            - state: false
+              duration: 150ms
+      
+      # Battery operation - Slow orange fade (amber warning pattern)
+      - pulse:
+          name: "Battery Warning"
+          transition_length: 1.5s
+          update_interval: 1.5s
+          min_brightness: 10%
+          max_brightness: 95%
+      
+      # Charging status - Quick yellow double-blink (charging pattern)
+      - strobe:
+          name: "Charging Pattern"
+          colors:
+            - state: true
+              brightness: 80%
+              red: 100%
+              green: 100%
+              blue: 0%
+              duration: 200ms
+            - state: false
+              duration: 200ms
+            - state: true
+              brightness: 80%
+              red: 100%
+              green: 100%
+              blue: 0%
+              duration: 200ms
+            - state: false
+              duration: 1400ms
+      
+      # Normal operation - Slow green breathing (peaceful pattern)
+      - pulse:
+          name: "Normal Status"
+          transition_length: 3s
+          update_interval: 3s
+          min_brightness: 20%
+          max_brightness: 60%
+      
+      # Fault/offline - Blue fade (distinct from other states)
+      - pulse:
+          name: "System Offline"
+          transition_length: 2s
+          update_interval: 2s
+          min_brightness: 5%
+          max_brightness: 40%
 
 # Enable external components
 external_components:
@@ -45,16 +147,6 @@ ups_hid:
   protocol_timeout: 15s     # USB communication timeout
   auto_detect_protocol: true # Enable automatic protocol detection
   simulation_mode: false    # Set to true for testing without UPS
-
-# Optional: RGB status LED (configured separately)
-light:
-  - platform: esp32_rmt_led_strip
-    rgb_order: GRB
-    pin: GPIO38
-    num_leds: 1
-    chipset: ws2812
-    name: "UPS Status LED"
-    id: ups_status_led
     
 # Define sensors (each sensor requires separate platform entry)
 sensor:
@@ -64,6 +156,8 @@ sensor:
     name: "UPS Battery Level"
     unit_of_measurement: "%"
     device_class: battery
+    state_class: measurement
+    accuracy_decimals: 0
     
   - platform: ups_hid
     ups_hid_id: ups_monitor
@@ -71,6 +165,8 @@ sensor:
     name: "UPS Input Voltage"
     unit_of_measurement: "V"
     device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
     
   - platform: ups_hid
     ups_hid_id: ups_monitor
@@ -78,12 +174,16 @@ sensor:
     name: "UPS Output Voltage" 
     unit_of_measurement: "V"
     device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
     
   - platform: ups_hid
     ups_hid_id: ups_monitor
     type: load_percent
     name: "UPS Load"
     unit_of_measurement: "%"
+    state_class: measurement
+    accuracy_decimals: 0
     
   - platform: ups_hid
     ups_hid_id: ups_monitor
@@ -91,42 +191,58 @@ sensor:
     name: "UPS Runtime"
     unit_of_measurement: "min"
     device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
     
   - platform: ups_hid
     ups_hid_id: ups_monitor
     type: frequency
     name: "UPS Frequency"
     unit_of_measurement: "Hz"
+    state_class: measurement
+    accuracy_decimals: 1
 
 binary_sensor:
   - platform: ups_hid
     ups_hid_id: ups_monitor
     type: online
     name: "UPS Online"
+    id: ups_online
     device_class: connectivity
     
   - platform: ups_hid
     ups_hid_id: ups_monitor
     type: on_battery
     name: "UPS On Battery"
+    id: on_battery
     device_class: battery
     
   - platform: ups_hid
     ups_hid_id: ups_monitor
     type: low_battery
     name: "UPS Low Battery"
+    id: low_battery
     device_class: battery
     
   - platform: ups_hid
     ups_hid_id: ups_monitor
     type: charging
     name: "UPS Charging"
+    id: battery_charging
     device_class: battery
     
   - platform: ups_hid
     ups_hid_id: ups_monitor
     type: fault
     name: "UPS Fault"
+    id: ups_fault
+    device_class: problem
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    type: overload
+    name: "UPS Overload"
+    id: overload_warning
     device_class: problem
 
 text_sensor:
@@ -149,6 +265,50 @@ text_sensor:
     ups_hid_id: ups_monitor
     type: status
     name: "UPS Status"
+
+# Automated LED status control based on UPS state
+interval:
+  - interval: 2s
+    then:
+      - lambda: |-
+          // Enhanced UPS status LED control with distinct visual patterns
+          // Each state now has a unique color and pattern combination
+
+          // CRITICAL CONDITIONS (Priority 1) - Fast red strobe
+          if (id(low_battery).state || id(ups_fault).state || id(overload_warning).state) {
+            auto call = id(ups_status_led).turn_on();
+            call.set_rgb(1.0, 0.0, 0.0); // Bright red
+            call.set_effect("Critical Alert");
+            call.perform();
+          }
+          // BATTERY OPERATION (Priority 2) - Orange slow fade  
+          else if (id(on_battery).state && !id(low_battery).state) {
+            auto call = id(ups_status_led).turn_on();
+            call.set_rgb(1.0, 0.5, 0.0); // Orange amber
+            call.set_effect("Battery Warning");
+            call.perform();
+          }
+          // CHARGING STATUS (Priority 3) - Yellow double-blink pattern
+          else if (id(battery_charging).state && id(ups_online).state) {
+            auto call = id(ups_status_led).turn_on();
+            call.set_rgb(1.0, 1.0, 0.0); // Yellow
+            call.set_effect("Charging Pattern");
+            call.perform();
+          }
+          // NORMAL OPERATION (Priority 4) - Gentle green breathing
+          else if (id(ups_online).state && !id(on_battery).state) {
+            auto call = id(ups_status_led).turn_on();
+            call.set_rgb(0.0, 1.0, 0.0); // Green
+            call.set_effect("Normal Status");
+            call.perform();
+          }
+          // OFFLINE/UNKNOWN (Priority 5) - Dim blue fade
+          else {
+            auto call = id(ups_status_led).turn_on();
+            call.set_rgb(0.0, 0.3, 1.0); // Blue
+            call.set_effect("System Offline");
+            call.perform();
+          }
 ```
 
 ## Hardware Setup
@@ -162,18 +322,18 @@ UPS USB Port (Type-B)  ←→  USB Cable  ←→  ESP32-S3 USB OTG Port
 ### RGB LED Wiring (Optional)
 
 ```
-GPIO38 (ESP32-S3) → RGB LED Data Pin
+GPIO48 (ESP32-S3) → RGB LED Data Pin
 3.3V → RGB LED VCC
 GND → RGB LED GND
 ```
 
 ### LED Status Indicators
 
-- 🟢 **Green**: UPS online, normal operation
-- 🟠 **Orange**: UPS running on battery power
-- 🔴 **Red (blinking)**: Low battery or critical status
-- 🔵 **Blue**: Charging or maintenance mode
-- ⚫ **Off**: UPS disconnected or component error
+- 🟢 **Green Breathing**: UPS online, normal operation (slow, gentle pulse)
+- 🟠 **Orange Fade**: UPS running on battery power (moderate fade pattern)  
+- 🟡 **Yellow Double-Blink**: Battery charging (distinct double-flash pattern)
+- 🔴 **Red Strobe**: Critical conditions - low battery, fault, overload (fast emergency flash)
+- 🔵 **Blue Fade**: System offline/unknown (dim, slow fade)
 
 ## Supported UPS Devices
 
@@ -220,7 +380,7 @@ ups_hid:
 light:
   - platform: esp32_rmt_led_strip
     rgb_order: GRB
-    pin: GPIO38                  # GPIO pin for RGB LED
+    pin: GPIO48                  # GPIO pin for RGB LED
     num_leds: 1
     chipset: ws2812              # LED type (ws2812, ws2811, etc.)
     name: "UPS Status LED"
@@ -506,11 +666,11 @@ The component can control an RGB LED to display UPS status with priority-based v
 
 ### LED Priority System
 
-1. **🔴 Critical** (Highest Priority): Red blinking - Low battery, UPS fault, overload
-2. **🟠 Battery Operation** (Medium Priority): Orange pulsing - Running on battery (normal level)  
-3. **🟡 Charging** (Low Priority): Yellow pulsing - Battery charging while online
-4. **🟢 Normal Operation**: Green breathing - Online, normal operation
-5. **⚫ Offline/Unknown**: LED off - UPS disconnected or error
+1. **🔴 Critical Alert** (Priority 1): Fast red strobe - Low battery, UPS fault, overload (150ms flash)
+2. **🟠 Battery Warning** (Priority 2): Orange slow fade - Running on battery power (1.5s cycle)
+3. **🟡 Charging Pattern** (Priority 3): Yellow double-blink - Battery charging while online (200ms double-flash)
+4. **🟢 Normal Status** (Priority 4): Green gentle breathing - Online, normal operation (3s cycle)
+5. **🔵 System Offline** (Priority 5): Blue dim fade - UPS disconnected or unknown state (2s cycle)
 
 ### Complete LED Configuration
 
@@ -519,80 +679,112 @@ The component can control an RGB LED to display UPS status with priority-based v
 light:
   - platform: esp32_rmt_led_strip
     rgb_order: GRB
-    pin: GPIO38
+    pin: GPIO48
     num_leds: 1
     chipset: ws2812
     name: "UPS Status LED"
     id: ups_status_led
     restore_mode: ALWAYS_OFF
     effects:
+      # Critical conditions - Fast red strobe (unmistakable emergency pattern)
       - strobe:
-          name: "Critical Strobe"
+          name: "Critical Alert"
           colors:
             - state: true
               brightness: 100%
               red: 100%
               green: 0%
               blue: 0%
-              duration: 250ms
+              duration: 150ms
             - state: false
-              duration: 250ms
+              duration: 150ms
+      
+      # Battery operation - Slow orange fade (amber warning pattern)
       - pulse:
-          name: "Battery Pulse"
-          transition_length: 1s
-          update_interval: 1s
+          name: "Battery Warning"
+          transition_length: 1.5s
+          update_interval: 1.5s
+          min_brightness: 10%
+          max_brightness: 95%
+      
+      # Charging status - Quick yellow double-blink (charging pattern)
+      - strobe:
+          name: "Charging Pattern"
+          colors:
+            - state: true
+              brightness: 80%
+              red: 100%
+              green: 100%
+              blue: 0%
+              duration: 200ms
+            - state: false
+              duration: 200ms
+            - state: true
+              brightness: 80%
+              red: 100%
+              green: 100%
+              blue: 0%
+              duration: 200ms
+            - state: false
+              duration: 1400ms
+      
+      # Normal operation - Slow green breathing (peaceful pattern)
+      - pulse:
+          name: "Normal Status"
+          transition_length: 3s
+          update_interval: 3s
           min_brightness: 20%
-          max_brightness: 80%
+          max_brightness: 60%
+      
+      # Fault/offline - Blue fade (distinct from other states)
       - pulse:
-          name: "Normal Breathing"
+          name: "System Offline"
           transition_length: 2s
           update_interval: 2s
-          min_brightness: 30%
-          max_brightness: 70%
-      - pulse:
-          name: "Battery Operation"
-          transition_length: 800ms
-          update_interval: 800ms
-          min_brightness: 40%
-          max_brightness: 90%
+          min_brightness: 5%
+          max_brightness: 40%
 
 # Priority-based LED control logic
 interval:
   - interval: 2s
     then:
       - lambda: |-
-          // Advanced UPS status LED control with priorities
+          // Enhanced UPS status LED control with distinct visual patterns
+          // Each state now has a unique color and pattern combination
 
-          // Critical conditions (highest priority) - Red blinking
+          // CRITICAL CONDITIONS (Priority 1) - Fast red strobe
           if (id(low_battery).state || id(ups_fault).state || id(overload_warning).state) {
             auto call = id(ups_status_led).turn_on();
-            call.set_effect("Critical Strobe");
+            call.set_rgb(1.0, 0.0, 0.0); // Bright red
+            call.set_effect("Critical Alert");
             call.perform();
           }
-          // Battery operation (medium priority) - Orange pulsing
+          // BATTERY OPERATION (Priority 2) - Orange slow fade  
           else if (id(on_battery).state && !id(low_battery).state) {
             auto call = id(ups_status_led).turn_on();
-            call.set_rgb(1.0, 0.6, 0.0); // Orange
-            call.set_effect("Battery Operation");
+            call.set_rgb(1.0, 0.5, 0.0); // Orange amber
+            call.set_effect("Battery Warning");
             call.perform();
           }
-          // Charging (low priority) - Yellow pulsing
+          // CHARGING STATUS (Priority 3) - Yellow double-blink pattern
           else if (id(battery_charging).state && id(ups_online).state) {
             auto call = id(ups_status_led).turn_on();
             call.set_rgb(1.0, 1.0, 0.0); // Yellow
-            call.set_effect("Battery Pulse");
+            call.set_effect("Charging Pattern");
             call.perform();
           }
-          // Normal operation (online, not on battery) - Green breathing
+          // NORMAL OPERATION (Priority 4) - Gentle green breathing
           else if (id(ups_online).state && !id(on_battery).state) {
             auto call = id(ups_status_led).turn_on();
             call.set_rgb(0.0, 1.0, 0.0); // Green
-            call.set_effect("Normal Breathing");
+            call.set_effect("Normal Status");
             call.perform();
           }
-          // Offline/Unknown - LED off
+          // OFFLINE/UNKNOWN (Priority 5) - Dim blue fade
           else {
-            auto call = id(ups_status_led).turn_off();
+            auto call = id(ups_status_led).turn_on();
+            call.set_rgb(0.0, 0.3, 1.0); // Blue
+            call.set_effect("System Offline");
             call.perform();
           }
 ```

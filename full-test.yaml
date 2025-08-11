@@ -64,35 +64,63 @@ light:
     id: ups_status_led
     restore_mode: ALWAYS_OFF
     effects:
+      # Critical conditions - Fast red strobe (unmistakable emergency pattern)
       - strobe:
-          name: "Critical Strobe"
+          name: "Critical Alert"
           colors:
             - state: true
               brightness: 100%
               red: 100%
               green: 0%
               blue: 0%
-              duration: 250ms
+              duration: 150ms
             - state: false
-              duration: 250ms
+              duration: 150ms
+      
+      # Battery operation - Slow orange fade (amber warning pattern)
       - pulse:
-          name: "Battery Pulse"
-          transition_length: 1s
-          update_interval: 1s
+          name: "Battery Warning"
+          transition_length: 1.5s
+          update_interval: 1.5s
+          min_brightness: 10%
+          max_brightness: 95%
+      
+      # Charging status - Quick yellow double-blink (charging pattern)
+      - strobe:
+          name: "Charging Pattern"
+          colors:
+            - state: true
+              brightness: 80%
+              red: 100%
+              green: 100%
+              blue: 0%
+              duration: 200ms
+            - state: false
+              duration: 200ms
+            - state: true
+              brightness: 80%
+              red: 100%
+              green: 100%
+              blue: 0%
+              duration: 200ms
+            - state: false
+              duration: 1400ms
+      
+      # Normal operation - Slow green breathing (peaceful pattern)
+      - pulse:
+          name: "Normal Status"
+          transition_length: 3s
+          update_interval: 3s
           min_brightness: 20%
-          max_brightness: 80%
+          max_brightness: 60%
+      
+      # Fault/offline - Blue fade (distinct from other states)
       - pulse:
-          name: "Normal Breathing"
+          name: "System Offline"
           transition_length: 2s
           update_interval: 2s
-          min_brightness: 30%
-          max_brightness: 70%
-      - pulse:
-          name: "Battery Operation"
-          transition_length: 800ms
-          update_interval: 800ms
-          min_brightness: 40%
-          max_brightness: 90%
+          min_brightness: 5%
+          max_brightness: 40%
 
 # External components - using local path for development
 external_components:
@@ -360,38 +388,42 @@ interval:
   - interval: 2s
     then:
       - lambda: |-
-          // Advanced UPS status LED control with priorities
+          // Enhanced UPS status LED control with distinct visual patterns
+          // Each state now has a unique color and pattern combination
 
-          // Critical conditions (highest priority) - Red blinking
+          // CRITICAL CONDITIONS (Priority 1) - Fast red strobe
           if (id(low_battery).state || id(ups_fault).state || id(overload_warning).state) {
             auto call = id(ups_status_led).turn_on();
-            call.set_effect("Critical Strobe");
+            call.set_rgb(1.0, 0.0, 0.0); // Bright red
+            call.set_effect("Critical Alert");
             call.perform();
           }
-          // Battery operation (medium priority) - Orange pulsing
+          // BATTERY OPERATION (Priority 2) - Orange slow fade  
           else if (id(on_battery).state && !id(low_battery).state) {
             auto call = id(ups_status_led).turn_on();
-            call.set_rgb(1.0, 0.6, 0.0); // Orange
-            call.set_effect("Battery Operation");
+            call.set_rgb(1.0, 0.5, 0.0); // Orange amber
+            call.set_effect("Battery Warning");
             call.perform();
           }
-          // Charging (low priority) - Yellow pulsing
+          // CHARGING STATUS (Priority 3) - Yellow double-blink pattern
           else if (id(battery_charging).state && id(ups_online).state) {
             auto call = id(ups_status_led).turn_on();
             call.set_rgb(1.0, 1.0, 0.0); // Yellow
-            call.set_effect("Battery Pulse");
+            call.set_effect("Charging Pattern");
             call.perform();
           }
-          // Normal operation (online, not on battery) - Green breathing
+          // NORMAL OPERATION (Priority 4) - Gentle green breathing
           else if (id(ups_online).state && !id(on_battery).state) {
             auto call = id(ups_status_led).turn_on();
             call.set_rgb(0.0, 1.0, 0.0); // Green
-            call.set_effect("Normal Breathing");
+            call.set_effect("Normal Status");
             call.perform();
           }
-          // Offline/Unknown - LED off
+          // OFFLINE/UNKNOWN (Priority 5) - Dim blue fade
           else {
-            auto call = id(ups_status_led).turn_off();
+            auto call = id(ups_status_led).turn_on();
+            call.set_rgb(0.0, 0.3, 1.0); // Blue
+            call.set_effect("System Offline");
             call.perform();
           }
 
