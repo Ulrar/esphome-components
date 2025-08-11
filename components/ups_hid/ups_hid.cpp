@@ -499,42 +499,55 @@ void UpsHidComponent::update_sensors() {
 }
 
 void UpsHidComponent::simulate_ups_data() {
-  static uint32_t sim_counter = 0;
-  sim_counter++;
+  uint32_t now_ms = millis();
+  static uint32_t last_log_time = 0;
+  
+  // Use time-based simulation for consistent behavior
+  float time_sec = now_ms / 1000.0f;
+  
+  // Add some randomness for realistic variation
+  static uint32_t random_seed = now_ms;
+  random_seed = random_seed * 1103515245 + 12345; // Simple LCG
+  float random_factor = (random_seed % 1000) / 10000.0f; // 0.0 to 0.1
   
   // Create simulation data with thread safety
   {
     std::lock_guard<std::mutex> lock(data_mutex_);
     
-    // Simulate realistic UPS data that changes over time with bounds checking
-    float battery_calc = 85.0f + sin(sim_counter * 0.01f) * 10.0f;
+    // Store previous values for change detection
+    float prev_battery = ups_data_.battery_level;
+    float prev_input = ups_data_.input_voltage;
+    float prev_load = ups_data_.load_percent;
+    
+    // Simulate realistic UPS data with faster, more visible changes
+    float battery_calc = 85.0f + sin(time_sec * 0.05f) * 12.0f + random_factor * 5.0f;
     ups_data_.battery_level = battery_calc < 0.0f ? 0.0f : (battery_calc > 100.0f ? 100.0f : battery_calc);
     
-    float input_calc = 120.0f + sin(sim_counter * 0.02f) * 5.0f;
-    ups_data_.input_voltage = input_calc < 80.0f ? 80.0f : (input_calc > 140.0f ? 140.0f : input_calc);
+    float input_calc = 120.0f + sin(time_sec * 0.08f) * 8.0f + random_factor * 3.0f;
+    ups_data_.input_voltage = input_calc < 100.0f ? 100.0f : (input_calc > 130.0f ? 130.0f : input_calc);
     
-    float output_calc = 118.0f + sin(sim_counter * 0.015f) * 3.0f;
-    ups_data_.output_voltage = output_calc < 80.0f ? 80.0f : (output_calc > 130.0f ? 130.0f : output_calc);
+    float output_calc = 118.0f + sin(time_sec * 0.06f) * 5.0f + random_factor * 2.0f;
+    ups_data_.output_voltage = output_calc < 100.0f ? 100.0f : (output_calc > 125.0f ? 125.0f : output_calc);
     
-    float load_calc = 45.0f + sin(sim_counter * 0.005f) * 15.0f;
+    float load_calc = 45.0f + sin(time_sec * 0.03f) * 20.0f + random_factor * 8.0f;
     ups_data_.load_percent = load_calc < 0.0f ? 0.0f : (load_calc > 100.0f ? 100.0f : load_calc);
     
-    float runtime_calc = 35.0f + sin(sim_counter * 0.003f) * 10.0f;
-    ups_data_.runtime_minutes = runtime_calc < 0.0f ? 0.0f : (runtime_calc > 999.0f ? 999.0f : runtime_calc);
+    float runtime_calc = 35.0f + sin(time_sec * 0.02f) * 15.0f + random_factor * 5.0f;
+    ups_data_.runtime_minutes = runtime_calc < 0.0f ? 0.0f : (runtime_calc > 120.0f ? 120.0f : runtime_calc);
     
-    float freq_calc = 60.0f + sin(sim_counter * 0.1f) * 0.2f;
-    ups_data_.frequency = freq_calc < 58.0f ? 58.0f : (freq_calc > 62.0f ? 62.0f : freq_calc);
+    float freq_calc = 60.0f + sin(time_sec * 0.4f) * 0.5f + random_factor * 0.3f;
+    ups_data_.frequency = freq_calc < 59.5f ? 59.5f : (freq_calc > 60.5f ? 60.5f : freq_calc);
     
-    // Simulate realistic status changes with transitions
-    uint32_t cycle_pos = sim_counter % 1000;
-    if (cycle_pos < 750) {
+    // Simulate realistic status changes with shorter, more dynamic cycles
+    uint32_t cycle_pos = (now_ms / 100) % 200; // 20 second total cycle
+    if (cycle_pos < 140) {
       ups_data_.status_flags = UPS_STATUS_ONLINE | UPS_STATUS_CHARGING;
-    } else if (cycle_pos < 900) {
+    } else if (cycle_pos < 170) {
       ups_data_.status_flags = UPS_STATUS_ON_BATTERY;
-    } else if (cycle_pos < 980) {
+    } else if (cycle_pos < 190) {
       ups_data_.status_flags = UPS_STATUS_ON_BATTERY | UPS_STATUS_LOW_BATTERY;
     } else {
-      // Simulate brief connection loss for testing resilience
+      // Brief fault simulation
       ups_data_.status_flags = UPS_STATUS_FAULT;
     }
     
@@ -543,19 +556,29 @@ void UpsHidComponent::simulate_ups_data() {
     ups_data_.model = "Virtual UPS Pro";
     ups_data_.serial_number = "SIM123456789";
     ups_data_.firmware_version = "1.0.0-SIM";
+    
+    // Debug logging every 10 seconds to verify changes
+    if (now_ms - last_log_time > 10000) {
+      ESP_LOGD(TAG, "Simulation values: Battery=%.1f%%, Input=%.1fV, Load=%.1f%%, Status=0x%X", 
+               ups_data_.battery_level, ups_data_.input_voltage, ups_data_.load_percent, ups_data_.status_flags);
+      ESP_LOGD(TAG, "Value changes: Battery=%+.1f, Input=%+.1f, Load=%+.1f", 
+               ups_data_.battery_level - prev_battery, 
+               ups_data_.input_voltage - prev_input,
+               ups_data_.load_percent - prev_load);
+      last_log_time = now_ms;
+    }
   }
   
-  // Occasionally simulate connection issues for testing (very rare)
-  if (sim_counter % 10000 == 9999) {
+  // Simulate connection issues for testing (less frequent)
+  uint32_t connection_cycle = (now_ms / 1000) % 300; // 5 minute cycle
+  if (connection_cycle == 299) {
     ESP_LOGD(TAG, "Simulating temporary connection loss");
     connected_ = false;
-  } else if (sim_counter % 10000 == 5) {
-    if (!connected_) {
-      ESP_LOGD(TAG, "Simulating connection restoration");
-      connected_ = true;
-      last_successful_read_ = millis();
-      consecutive_failures_ = 0;
-    }
+  } else if (connection_cycle == 5 && !connected_) {
+    ESP_LOGD(TAG, "Simulating connection restoration");
+    connected_ = true;
+    last_successful_read_ = millis();
+    consecutive_failures_ = 0;
   }
 }
 
