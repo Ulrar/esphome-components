@@ -15,7 +15,8 @@ RUN apt-get update \
         udev sudo dialog npm nut-client
 
 RUN groupadd --gid $USER_GID $USERNAME \
+    && groupadd -g 18 compat_dialout \
     && useradd --uid $USER_UID --gid $USER_GID -m $USERNAME -s /bin/bash \
-    && usermod -aG dialout,plugdev $USERNAME \
+    && usermod -aG dialout,plugdev,compat_dialout $USERNAME \
     && echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/$USERNAME \
     && chmod 0440 /etc/sudoers.d/$USERNAME
