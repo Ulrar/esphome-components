@@ -150,57 +150,22 @@ Component-specific requirements are documented in each component's README:
 - **UPS HID**: ESP32-S3-DevKitC-1 v1.1 with USB OTG support
 - **Future components**: Requirements will be listed here
 
-## Contributing
-
-Contributions are welcome! Please follow these guidelines:
-
-1. **Fork the repository**: [github.com/bullshit/esphome-components](https://github.com/bullshit/esphome-components)
-2. **Create a feature branch**: `git checkout -b feature/your-feature-name`
-3. **Follow coding guidelines**: See development section above
-4. **Test thoroughly**: Include both unit and integration tests
-5. **Update documentation**: Add/update README files as needed
-6. **Submit a Pull Request**: Include detailed description of changes
-
-### Development Environment
-
-This repository includes a complete development environment with:
-
-- **DevContainer**: Pre-configured development environment
-- **VSCode Integration**: Tasks, debugging, and extensions
-- **Development Tools**: USB scanning, vendor management, etc.
-- **Test Configurations**: Example YAML files for testing
-
-## Support
-
-For issues and questions:
-
-1. **Check component documentation** - Each component has detailed troubleshooting
-2. **Enable debug logging** in your ESPHome configuration
-3. **Search existing issues**: [GitHub Issues](https://github.com/bullshit/esphome-components/issues)
-4. **Create new issue** with:
-   - Component name and version
-   - Complete ESPHome configuration
-   - Relevant log output
-   - Hardware information
-
 ## License
 
-This project is open source and available under the MIT License.
+Copyright bullshit <coding@ow-software.pl>
 
 ## Roadmap
 
 ### Planned Components
 
-- 📡 **RF Module**: ASK/OOK transceiver integration
-- 🌡️ **Multi-Sensor Hub**: I2C sensor aggregation
-- 🔌 **Smart Relay Controller**: Multi-channel relay management
-- 📊 **Data Logger**: SD card logging with web interface
+- 🌐 **NUT Server** (`nut_server`): A NUT (Network UPS Tools) server implementation that uses the ups_hid component for network-accessible UPS monitoring and supports minimal NUT commands with authentication
+- 💡 **UPS Status LED** (`ups_status_led`): Smart LED status indicator component for UPS monitoring
 
 ### Current Status
 
 - ✅ **UPS HID Component**: Production ready
 - 🔄 **Documentation**: Ongoing improvements
-- 🔄 **Test Coverage**: Expanding automated tests
+- ⏳ **Test Coverage**: Not yet set up - automated testing framework pending
 - 📋 **Future Components**: Planning and design phase
 
 Stay tuned for updates and new component releases!

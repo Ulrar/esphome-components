@@ -848,39 +848,3 @@ A: Only ESP32-S3 supports USB OTG required for direct UPS communication.
 ups_hid:
   simulation_mode: true
 ```
-
-## Support
-
-For issues and questions:
-
-1. **Check this documentation first** - Most common issues are covered
-2. **Enable debug logging** and analyze the output:
-   ```yaml
-   logger:
-     level: DEBUG
-     logs:
-       ups_hid: DEBUG
-   ```
-3. **Search existing issues**: [GitHub Issues](https://github.com/bullshit/esphome-components/issues)
-4. **Create new issue** with:
-   - Complete ESPHome configuration
-   - Relevant log output
-   - UPS model and vendor/product IDs
-   - ESP32-S3 board information
-
-### Reporting Bugs
-
-Include this information in bug reports:
-- ESPHome version
-- ESP32-S3 board model  
-- UPS make/model and USB vendor/product IDs
-- Complete error logs with DEBUG level enabled
-- Your ESPHome configuration (sanitized)
-
-### Feature Requests
-
-For new UPS protocol support:
-- UPS vendor and model information
-- USB vendor/product IDs (check logs)
-- Any available protocol documentation
-- Sample communication logs if possible
