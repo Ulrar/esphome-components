@@ -5,13 +5,12 @@ esphome:
 
 esp32:
   board: esp32-s3-devkitc-1
-  framework:
-    type: arduino
-    version: recommended
 
 # Enable logging
 logger:
   level: DEBUG
+  baud_rate: 115200
+  hardware_uart: UART0
 
 # Enable Home Assistant API
 api:
@@ -35,11 +34,10 @@ web_server:
 # RGB LED for status indication
 light:
   - platform: esp32_rmt_led_strip
-    rgb_order: GRB
-    pin: GPIO38
+    chipset: WS2812
+    pin: GPIO48
     num_leds: 1
-    # rmt_channel: 0 @INFO: esp32_rmt_led_strip does manage the rmt channel
-    chipset: ws2812
+    rgb_order: GRB
     name: "UPS Status LED"
     id: status_led
     effects:
@@ -54,7 +52,6 @@ light:
               duration: 250ms
             - state: false
               duration: 250ms
-
 # External components
 external_components:
   - source:
@@ -66,8 +63,14 @@ ups_hid:
   id: ups_monitor
   simulation_mode: true # Set to false for production
   update_interval: 5s
-  usb_vendor_id: 0x051d # APC vendor ID
-  usb_product_id: 0x0002 # Back-UPS ES series
+
+  # Hardware Configuration
+  usb_vendor_id: 0x051d # APC vendor ID (0x051d)
+  usb_product_id: 0x0002 # APC Back-UPS ES series
+
+  # usb_vendor_id: 0x0764 # CyberPower (0x0764)
+  # usb_product_id: 0x0501 # CP1500 AVR UPS
+
   protocol_timeout: 10s
   auto_detect_protocol: true
 

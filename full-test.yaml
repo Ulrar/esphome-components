@@ -19,6 +19,8 @@ logger:
   level: VERBOSE
   logs:
     ups_hid: DEBUG
+  baud_rate: 115200
+  hardware_uart: UART0
 
 # Enable Home Assistant API
 api:
@@ -54,10 +56,10 @@ time:
 # RGB LED for UPS status indication (GPIO38 on ESP32-S3-DevKitC-1)
 light:
   - platform: esp32_rmt_led_strip
-    rgb_order: GRB
-    pin: GPIO38
+    chipset: WS2812
+    pin: GPIO48
     num_leds: 1
-    chipset: ws2812
+    rgb_order: GRB
     name: "UPS Status LED"
     id: ups_status_led
     restore_mode: ALWAYS_OFF
@@ -76,7 +78,7 @@ light:
       - pulse:
           name: "Battery Pulse"
           transition_length: 1s
-          update_interval: 1s
+          update_interval: 2s
           min_brightness: 20%
           max_brightness: 80%
       - pulse:
@@ -104,15 +106,18 @@ ups_hid:
   update_interval: 10s
 
   # Hardware Configuration
-  usb_vendor_id: 0x051d # APC vendor ID (0x051d), CyberPower (0x0764)
-  usb_product_id: 0x0002 # APC Back-UPS ES series
+  #usb_vendor_id: 0x051d # APC vendor ID (0x051d)
+  #usb_product_id: 0x0002 # APC Back-UPS ES series
+
+  # usb_vendor_id: 0x0764 # CyberPower (0x0764)
+  # usb_product_id: 0x0501 # CP1500 AVR UPS
 
   # Protocol Configuration
   auto_detect_protocol: true
   protocol_timeout: 15s
 
   # Development/Testing Configuration
-  simulation_mode: true # Set to false for production with real hardware
+  simulation_mode: false # Set to false for production with real hardware
 
 # Numeric Sensors
 sensor:
@@ -352,7 +357,7 @@ text_sensor:
 
 # Advanced LED Status Control with Priorities
 interval:
-  - interval: 2s
+  - interval: 3s
     then:
       - lambda: |-
           // Advanced UPS status LED control with priorities
