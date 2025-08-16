@@ -19,6 +19,7 @@
 #include "usb/usb_host.h"
 #include "usb/usb_types_ch9.h"
 #include <cstring>
+#include "driver/gpio.h"
 
 // USB HID Class defines
 #ifndef USB_CLASS_HID
@@ -197,47 +198,55 @@ namespace esphome
     bool UpsHidComponent::initialize_usb()
     {
 #ifdef USE_ESP32
-      ESP_LOGI(TAG, "Initializing USB communication...");
+      ESP_LOGI(TAG, "Initializing USB HID Host communication...");
       ESP_LOGI(TAG, "ESP32-S3 USB OTG Host Mode Configuration:");
       ESP_LOGI(TAG, "  Board: ESP32-S3-DevKitC-1");
       ESP_LOGI(TAG, "  USB OTG Pins: D+ (GPIO20), D- (GPIO19)");
-      ESP_LOGI(TAG, "  USB Host Mode: Enabled");
+      ESP_LOGI(TAG, "  USB Host Mode: Enabled with HID Host driver");
 
-      // Add delay to ensure USB hardware is ready
-      vTaskDelay(pdMS_TO_TICKS(100));
-
-      esp_err_t ret = usb_init();
-      if (ret != ESP_OK)
-      {
-        ESP_LOGE(TAG, "USB initialization failed: %s", esp_err_to_name(ret));
-        ESP_LOGE(TAG, "USB Troubleshooting:");
-        ESP_LOGE(TAG, "  1. Verify USB OTG pads are soldered correctly");
-        ESP_LOGE(TAG, "  2. Check UPS is powered ON and connected");
-        ESP_LOGE(TAG, "  3. Try different USB cable");
-        ESP_LOGE(TAG, "  4. Verify ESP32-S3 has USB host capability");
+      // Create mutex for USB synchronization
+      usb_mutex_ = xSemaphoreCreateMutex();
+      if (usb_mutex_ == nullptr) {
+        ESP_LOGE(TAG, "Failed to create USB mutex");
         return false;
       }
 
-      ESP_LOGI(TAG, "USB Host initialized, waiting for device enumeration...");
-      // Wait longer for devices to be detected
-      vTaskDelay(pdMS_TO_TICKS(2000));
+      // Initialize USB Host Library first
+      esp_err_t ret = usb_host_lib_init();
+      if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "USB Host library initialization failed: %s", esp_err_to_name(ret));
+        return false;
+      }
+      usb_host_initialized_ = true;
 
-      // Try to enumerate and connect to UPS device
-      ret = usb_device_enumerate();
-      if (ret != ESP_OK)
-      {
-        ESP_LOGW(TAG, "No UPS devices found during initial enumeration");
-        ESP_LOGW(TAG, "Device enumeration troubleshooting:");
-        ESP_LOGW(TAG, "  1. Check if UPS is USB HID compatible");
-        ESP_LOGW(TAG, "  2. Try connecting UPS to a computer first");
-        ESP_LOGW(TAG, "  3. Some UPS devices need to be 'awake' (press a button)");
-        ESP_LOGW(TAG, "  4. Verify USB cable supports data (not just power)");
-        // Don't fail completely - device might be connected later
+      // Register USB client
+      ret = usb_client_register();
+      if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "USB client registration failed: %s", esp_err_to_name(ret));
+        usb_deinit();
+        return false;
       }
 
-      ESP_LOGI(TAG, "USB initialized successfully");
+      // Wait a moment for USB devices to be detected
+      vTaskDelay(pdMS_TO_TICKS(1000));
+      
+      // Try initial device enumeration
+      ret = usb_device_enumerate();
+      if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Initial USB device enumeration completed successfully");
+      } else {
+        ESP_LOGW(TAG, "Initial USB device enumeration failed: %s", esp_err_to_name(ret));
+        ESP_LOGW(TAG, "USB Troubleshooting if no devices found:");
+        ESP_LOGW(TAG, "  1. Verify USB OTG pads are soldered correctly");
+        ESP_LOGW(TAG, "  2. Check UPS is powered ON and connected");
+        ESP_LOGW(TAG, "  3. Try different USB cable (must support data)");
+        ESP_LOGW(TAG, "  4. Some UPS devices need to be 'awake' (press a button)");
+      }
+      
+      ESP_LOGI(TAG, "USB Host initialized successfully");
       return true;
 #else
+      ESP_LOGE(TAG, "USB HID Host only supported on ESP32 platform");
       return false;
 #endif
     }
@@ -851,125 +860,40 @@ namespace esphome
     }
 
 #ifdef USE_ESP32
-    esp_err_t UpsHidComponent::usb_init()
-    {
-      ESP_LOGD(TAG, "Initializing USB Host...");
-
-      if (usb_host_initialized_)
-      {
-        ESP_LOGW(TAG, "USB Host already initialized");
-        return ESP_OK;
-      }
-
-      // Create mutex for USB operations
-      usb_mutex_ = xSemaphoreCreateMutex();
-      if (!usb_mutex_)
-      {
-        ESP_LOGE(TAG, "Failed to create USB mutex");
-        return ESP_ERR_NO_MEM;
-      }
-
-      // Initialize USB Host Library
-      esp_err_t ret = usb_host_lib_init();
-      if (ret != ESP_OK)
-      {
-        ESP_LOGE(TAG, "USB Host lib init failed: %s", esp_err_to_name(ret));
-        return ret;
-      }
-
-      // Register USB client
-      ret = usb_client_register();
-      if (ret != ESP_OK)
-      {
-        ESP_LOGE(TAG, "USB client register failed: %s", esp_err_to_name(ret));
-        return ret;
-      }
-
-      usb_host_initialized_ = true;
-      ESP_LOGI(TAG, "USB Host initialized successfully");
-      return ESP_OK;
-    }
-
-    void UpsHidComponent::usb_deinit()
-    {
-      ESP_LOGD(TAG, "Deinitializing USB Host...");
-
-      if (!usb_host_initialized_)
-      {
-        return;
-      }
-
-      // Stop USB Host task
-      if (usb_task_handle_)
-      {
-        vTaskDelete(usb_task_handle_);
-        usb_task_handle_ = nullptr;
-      }
-
-      // Close USB device if connected
-      if (usb_device_.dev_hdl)
-      {
-        usb_host_device_close(usb_device_.client_hdl, usb_device_.dev_hdl);
-        usb_device_.dev_hdl = nullptr;
-      }
-
-      // Deregister USB client
-      if (usb_device_.client_hdl)
-      {
-        usb_host_client_deregister(usb_device_.client_hdl);
-        usb_device_.client_hdl = nullptr;
-      }
-
-      // Uninstall USB Host Library
-      usb_host_uninstall();
-
-      // Delete mutex
-      if (usb_mutex_)
-      {
-        vSemaphoreDelete(usb_mutex_);
-        usb_mutex_ = nullptr;
-      }
-
-      usb_host_initialized_ = false;
-      device_connected_ = false;
-
-      ESP_LOGI(TAG, "USB Host deinitialized");
-    }
-
     esp_err_t UpsHidComponent::usb_host_lib_init()
     {
-      // Enhanced USB host configuration with debugging
-      usb_host_config_t host_config = {
-          .skip_phy_setup = false,
-          .intr_flags = ESP_INTR_FLAG_LEVEL1,
-      };
+      ESP_LOGD(TAG, "Creating USB Host Library task...");
 
-      ESP_LOGI(TAG, "Installing USB Host library...");
-      ESP_LOGD(TAG, "USB Host config: skip_phy_setup=%s, intr_flags=0x%08X",
-               host_config.skip_phy_setup ? "true" : "false", host_config.intr_flags);
+      // Create USB Host Library task
+      BaseType_t task_created = xTaskCreatePinnedToCore(
+          usb_host_lib_task,
+          "usb_events",
+          4096,
+          xTaskGetCurrentTaskHandle(), // Pass current task handle for notification
+          2,
+          &usb_lib_task_handle_,
+          0);
 
-      esp_err_t ret = usb_host_install(&host_config);
-      ESP_LOGD(TAG, "usb_host_install returned: %s", esp_err_to_name(ret));
-
-      if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE)
-      { // ESP_ERR_INVALID_STATE means already initialized
-        ESP_LOGE(TAG, "USB Host install failed: %s", esp_err_to_name(ret));
-        return ret;
-      }
-      ESP_LOGI(TAG, "USB Host library installed successfully");
-
-      // Create USB Host Library task with larger stack size for safety
-      if (xTaskCreate(usb_host_lib_task, "usb_host", 8192, this, 5, &usb_task_handle_) != pdTRUE)
-      {
-        ESP_LOGE(TAG, "Failed to create USB Host task");
-        return ESP_ERR_NO_MEM;
+      if (task_created != pdTRUE) {
+        ESP_LOGE(TAG, "Failed to create USB Host Library task");
+        return ESP_FAIL;
       }
 
+      // Wait for notification from USB Host Library task that it's ready
+      uint32_t notification_value = ulTaskNotifyTake(pdFALSE, pdMS_TO_TICKS(5000));
+      if (notification_value == 0) {
+        ESP_LOGE(TAG, "USB Host Library task startup timeout");
+        return ESP_ERR_TIMEOUT;
+      }
+
+      ESP_LOGI(TAG, "USB Host Library task started successfully");
       return ESP_OK;
     }
 
     esp_err_t UpsHidComponent::usb_client_register()
     {
+      ESP_LOGD(TAG, "Registering USB client...");
+
       usb_host_client_config_t client_config = {
           .is_synchronous = false,
           .max_num_event_msg = 5,
@@ -979,14 +903,43 @@ namespace esphome
           }};
 
       esp_err_t ret = usb_host_client_register(&client_config, &usb_device_.client_hdl);
-      if (ret != ESP_OK)
-      {
+      if (ret != ESP_OK) {
         ESP_LOGE(TAG, "USB client register failed: %s", esp_err_to_name(ret));
         return ret;
       }
 
+      ESP_LOGI(TAG, "USB client registered successfully");
       return ESP_OK;
     }
+
+
+    void UpsHidComponent::usb_deinit()
+    {
+      ESP_LOGD(TAG, "Deinitializing USB Host...");
+
+      if (usb_host_initialized_) {
+        // Stop USB Host Library task
+        if (usb_lib_task_handle_) {
+          vTaskDelete(usb_lib_task_handle_);
+          usb_lib_task_handle_ = nullptr;
+        }
+
+        // Uninstall USB Host Library
+        usb_host_uninstall();
+        usb_host_initialized_ = false;
+      }
+
+      // Delete mutex
+      if (usb_mutex_) {
+        vSemaphoreDelete(usb_mutex_);
+        usb_mutex_ = nullptr;
+      }
+
+      device_connected_ = false;
+      ESP_LOGI(TAG, "USB Host deinitialized");
+    }
+
+
 
     esp_err_t UpsHidComponent::usb_device_enumerate()
     {
@@ -1179,25 +1132,27 @@ namespace esphome
         return ESP_ERR_NOT_FOUND;
       }
 
-      // Find endpoints in the HID interface
-      int ep_index = 0;
-      const usb_ep_desc_t *ep_desc;
-
-      while ((ep_desc = usb_parse_endpoint_descriptor_by_index(intf_desc, ep_index, 0, nullptr)) != nullptr)
-      {
-        if (USB_EP_DESC_GET_EP_DIR(ep_desc))
-        { // IN endpoint
-          usb_device_.ep_in = ep_desc->bEndpointAddress;
-          usb_device_.max_packet_size = ep_desc->wMaxPacketSize;
-          ESP_LOGD(TAG, "Found IN endpoint: 0x%02X, max packet: %d",
-                   usb_device_.ep_in, usb_device_.max_packet_size);
+      // Parse endpoints correctly using ESP-IDF approach
+      const usb_ep_desc_t *ep_desc = nullptr;
+      int ep_offset = intf_offset;
+      
+      ESP_LOGD(TAG, "Interface has %d endpoints", intf_desc->bNumEndpoints);
+      
+      for (int i = 0; i < intf_desc->bNumEndpoints; i++) {
+        ep_desc = usb_parse_endpoint_descriptor_by_index(intf_desc, i, config_desc->wTotalLength, &ep_offset);
+        if (ep_desc) {
+          if (USB_EP_DESC_GET_EP_DIR(ep_desc)) {
+            usb_device_.ep_in = ep_desc->bEndpointAddress;
+            usb_device_.max_packet_size = ep_desc->wMaxPacketSize;
+            ESP_LOGD(TAG, "Found IN endpoint: 0x%02X (max packet size: %d)",
+                     usb_device_.ep_in, usb_device_.max_packet_size);
+          } else {
+            usb_device_.ep_out = ep_desc->bEndpointAddress;
+            ESP_LOGD(TAG, "Found OUT endpoint: 0x%02X", usb_device_.ep_out);
+          }
+        } else {
+          ESP_LOGW(TAG, "Failed to parse endpoint %d", i);
         }
-        else
-        { // OUT endpoint
-          usb_device_.ep_out = ep_desc->bEndpointAddress;
-          ESP_LOGD(TAG, "Found OUT endpoint: 0x%02X", usb_device_.ep_out);
-        }
-        ep_index++;
       }
 
       if (usb_device_.ep_in == 0)
@@ -1207,6 +1162,43 @@ namespace esphome
       }
 
       return ESP_OK;
+    }
+
+    void UpsHidComponent::usb_transfer_callback(usb_transfer_t *transfer)
+    {
+      TransferContext *ctx = static_cast<TransferContext*>(transfer->context);
+      if (!ctx) {
+        ESP_LOGE(TAG, "Transfer callback: NULL context");
+        return;
+      }
+
+      // Store transfer results
+      ctx->result = (transfer->status == USB_TRANSFER_STATUS_COMPLETED) ? ESP_OK : ESP_FAIL;
+      ctx->actual_bytes = transfer->actual_num_bytes;
+      
+      // Copy data for IN transfers if successful
+      if (ctx->result == ESP_OK && ctx->buffer && transfer->actual_num_bytes > 0) {
+        // For control transfers, skip the setup packet (8 bytes)
+        size_t data_offset = 0;
+        size_t available_data = transfer->actual_num_bytes;
+        
+        // Check if this is a control transfer (endpoint 0)
+        if (transfer->bEndpointAddress == 0 && available_data >= sizeof(usb_setup_packet_t)) {
+          data_offset = sizeof(usb_setup_packet_t);
+          available_data -= sizeof(usb_setup_packet_t);
+        }
+        
+        if (available_data > 0 && ctx->buffer_size > 0) {
+          size_t copy_size = std::min(available_data, ctx->buffer_size);
+          memcpy(ctx->buffer, transfer->data_buffer + data_offset, copy_size);
+          ESP_LOGV(TAG, "Transfer callback: copied %zu bytes (offset %zu)", copy_size, data_offset);
+        }
+      }
+
+      // Signal completion
+      if (ctx->done_sem) {
+        xSemaphoreGive(ctx->done_sem);
+      }
     }
 
     esp_err_t UpsHidComponent::usb_transfer_sync(const std::vector<uint8_t> &data_out,
@@ -1233,25 +1225,56 @@ namespace esphome
           return ESP_ERR_INVALID_SIZE;
         }
 
+        // Ensure transfer size is multiple of MPS
+        size_t transfer_size = data_out.size();
+        if (usb_device_.max_packet_size > 0) {
+          size_t remainder = transfer_size % usb_device_.max_packet_size;
+          if (remainder != 0) {
+            transfer_size += (usb_device_.max_packet_size - remainder);
+          }
+        }
+        ESP_LOGV(TAG, "OUT transfer: data_size=%zu, mps=%u, transfer_size=%zu", 
+                 data_out.size(), usb_device_.max_packet_size, transfer_size);
+
+        // Create transfer context
+        TransferContext out_ctx = {};
+        out_ctx.done_sem = xSemaphoreCreateBinary();
+        if (!out_ctx.done_sem) {
+          ESP_LOGE(TAG, "Failed to create OUT transfer semaphore");
+          return ESP_ERR_NO_MEM;
+        }
+
         usb_transfer_t *transfer_out = nullptr;
-        ret = usb_host_transfer_alloc(data_out.size(), 0, &transfer_out);
+        ret = usb_host_transfer_alloc(transfer_size, 0, &transfer_out);
         if (ret != ESP_OK || !transfer_out)
         {
           ESP_LOGE(TAG, "Failed to allocate OUT transfer: %s", esp_err_to_name(ret));
+          vSemaphoreDelete(out_ctx.done_sem);
           return ret;
         }
 
         transfer_out->device_handle = usb_device_.dev_hdl;
         transfer_out->bEndpointAddress = usb_device_.ep_out;
-        transfer_out->callback = nullptr;
-        transfer_out->context = this;
-        transfer_out->num_bytes = data_out.size();
+        transfer_out->callback = usb_transfer_callback;
+        transfer_out->context = &out_ctx;
+        transfer_out->num_bytes = transfer_size;
+        // Copy data and zero-pad the rest
         std::memcpy(transfer_out->data_buffer, data_out.data(), data_out.size());
+        if (transfer_size > data_out.size()) {
+          std::memset(transfer_out->data_buffer + data_out.size(), 0, transfer_size - data_out.size());
+        }
 
         ret = usb_host_transfer_submit(transfer_out);
         if (ret == ESP_OK)
         {
-          vTaskDelay(pdMS_TO_TICKS(std::min(timeout_ms, static_cast<uint32_t>(1000)))); // Max 1s for OUT
+          // Wait for transfer completion
+          if (xSemaphoreTake(out_ctx.done_sem, pdMS_TO_TICKS(timeout_ms)) == pdTRUE) {
+            ret = out_ctx.result;
+            ESP_LOGV(TAG, "OUT transfer completed with result: %s", esp_err_to_name(ret));
+          } else {
+            ESP_LOGW(TAG, "OUT transfer timeout after %ums", timeout_ms);
+            ret = ESP_ERR_TIMEOUT;
+          }
         }
         else
         {
@@ -1259,6 +1282,8 @@ namespace esphome
         }
 
         usb_host_transfer_free(transfer_out);
+        vSemaphoreDelete(out_ctx.done_sem);
+        
         if (ret != ESP_OK)
         {
           return ret;
@@ -1270,39 +1295,61 @@ namespace esphome
       {
         size_t buffer_size = std::max(static_cast<size_t>(64), static_cast<size_t>(usb_device_.max_packet_size));
         buffer_size = std::min(buffer_size, static_cast<size_t>(1024)); // Cap at 1KB
+        
+        // Ensure buffer size is multiple of MPS
+        if (usb_device_.max_packet_size > 0) {
+          size_t remainder = buffer_size % usb_device_.max_packet_size;
+          if (remainder != 0) {
+            buffer_size += (usb_device_.max_packet_size - remainder);
+          }
+        }
+        ESP_LOGV(TAG, "IN transfer: mps=%u, buffer_size=%zu", usb_device_.max_packet_size, buffer_size);
+
+        // Prepare buffer for received data
+        std::vector<uint8_t> temp_buffer(buffer_size);
+        
+        // Create transfer context
+        TransferContext in_ctx = {};
+        in_ctx.done_sem = xSemaphoreCreateBinary();
+        in_ctx.buffer = temp_buffer.data();
+        in_ctx.buffer_size = buffer_size;
+        
+        if (!in_ctx.done_sem) {
+          ESP_LOGE(TAG, "Failed to create IN transfer semaphore");
+          return ESP_ERR_NO_MEM;
+        }
 
         usb_transfer_t *transfer_in = nullptr;
         ret = usb_host_transfer_alloc(buffer_size, 0, &transfer_in);
         if (ret != ESP_OK || !transfer_in)
         {
           ESP_LOGE(TAG, "Failed to allocate IN transfer: %s", esp_err_to_name(ret));
+          vSemaphoreDelete(in_ctx.done_sem);
           return ret;
         }
 
         transfer_in->device_handle = usb_device_.dev_hdl;
         transfer_in->bEndpointAddress = usb_device_.ep_in;
-        transfer_in->callback = nullptr;
-        transfer_in->context = this;
+        transfer_in->callback = usb_transfer_callback;
+        transfer_in->context = &in_ctx;
         transfer_in->num_bytes = buffer_size;
 
         ret = usb_host_transfer_submit(transfer_in);
         if (ret == ESP_OK)
         {
-          vTaskDelay(pdMS_TO_TICKS(timeout_ms));
-
-          // Copy received data with bounds checking
-          if (transfer_in->actual_num_bytes > 0 &&
-              transfer_in->actual_num_bytes <= buffer_size)
-          {
-            data_in.resize(transfer_in->actual_num_bytes);
-            std::memcpy(data_in.data(), transfer_in->data_buffer, transfer_in->actual_num_bytes);
-            ESP_LOGV(TAG, "USB IN transfer received %d bytes", transfer_in->actual_num_bytes);
-          }
-          else if (transfer_in->actual_num_bytes > buffer_size)
-          {
-            ESP_LOGW(TAG, "USB IN transfer size mismatch: %d > %zu",
-                     transfer_in->actual_num_bytes, buffer_size);
-            ret = ESP_ERR_INVALID_SIZE;
+          // Wait for transfer completion
+          if (xSemaphoreTake(in_ctx.done_sem, pdMS_TO_TICKS(timeout_ms)) == pdTRUE) {
+            ret = in_ctx.result;
+            
+            if (ret == ESP_OK && in_ctx.actual_bytes > 0) {
+              // Copy received data to output vector
+              data_in.resize(in_ctx.actual_bytes);
+              std::memcpy(data_in.data(), temp_buffer.data(), in_ctx.actual_bytes);
+              ESP_LOGV(TAG, "USB IN transfer received %zu bytes", in_ctx.actual_bytes);
+            }
+          } else {
+            ESP_LOGW(TAG, "IN transfer timeout after %ums", timeout_ms);
+            ret = ESP_ERR_TIMEOUT;
           }
         }
         else
@@ -1311,80 +1358,151 @@ namespace esphome
         }
 
         usb_host_transfer_free(transfer_in);
+        vSemaphoreDelete(in_ctx.done_sem);
       }
 
       return ret;
     }
 
-    void UpsHidComponent::usb_host_lib_task(void *arg)
+    esp_err_t UpsHidComponent::hid_get_report(uint8_t report_type, uint8_t report_id, uint8_t* data, size_t* data_len)
     {
-      auto *component = static_cast<UpsHidComponent *>(arg);
-
-      ESP_LOGD(TAG, "USB Host task started");
-
-      while (component->usb_host_initialized_)
-      {
-        uint32_t event_flags;
-        esp_err_t ret = usb_host_lib_handle_events(portMAX_DELAY, &event_flags);
-
-        if (ret != ESP_OK)
-        {
-          ESP_LOGW(TAG, "USB Host lib handle events error: %s", esp_err_to_name(ret));
-          continue;
-        }
-
-        // Log all event flags for debugging
-        if (event_flags != 0)
-        {
-          ESP_LOGD(TAG, "USB Host event flags: 0x%08X", event_flags);
-        }
-
-        if (event_flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS)
-        {
-          ESP_LOGD(TAG, "USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS");
-          usb_host_device_free_all();
-        }
-
-        if (event_flags & USB_HOST_LIB_EVENT_FLAGS_ALL_FREE)
-        {
-          ESP_LOGD(TAG, "USB_HOST_LIB_EVENT_FLAGS_ALL_FREE");
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(10));
+      if (!device_connected_ || !usb_device_.dev_hdl || !data || !data_len) {
+        return ESP_ERR_INVALID_ARG;
       }
-
-      ESP_LOGD(TAG, "USB Host task ended");
-      vTaskDelete(nullptr);
+      
+      const uint8_t bmRequestType = USB_BM_REQUEST_TYPE_DIR_IN | USB_BM_REQUEST_TYPE_TYPE_CLASS | USB_BM_REQUEST_TYPE_RECIP_INTERFACE;
+      const uint8_t bRequest = 0x01; // HID GET_REPORT
+      const uint16_t wValue = (report_type << 8) | report_id;
+      const uint16_t wIndex = usb_device_.interface_num;
+      
+      usb_transfer_t *transfer = nullptr;
+      esp_err_t ret = usb_host_transfer_alloc(sizeof(usb_setup_packet_t) + *data_len, 0, &transfer);
+      if (ret != ESP_OK || !transfer) {
+        ESP_LOGE(TAG, "Failed to allocate control transfer: %s", esp_err_to_name(ret));
+        return ret;
+      }
+      
+      // Create transfer context for synchronization
+      TransferContext ctx = {};
+      ctx.done_sem = xSemaphoreCreateBinary();
+      ctx.buffer = data;
+      ctx.buffer_size = *data_len;
+      
+      if (!ctx.done_sem) {
+        usb_host_transfer_free(transfer);
+        return ESP_ERR_NO_MEM;
+      }
+      
+      // Set up USB control transfer
+      transfer->device_handle = usb_device_.dev_hdl;
+      transfer->bEndpointAddress = 0; // Control endpoint
+      transfer->callback = usb_transfer_callback;
+      transfer->context = &ctx;
+      transfer->num_bytes = sizeof(usb_setup_packet_t) + *data_len;
+      
+      // Create setup packet
+      usb_setup_packet_t *setup = (usb_setup_packet_t*)transfer->data_buffer;
+      setup->bmRequestType = bmRequestType;
+      setup->bRequest = bRequest;
+      setup->wValue = wValue;
+      setup->wIndex = wIndex;
+      setup->wLength = *data_len;
+      
+      ESP_LOGV(TAG, "HID GET_REPORT: type=0x%02X, id=0x%02X, len=%zu", report_type, report_id, *data_len);
+      
+      ret = usb_host_transfer_submit(transfer);
+      if (ret == ESP_OK) {
+        // Wait for completion
+        if (xSemaphoreTake(ctx.done_sem, pdMS_TO_TICKS(5000)) == pdTRUE) {
+          ret = ctx.result;
+          if (ret == ESP_OK && ctx.actual_bytes >= sizeof(usb_setup_packet_t)) {
+            size_t actual_data_len = ctx.actual_bytes - sizeof(usb_setup_packet_t);
+            *data_len = std::min(*data_len, actual_data_len);
+            // Data is already copied by callback
+            ESP_LOGV(TAG, "HID GET_REPORT success: received %zu bytes", *data_len);
+          }
+        } else {
+          ESP_LOGW(TAG, "HID GET_REPORT timeout");
+          ret = ESP_ERR_TIMEOUT;
+        }
+      } else {
+        ESP_LOGW(TAG, "Failed to submit HID GET_REPORT: %s", esp_err_to_name(ret));
+      }
+      
+      usb_host_transfer_free(transfer);
+      vSemaphoreDelete(ctx.done_sem);
+      return ret;
     }
 
-    void UpsHidComponent::usb_client_event_callback(const usb_host_client_event_msg_t *event_msg, void *arg)
+    esp_err_t UpsHidComponent::hid_set_report(uint8_t report_type, uint8_t report_id, const uint8_t* data, size_t data_len)
     {
-      auto *component = static_cast<UpsHidComponent *>(arg);
-
-      ESP_LOGD(TAG, "USB client event received: type=%d", event_msg->event);
-
-      switch (event_msg->event)
-      {
-      case USB_HOST_CLIENT_EVENT_NEW_DEV:
-        ESP_LOGI(TAG, "USB_HOST_CLIENT_EVENT_NEW_DEV: device address %d", event_msg->new_dev.address);
-        // Trigger device enumeration
-        component->usb_device_enumerate();
-        break;
-
-      case USB_HOST_CLIENT_EVENT_DEV_GONE:
-        ESP_LOGI(TAG, "USB_HOST_CLIENT_EVENT_DEV_GONE: device handle %p", event_msg->dev_gone.dev_hdl);
-        if (component->usb_device_.dev_hdl == event_msg->dev_gone.dev_hdl)
-        {
-          component->device_connected_ = false;
-          component->usb_device_.dev_hdl = nullptr;
-        }
-        break;
-
-      default:
-        ESP_LOGD(TAG, "Unknown USB client event: %d", event_msg->event);
-        break;
+      if (!device_connected_ || !usb_device_.dev_hdl || !data) {
+        return ESP_ERR_INVALID_ARG;
       }
+      
+      const uint8_t bmRequestType = USB_BM_REQUEST_TYPE_DIR_OUT | USB_BM_REQUEST_TYPE_TYPE_CLASS | USB_BM_REQUEST_TYPE_RECIP_INTERFACE;
+      const uint8_t bRequest = 0x09; // HID SET_REPORT
+      const uint16_t wValue = (report_type << 8) | report_id;
+      const uint16_t wIndex = usb_device_.interface_num;
+      
+      usb_transfer_t *transfer = nullptr;
+      esp_err_t ret = usb_host_transfer_alloc(sizeof(usb_setup_packet_t) + data_len, 0, &transfer);
+      if (ret != ESP_OK || !transfer) {
+        ESP_LOGE(TAG, "Failed to allocate control transfer: %s", esp_err_to_name(ret));
+        return ret;
+      }
+      
+      // Create transfer context for synchronization
+      TransferContext ctx = {};
+      ctx.done_sem = xSemaphoreCreateBinary();
+      
+      if (!ctx.done_sem) {
+        usb_host_transfer_free(transfer);
+        return ESP_ERR_NO_MEM;
+      }
+      
+      // Set up USB control transfer
+      transfer->device_handle = usb_device_.dev_hdl;
+      transfer->bEndpointAddress = 0; // Control endpoint
+      transfer->callback = usb_transfer_callback;
+      transfer->context = &ctx;
+      transfer->num_bytes = sizeof(usb_setup_packet_t) + data_len;
+      
+      // Create setup packet
+      usb_setup_packet_t *setup = (usb_setup_packet_t*)transfer->data_buffer;
+      setup->bmRequestType = bmRequestType;
+      setup->bRequest = bRequest;
+      setup->wValue = wValue;
+      setup->wIndex = wIndex;
+      setup->wLength = data_len;
+      
+      // Copy data after setup packet
+      if (data_len > 0) {
+        memcpy(transfer->data_buffer + sizeof(usb_setup_packet_t), data, data_len);
+      }
+      
+      ESP_LOGV(TAG, "HID SET_REPORT: type=0x%02X, id=0x%02X, len=%zu", report_type, report_id, data_len);
+      
+      ret = usb_host_transfer_submit(transfer);
+      if (ret == ESP_OK) {
+        // Wait for completion
+        if (xSemaphoreTake(ctx.done_sem, pdMS_TO_TICKS(5000)) == pdTRUE) {
+          ret = ctx.result;
+          ESP_LOGV(TAG, "HID SET_REPORT success");
+        } else {
+          ESP_LOGW(TAG, "HID SET_REPORT timeout");
+          ret = ESP_ERR_TIMEOUT;
+        }
+      } else {
+        ESP_LOGW(TAG, "Failed to submit HID SET_REPORT: %s", esp_err_to_name(ret));
+      }
+      
+      usb_host_transfer_free(transfer);
+      vSemaphoreDelete(ctx.done_sem);
+      return ret;
     }
+
+
 #endif
 
     // Base Protocol Implementation
@@ -1411,6 +1529,80 @@ namespace esphome
       }
       return result;
     }
+
+#ifdef USE_ESP32
+    // USB Host Library task - based on working ESP32 NUT server implementation
+    void UpsHidComponent::usb_host_lib_task(void *arg)
+    {
+      TaskHandle_t parent_task = static_cast<TaskHandle_t>(arg);
+      ESP_LOGI(TAG, "USB Host Library task starting...");
+
+      // Initialize USB Host library
+      const usb_host_config_t host_config = {
+          .skip_phy_setup = false,
+          .intr_flags = ESP_INTR_FLAG_LEVEL1,
+      };
+
+      esp_err_t ret = usb_host_install(&host_config);
+      if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "USB Host install failed: %s", esp_err_to_name(ret));
+        vTaskDelete(nullptr);
+        return;
+      }
+
+      ESP_LOGI(TAG, "USB Host library installed successfully");
+      
+      // Notify parent task that USB Host is ready
+      xTaskNotifyGive(parent_task);
+
+      // Main USB Host event loop
+      while (true) {
+        uint32_t event_flags;
+        ret = usb_host_lib_handle_events(portMAX_DELAY, &event_flags);
+        
+        if (ret != ESP_OK) {
+          ESP_LOGE(TAG, "USB Host event handling failed: %s", esp_err_to_name(ret));
+          continue;
+        }
+
+        // Handle USB Host events
+        if (event_flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS) {
+          usb_host_device_free_all();
+          ESP_LOGI(TAG, "USB Event: NO_CLIENTS - freed all devices");
+        }
+        
+        if (event_flags & USB_HOST_LIB_EVENT_FLAGS_ALL_FREE) {
+          ESP_LOGI(TAG, "USB Event: ALL_FREE - all devices removed");
+        }
+      }
+    }
+
+    // USB client event callback
+    void UpsHidComponent::usb_client_event_callback(const usb_host_client_event_msg_t *event_msg, void *arg)
+    {
+      UpsHidComponent *component = static_cast<UpsHidComponent *>(arg);
+
+      switch (event_msg->event) {
+        case USB_HOST_CLIENT_EVENT_NEW_DEV:
+          ESP_LOGI(TAG, "USB_HOST_CLIENT_EVENT_NEW_DEV: device address %d", event_msg->new_dev.address);
+          // Trigger device enumeration
+          component->usb_device_enumerate();
+          break;
+
+        case USB_HOST_CLIENT_EVENT_DEV_GONE:
+          ESP_LOGI(TAG, "USB_HOST_CLIENT_EVENT_DEV_GONE: device handle %p", event_msg->dev_gone.dev_hdl);
+          if (component->usb_device_.dev_hdl == event_msg->dev_gone.dev_hdl) {
+            component->device_connected_ = false;
+            component->usb_device_.dev_hdl = nullptr;
+          }
+          break;
+
+        default:
+          ESP_LOGD(TAG, "Unknown USB client event: %d", event_msg->event);
+          break;
+      }
+    }
+#endif
 
   } // namespace ups_hid
 } // namespace esphome

@@ -21,6 +21,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "freertos/portmacro.h"
+#include "driver/gpio.h"
 
 // USB HID Class defines
 #ifndef USB_CLASS_HID
@@ -110,7 +112,7 @@ namespace esphome
     class UpsHidComponent : public PollingComponent
     {
     public:
-      UpsHidComponent() : usb_device_{}, usb_mutex_(nullptr), usb_task_handle_(nullptr), 
+      UpsHidComponent() : usb_device_{}, usb_mutex_(nullptr), usb_lib_task_handle_(nullptr), 
                           usb_host_initialized_(false), device_connected_(false) {
 #ifdef USE_ESP32
         memset(&usb_device_, 0, sizeof(usb_device_));
@@ -208,6 +210,10 @@ namespace esphome
       // USB communication methods (accessible by protocol classes)
       bool usb_write(const std::vector<uint8_t> &data);
       bool usb_read(std::vector<uint8_t> &data, uint32_t timeout_ms = 1000);
+      
+      // HID class requests (UPS-specific communication)
+      esp_err_t hid_get_report(uint8_t report_type, uint8_t report_id, uint8_t* data, size_t* data_len);
+      esp_err_t hid_set_report(uint8_t report_type, uint8_t report_id, const uint8_t* data, size_t data_len);
 
     protected:
 #ifdef USE_ESP32
@@ -228,7 +234,7 @@ namespace esphome
       // USB Host member variables
       UsbDevice usb_device_;
       SemaphoreHandle_t usb_mutex_;
-      TaskHandle_t usb_task_handle_;
+      TaskHandle_t usb_lib_task_handle_;
       bool usb_host_initialized_;
       bool device_connected_;
 
@@ -245,9 +251,19 @@ namespace esphome
       // USB communication
       esp_err_t usb_transfer_sync(const std::vector<uint8_t> &data_out, std::vector<uint8_t> &data_in, uint32_t timeout_ms);
       
+      // Transfer completion tracking
+      struct TransferContext {
+        SemaphoreHandle_t done_sem;
+        esp_err_t result;
+        size_t actual_bytes;
+        uint8_t* buffer;
+        size_t buffer_size;
+      };
+      
       // USB Host event handling
       static void usb_host_lib_task(void *arg);
       static void usb_client_event_callback(const usb_host_client_event_msg_t *event_msg, void *arg);
+      static void usb_transfer_callback(usb_transfer_t *transfer);
 #endif
     };
 

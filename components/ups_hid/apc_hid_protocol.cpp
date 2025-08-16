@@ -117,36 +117,42 @@ bool ApcHidProtocol::init_hid_communication() {
 }
 
 bool ApcHidProtocol::read_hid_report(uint8_t report_id, HidReport &report) {
-  // Prepare HID Get Report request
-  std::vector<uint8_t> request = {
-    0x21, // bmRequestType: Class, Interface, Host-to-device
-    0x01, // bRequest: GET_REPORT
-    report_id, 0x03, // wValue: Report Type (Input=0x01, Output=0x02, Feature=0x03) and Report ID
-    0x00, 0x00, // wIndex: Interface
-    0x40, 0x00  // wLength: Maximum report length (64 bytes)
-  };
+  // Use HID Feature Report (0x03) for UPS status data
+  const uint8_t report_type = 0x03; // Feature Report
+  uint8_t buffer[64]; // Maximum HID report size
+  size_t buffer_len = sizeof(buffer);
   
-  std::vector<uint8_t> response;
-  if (!send_command(request, response, 2000)) {
+  esp_err_t ret = parent_->hid_get_report(report_type, report_id, buffer, &buffer_len);
+  if (ret != ESP_OK) {
+    ESP_LOGD(APC_HID_TAG, "HID GET_REPORT failed: %s", esp_err_to_name(ret));
     return false;
   }
   
-  if (response.empty()) {
+  if (buffer_len == 0) {
+    ESP_LOGD(APC_HID_TAG, "Empty HID report received");
     return false;
   }
   
   report.report_id = report_id;
-  report.data = response;
+  report.data.assign(buffer, buffer + buffer_len);
   
+  ESP_LOGD(APC_HID_TAG, "HID report 0x%02X: received %zu bytes", report_id, buffer_len);
   return true;
 }
 
 bool ApcHidProtocol::write_hid_report(const HidReport &report) {
-  std::vector<uint8_t> request = {report.report_id};
-  request.insert(request.end(), report.data.begin(), report.data.end());
+  // Use HID Feature Report (0x03) for UPS control commands  
+  const uint8_t report_type = 0x03; // Feature Report
   
-  std::vector<uint8_t> response;
-  return send_command(request, response, 1000);
+  esp_err_t ret = parent_->hid_set_report(report_type, report.report_id, 
+                                          report.data.data(), report.data.size());
+  if (ret != ESP_OK) {
+    ESP_LOGD(APC_HID_TAG, "HID SET_REPORT failed: %s", esp_err_to_name(ret));
+    return false;
+  }
+  
+  ESP_LOGD(APC_HID_TAG, "HID report 0x%02X: sent %zu bytes", report.report_id, report.data.size());
+  return true;
 }
 
 void ApcHidProtocol::parse_status_report(const HidReport &report, UpsData &data) {
