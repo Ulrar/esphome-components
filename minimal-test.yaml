@@ -5,12 +5,26 @@ esphome:
 
 esp32:
   board: esp32-s3-devkitc-1
+  variant: esp32s3
+  framework:
+    type: esp-idf
 
 # Enable logging
 logger:
   level: DEBUG
   baud_rate: 115200
   hardware_uart: UART0
+  logs:
+    ups_hid: DEBUG
+    ups_hid.apc: DEBUG
+    ups_hid.apc_hid: DEBUG
+    ups_hid.generic: DEBUG
+    usb_host: DEBUG
+    esp32.usb_host: DEBUG
+    usb: DEBUG
+    usb-otg: DEBUG
+    HCD: DEBUG
+    USBH: DEBUG
 
 # Enable Home Assistant API
 api:
@@ -61,7 +75,7 @@ external_components:
 # UPS HID Component
 ups_hid:
   id: ups_monitor
-  simulation_mode: true # Set to false for production
+  simulation_mode: false # Set to false for production
   update_interval: 5s
 
   # Hardware Configuration

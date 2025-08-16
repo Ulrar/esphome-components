@@ -86,7 +86,6 @@ CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(UpsHidComponent),
-            cv.Optional(CONF_UPDATE_INTERVAL, default="30s"): validate_update_interval,
             cv.Optional(CONF_SIMULATION_MODE, default=False): cv.boolean,
             cv.Optional(CONF_USB_VENDOR_ID, default=0x051D): cv.hex_uint16_t,
             cv.Optional(CONF_USB_PRODUCT_ID, default=0x0002): cv.hex_uint16_t,
@@ -95,7 +94,8 @@ CONFIG_SCHEMA = cv.All(
             ): validate_protocol_timeout,
             cv.Optional(CONF_AUTO_DETECT_PROTOCOL, default=True): cv.boolean,
         }
-    ).extend(cv.COMPONENT_SCHEMA),
+    ).extend(cv.polling_component_schema("30s"))
+     .extend(cv.COMPONENT_SCHEMA),
     validate_usb_config,
 )
 

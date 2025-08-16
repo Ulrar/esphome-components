@@ -7,12 +7,18 @@ from esphome.const import (
     DEVICE_CLASS_VOLTAGE,
     DEVICE_CLASS_POWER_FACTOR,
     DEVICE_CLASS_DURATION,
-    STATE_CLASS_MEASUREMENT,
     UNIT_PERCENT,
     UNIT_VOLT,
     UNIT_MINUTE,
     UNIT_HERTZ,
 )
+
+# Handle STATE_CLASS_MEASUREMENT import for different ESPHome versions
+try:
+    from esphome.const import STATE_CLASS_MEASUREMENT
+except ImportError:
+    from esphome.components.sensor import StateClass
+    STATE_CLASS_MEASUREMENT = StateClass.MEASUREMENT
 
 from . import ups_hid_ns, UpsHidComponent, CONF_UPS_HID_ID
 
