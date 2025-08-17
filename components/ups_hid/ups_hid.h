@@ -23,6 +23,8 @@
 #include "freertos/task.h"
 #include "freertos/portmacro.h"
 #include "driver/gpio.h"
+#include <set>
+#include <map>
 
 // USB HID Class defines
 #ifndef USB_CLASS_HID
@@ -344,7 +346,25 @@ namespace esphome
       std::string get_protocol_name() const override { return "Generic HID"; }
       
     private:
-      bool parse_generic_report(const std::vector<uint8_t>& response, UpsData& data);
+      // Report discovery and caching
+      std::set<uint8_t> available_input_reports_;
+      std::set<uint8_t> available_feature_reports_;
+      std::map<uint8_t, size_t> report_sizes_;
+      
+      // Core methods
+      void enumerate_reports();
+      bool read_report(uint8_t report_id, uint8_t* buffer, size_t& buffer_len);
+      
+      // Standard report parsers (based on NUT analysis)
+      void parse_power_summary(uint8_t* data, size_t len, UpsData& ups_data);
+      void parse_battery_status(uint8_t* data, size_t len, UpsData& ups_data);
+      void parse_present_status(uint8_t* data, size_t len, UpsData& ups_data);
+      void parse_general_status(uint8_t* data, size_t len, UpsData& ups_data);
+      void parse_voltage(uint8_t* data, size_t len, UpsData& ups_data, bool is_input);
+      void parse_load(uint8_t* data, size_t len, UpsData& ups_data);
+      
+      // Heuristic parsing for unknown reports
+      bool parse_unknown_report(uint8_t* data, size_t len, UpsData& ups_data);
     };
 
   } // namespace ups_hid
