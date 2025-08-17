@@ -305,6 +305,67 @@ sensor:
     state_class: measurement
     accuracy_decimals: 0
 
+  # New missing dynamic values from NUT analysis
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Charge Low Threshold"
+    id: battery_charge_low
+    type: battery_charge_low
+    unit_of_measurement: "%"
+    device_class: battery
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Charge Warning Threshold"
+    id: battery_charge_warning
+    type: battery_charge_warning
+    unit_of_measurement: "%"
+    device_class: battery
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Runtime Low Threshold"
+    id: battery_runtime_low
+    type: battery_runtime_low
+    unit_of_measurement: "min"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Timer Reboot"
+    id: ups_timer_reboot
+    type: ups_timer_reboot
+    unit_of_measurement: "s"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Timer Shutdown"
+    id: ups_timer_shutdown
+    type: ups_timer_shutdown
+    unit_of_measurement: "s"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Timer Start"
+    id: ups_timer_start
+    type: ups_timer_start
+    unit_of_measurement: "s"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+
   # System sensors for monitoring ESP32 health
   - platform: uptime
     name: "Uptime"
@@ -439,44 +500,134 @@ binary_sensor:
       return false;
 
 # Text Sensors for UPS information
+# 
+# DEVICE INFORMATION CAPABILITIES BY PROTOCOL:
+#
+# APC HID Protocol (VID: 0x051D):
+#   ✅ manufacturer, model, status, protocol
+#   ⚠️  serial_number, firmware_version (basic support - may be limited)
+#   ⚠️  ups_beeper_status, input_sensitivity (basic support - may be limited)
+#
+# CyberPower HID Protocol (VID: 0x0764):
+#   ✅ manufacturer, model, status, protocol
+#   ✅ serial_number, firmware_version (full HID report parsing)
+#   ✅ ups_beeper_status, input_sensitivity (full HID report parsing)
+#
+# Generic HID Protocol (All other vendors):
+#   ✅ manufacturer, model, status, protocol
+#   ⚠️  serial_number, firmware_version (generic parsing - device dependent)
+#   ⚠️  ups_beeper_status, input_sensitivity (generic parsing - device dependent)
+#
+# Legend: ✅ = Full Support, ⚠️ = Basic/Limited Support
+#
 text_sensor:
-  - platform: ups_hid
-    ups_hid_id: ups_monitor
-    name: "UPS Model"
-    id: ups_model
-    type: model
-
+  # === DEVICE IDENTIFICATION (Protocol-Independent) ===
+  # Available on all protocols - basic device identification
   - platform: ups_hid
     ups_hid_id: ups_monitor
     name: "UPS Manufacturer"
     id: ups_manufacturer
     type: manufacturer
+    icon: "mdi:factory"
 
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Model"
+    id: ups_model
+    type: model
+    icon: "mdi:information-outline"
+
+  # === PROTOCOL-SPECIFIC DEVICE INFO ===
+  # Serial Number - Available on: CyberPower (full), APC (limited), Generic (basic)
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Serial Number"
+    id: ups_serial_number
+    type: serial_number
+    icon: "mdi:identifier"
+
+  # Firmware Version - Available on: CyberPower (full), APC (limited), Generic (basic)
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Firmware Version"
+    id: ups_firmware_version
+    type: firmware_version
+    icon: "mdi:chip"
+
+  # === COMMUNICATION STATUS ===
   - platform: ups_hid
     ups_hid_id: ups_monitor
     name: "UPS Status"
     id: ups_status_text
     type: status
+    icon: "mdi:power-standby"
 
   - platform: ups_hid
     ups_hid_id: ups_monitor
     name: "Detected Protocol"
     id: ups_protocol
     type: protocol
+    icon: "mdi:connection"
 
-  # Additional CyberPower text sensors (newly implemented)
-  # Available text sensor types: ups_beeper_status, input_sensitivity
+  # === HID-SPECIFIC CONFIGURATION ===
+  # UPS Beeper Status - Available on: CyberPower (full), APC (limited), Generic (basic)
   - platform: ups_hid
     ups_hid_id: ups_monitor
     name: "UPS Beeper Status"
     id: ups_beeper_status
     type: ups_beeper_status
+    icon: "mdi:volume-high"
 
+  # Input Sensitivity - Available on: CyberPower (full), APC (limited), Generic (basic)
   - platform: ups_hid
     ups_hid_id: ups_monitor
     name: "Input Sensitivity"
     id: input_sensitivity
     type: input_sensitivity
+    icon: "mdi:tune-vertical"
+
+  # New missing text sensors from NUT analysis
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Status"
+    id: battery_status
+    type: battery_status
+    icon: "mdi:battery-check"
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Type"
+    id: battery_type
+    type: battery_type
+    icon: "mdi:battery-outline"
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Manufacture Date"
+    id: battery_mfr_date
+    type: battery_mfr_date
+    icon: "mdi:calendar-check"
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Manufacture Date"
+    id: ups_mfr_date
+    type: ups_mfr_date
+    icon: "mdi:calendar-check"
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Firmware Auxiliary"
+    id: ups_firmware_aux
+    type: ups_firmware_aux
+    icon: "mdi:chip"
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Test Result"
+    id: ups_test_result
+    type: ups_test_result
+    icon: "mdi:test-tube"
 
   # System text sensors
   - platform: version

@@ -575,6 +575,30 @@ namespace esphome
         {
           value = static_cast<float>(local_data.ups_delay_start);
         }
+        else if (type == "battery_charge_low")
+        {
+          value = local_data.battery_charge_low;
+        }
+        else if (type == "battery_charge_warning")
+        {
+          value = local_data.battery_charge_warning;
+        }
+        else if (type == "battery_runtime_low")
+        {
+          value = local_data.battery_runtime_low;
+        }
+        else if (type == "ups_timer_reboot")
+        {
+          value = static_cast<float>(local_data.ups_timer_reboot);
+        }
+        else if (type == "ups_timer_shutdown")
+        {
+          value = static_cast<float>(local_data.ups_timer_shutdown);
+        }
+        else if (type == "ups_timer_start")
+        {
+          value = static_cast<float>(local_data.ups_timer_start);
+        }
 
         // Only publish if value is valid and within reasonable bounds
         if (!std::isnan(value))
@@ -660,6 +684,30 @@ namespace esphome
         else if (type == "input_sensitivity" && !local_data.input_sensitivity.empty())
         {
           sensor->publish_state(local_data.input_sensitivity);
+        }
+        else if (type == "battery_status" && !local_data.battery_status.empty())
+        {
+          sensor->publish_state(local_data.battery_status);
+        }
+        else if (type == "battery_type" && !local_data.battery_type.empty())
+        {
+          sensor->publish_state(local_data.battery_type);
+        }
+        else if (type == "battery_mfr_date" && !local_data.battery_mfr_date.empty())
+        {
+          sensor->publish_state(local_data.battery_mfr_date);
+        }
+        else if (type == "ups_mfr_date" && !local_data.ups_mfr_date.empty())
+        {
+          sensor->publish_state(local_data.ups_mfr_date);
+        }
+        else if (type == "ups_firmware_aux" && !local_data.ups_firmware_aux.empty())
+        {
+          sensor->publish_state(local_data.ups_firmware_aux);
+        }
+        else if (type == "ups_test_result" && !local_data.ups_test_result.empty())
+        {
+          sensor->publish_state(local_data.ups_test_result);
         }
         else if (type == "status")
         {
@@ -1595,6 +1643,124 @@ namespace esphome
       return ret;
     }
 
+    esp_err_t UpsHidComponent::usb_get_string_descriptor(uint8_t string_index, std::string& result, uint16_t language_id) 
+    {
+      result.clear();
+      
+      if (!device_connected_ || !usb_device_.dev_hdl) {
+        ESP_LOGW(TAG, "USB GET_STRING_DESCRIPTOR: Device not ready - connected: %s, handle: %p", 
+                 device_connected_ ? "true" : "false", usb_device_.dev_hdl);
+        return ESP_ERR_INVALID_ARG;
+      }
+      
+      ESP_LOGD(TAG, "USB GET_STRING_DESCRIPTOR: index=%d, language_id=0x%04X", string_index, language_id);
+      
+      // USB string descriptors can be up to 255 bytes, but typically much smaller
+      const size_t max_string_len = 255;
+      
+      // USB string descriptor request parameters
+      const uint8_t bmRequestType = USB_BM_REQUEST_TYPE_DIR_IN | USB_BM_REQUEST_TYPE_TYPE_STANDARD | USB_BM_REQUEST_TYPE_RECIP_DEVICE;
+      const uint8_t bRequest = USB_B_REQUEST_GET_DESCRIPTOR;
+      const uint16_t wValue = (USB_B_DESCRIPTOR_TYPE_STRING << 8) | string_index;
+      const uint16_t wIndex = language_id;  // Language ID (0x0409 = English US)
+      const uint16_t wLength = max_string_len;
+      
+      usb_transfer_t *transfer = nullptr;
+      size_t transfer_size = sizeof(usb_setup_packet_t) + max_string_len;
+      esp_err_t ret = usb_host_transfer_alloc(transfer_size, 0, &transfer);
+      if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to allocate string descriptor transfer: %s", esp_err_to_name(ret));
+        return ret;
+      }
+      
+      // Setup control transfer
+      transfer->device_handle = usb_device_.dev_hdl;
+      transfer->bEndpointAddress = 0;  // Control endpoint
+      transfer->num_bytes = transfer_size;
+      transfer->timeout_ms = 1000;  // 1 second timeout for string descriptor
+      
+      // Create setup packet
+      usb_setup_packet_t *setup = (usb_setup_packet_t*)transfer->data_buffer;
+      setup->bmRequestType = bmRequestType;
+      setup->bRequest = bRequest;
+      setup->wValue = wValue;
+      setup->wIndex = wIndex;
+      setup->wLength = wLength;
+      
+      // Create transfer context for synchronization
+      TransferContext ctx = {};
+      ctx.done_sem = xSemaphoreCreateBinary();
+      
+      if (!ctx.done_sem) {
+        usb_host_transfer_free(transfer);
+        return ESP_ERR_NO_MEM;
+      }
+      
+      transfer->context = &ctx;
+      transfer->callback = usb_transfer_callback;
+      
+      ESP_LOGV(TAG, "USB GET_STRING_DESCRIPTOR: setup packet created");
+      
+      ret = usb_host_transfer_submit_control(usb_device_.client_hdl, transfer);
+      if (ret == ESP_OK) {
+        // Wait for completion with timeout
+        if (xSemaphoreTake(ctx.done_sem, pdMS_TO_TICKS(1000)) == pdTRUE) {
+          ret = ctx.result;
+          if (ret == ESP_OK && ctx.actual_bytes > sizeof(usb_setup_packet_t)) {
+            // Parse the USB string descriptor
+            uint8_t *desc_data = transfer->data_buffer + sizeof(usb_setup_packet_t);
+            size_t desc_len = ctx.actual_bytes - sizeof(usb_setup_packet_t);
+            
+            if (desc_len >= 2) {
+              uint8_t bLength = desc_data[0];       // Total length of descriptor
+              uint8_t bDescriptorType = desc_data[1]; // Should be USB_B_DESCRIPTOR_TYPE_STRING (0x03)
+              
+              if (bDescriptorType == USB_B_DESCRIPTOR_TYPE_STRING && bLength >= 2) {
+                // USB string descriptors are UTF-16LE encoded, skip the 2-byte header
+                size_t string_data_len = bLength - 2;
+                uint8_t *string_data = desc_data + 2;
+                
+                // Convert UTF-16LE to ASCII (simplified, only handles ASCII characters)
+                result.reserve(string_data_len / 2);
+                for (size_t i = 0; i < string_data_len; i += 2) {
+                  uint16_t utf16_char = string_data[i] | (string_data[i + 1] << 8);
+                  if (utf16_char < 128) {  // ASCII range
+                    result += static_cast<char>(utf16_char);
+                  } else {
+                    result += '?';  // Non-ASCII character placeholder
+                  }
+                }
+                
+                // Trim trailing whitespace
+                while (!result.empty() && std::isspace(result.back())) {
+                  result.pop_back();
+                }
+                
+                ESP_LOGI(TAG, "USB string descriptor %d: \"%s\"", string_index, result.c_str());
+              } else {
+                ESP_LOGW(TAG, "Invalid string descriptor: type=0x%02X, length=%d", bDescriptorType, bLength);
+                ret = ESP_ERR_INVALID_RESPONSE;
+              }
+            } else {
+              ESP_LOGW(TAG, "String descriptor too short: %zu bytes", desc_len);
+              ret = ESP_ERR_INVALID_SIZE;
+            }
+          } else {
+            ESP_LOGW(TAG, "String descriptor transfer failed: %s, bytes=%zu", 
+                     esp_err_to_name(ret), ctx.actual_bytes);
+          }
+        } else {
+          ESP_LOGW(TAG, "String descriptor transfer timeout");
+          ret = ESP_ERR_TIMEOUT;
+        }
+      } else {
+        ESP_LOGW(TAG, "Failed to submit string descriptor transfer: %s", esp_err_to_name(ret));
+      }
+      
+      usb_host_transfer_free(transfer);
+      vSemaphoreDelete(ctx.done_sem);
+      return ret;
+    }
 
 #endif
 

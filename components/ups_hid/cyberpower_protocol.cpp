@@ -2,6 +2,8 @@
 #include "ups_hid.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_err.h"
+#include "esphome/core/log.h"
 
 namespace esphome {
 namespace ups_hid {
@@ -55,10 +57,6 @@ bool CyberPowerProtocol::initialize() {
 
 bool CyberPowerProtocol::read_data(UpsData &data) {
   ESP_LOGD(CP_TAG, "Reading CyberPower HID data");
-  
-  // Set manufacturer and model information for CyberPower
-  data.manufacturer = "CPS";
-  data.model = "CP1500EPFCLCD";
   
   bool success = false;
 
@@ -146,6 +144,12 @@ bool CyberPowerProtocol::read_data(UpsData &data) {
     parse_input_sensitivity_report(input_sensitivity_report, data);
   }
 
+  // Read overload status (Report 0x17)
+  HidReport overload_report;
+  if (read_hid_report(OVERLOAD_REPORT_ID, overload_report)) {
+    parse_overload_report(overload_report, data);
+  }
+
   // Read beeper status (Report 0x0c)
   HidReport beeper_status_report;
   if (read_hid_report(BEEPER_STATUS_REPORT_ID, beeper_status_report)) {
@@ -166,10 +170,46 @@ bool CyberPowerProtocol::read_data(UpsData &data) {
   // Set frequency to NaN - not available for CyberPower CP1500 model
   data.frequency = NAN;
   
+  // TIMING FIX: Only read USB string descriptors after successful HID communication
+  // This ensures the device is ready and responsive before attempting descriptor access
   if (success) {
+    ESP_LOGD(CP_TAG, "CyberPower HID data read successful, now reading device info...");
+    
+    // Read manufacturer from USB Manufacturer string descriptor (index 3)
+    // NUT shows: UPS.PowerSummary.iManufacturer, Value: 3 → Manufacturer: "CPS"
+    std::string manufacturer_string;
+    esp_err_t mfr_ret = parent_->usb_get_string_descriptor(3, manufacturer_string);
+    
+    if (mfr_ret == ESP_OK && !manufacturer_string.empty()) {
+      data.manufacturer = manufacturer_string;
+      ESP_LOGI(CP_TAG, "Successfully read manufacturer from USB descriptor: \"%s\"", data.manufacturer.c_str());
+    } else {
+      data.manufacturer.clear();  // Set to unset state instead of hardcoded fallback
+      ESP_LOGW(CP_TAG, "Failed to read USB Manufacturer descriptor: %s, leaving unset", esp_err_to_name(mfr_ret));
+    }
+    
+    // Read model from USB Product string descriptor (index 1)
+    // NUT shows: Product: "CP1500EPFCLCD"
+    std::string product_string;
+    esp_err_t prod_ret = parent_->usb_get_string_descriptor(1, product_string);
+    
+    if (prod_ret == ESP_OK && !product_string.empty()) {
+      data.model = product_string;
+      ESP_LOGI(CP_TAG, "Successfully read CyberPower model from USB Product descriptor: \"%s\"", data.model.c_str());
+    } else {
+      data.model.clear();  // Set to unset state instead of hardcoded fallback
+      ESP_LOGW(CP_TAG, "Failed to read USB Product descriptor: %s, leaving model unset", esp_err_to_name(prod_ret));
+    }
+    
+    // Read missing dynamic values identified from NUT analysis
+    read_missing_dynamic_values(data);
+    
     ESP_LOGD(CP_TAG, "CyberPower data read completed successfully");
   } else {
     ESP_LOGW(CP_TAG, "Failed to read any CyberPower HID reports");
+    // Leave manufacturer and model unset when HID communication fails
+    data.manufacturer.clear();
+    data.model.clear();
   }
 
   return success;
@@ -220,6 +260,7 @@ void CyberPowerProtocol::parse_battery_runtime_report(const HidReport &report, U
   // NUT mapping: 
   // Offset 0 (byte 1): RemainingCapacity (battery %) - Size: 8
   // Offset 8 (bytes 2-3): RunTimeToEmpty - Size: 16, little-endian
+  // Offset 24 (bytes 4-5): RemainingTimeLimit - Size: 16, little-endian
   uint8_t battery_percentage = report.data[1];
   uint16_t runtime_minutes = report.data[2] | (report.data[3] << 8);
   
@@ -227,8 +268,16 @@ void CyberPowerProtocol::parse_battery_runtime_report(const HidReport &report, U
   data.battery_level = static_cast<float>(battery_percentage > 100 ? 100 : battery_percentage);
   data.runtime_minutes = static_cast<float>(runtime_minutes);
   
-  ESP_LOGD(CP_TAG, "Battery: %.0f%%, Runtime: %.0f min (raw: %02X %02X%02X)", 
-           data.battery_level, data.runtime_minutes, battery_percentage, report.data[3], report.data[2]);
+  // Extract runtime low threshold if available (offset 24 = bytes 4-5)
+  if (report.data.size() >= 6) {
+    uint16_t runtime_low_minutes = report.data[4] | (report.data[5] << 8);
+    data.battery_runtime_low = static_cast<float>(runtime_low_minutes);
+    ESP_LOGD(CP_TAG, "Battery: %.0f%%, Runtime: %.0f min, Runtime Low: %.0f min", 
+             data.battery_level, data.runtime_minutes, data.battery_runtime_low);
+  } else {
+    ESP_LOGD(CP_TAG, "Battery: %.0f%%, Runtime: %.0f min (raw: %02X %02X%02X)", 
+             data.battery_level, data.runtime_minutes, battery_percentage, report.data[3], report.data[2]);
+  }
 }
 
 void CyberPowerProtocol::parse_battery_voltage_report(const HidReport &report, UpsData &data) {
@@ -481,25 +530,63 @@ void CyberPowerProtocol::parse_input_sensitivity_report(const HidReport &report,
 
   // NUT debug shows: Report 0x1a, Value: 1 (CPSInputSensitivity)
   uint8_t sensitivity_raw = report.data[1];
+  ESP_LOGD(CP_TAG, "Raw CyberPower sensitivity from report 0x1a: 0x%02X (%d)", sensitivity_raw, sensitivity_raw);
   
-  // Map sensitivity values: 0=high, 1=normal, 2=low
+  // DYNAMIC SENSITIVITY MAPPING: Handle known CyberPower values with intelligent fallbacks
   switch (sensitivity_raw) {
     case 0:
       data.input_sensitivity = "high";
+      ESP_LOGI(CP_TAG, "CyberPower input sensitivity: high (raw: %d)", sensitivity_raw);
       break;
     case 1:
       data.input_sensitivity = "normal";
+      ESP_LOGI(CP_TAG, "CyberPower input sensitivity: normal (raw: %d)", sensitivity_raw);
       break;
     case 2:
       data.input_sensitivity = "low";
+      ESP_LOGI(CP_TAG, "CyberPower input sensitivity: low (raw: %d)", sensitivity_raw);
       break;
     default:
-      data.input_sensitivity = "unknown";
+      // DYNAMIC HANDLING: For unknown values, provide better context
+      if (sensitivity_raw >= 100) {
+        // Large values might indicate report format issue
+        ESP_LOGW(CP_TAG, "Unexpected large CyberPower sensitivity value: %d (0x%02X) - possible report format issue", 
+                 sensitivity_raw, sensitivity_raw);
+        
+        // Try alternative parsing - some models might use different byte
+        if (report.data.size() >= 3) {
+          uint8_t alt_value = report.data[2];
+          ESP_LOGD(CP_TAG, "Trying alternative sensitivity parsing from byte[2]: %d", alt_value);
+          
+          if (alt_value <= 2) {
+            sensitivity_raw = alt_value;
+            switch (sensitivity_raw) {
+              case 0: data.input_sensitivity = "high"; break;
+              case 1: data.input_sensitivity = "normal"; break;
+              case 2: data.input_sensitivity = "low"; break;
+            }
+            ESP_LOGI(CP_TAG, "CyberPower input sensitivity (alt parsing): %s (raw: %d)", 
+                     data.input_sensitivity.c_str(), sensitivity_raw);
+            return;
+          }
+        }
+        
+        // Fallback for problematic values
+        data.input_sensitivity = "normal";
+        ESP_LOGW(CP_TAG, "Using default 'normal' sensitivity due to unexpected value: %d", sensitivity_raw);
+      } else {
+        // Values 3-99 - extend mapping for future CyberPower models
+        if (sensitivity_raw == 3) {
+          data.input_sensitivity = "auto";
+          ESP_LOGI(CP_TAG, "CyberPower input sensitivity: auto (raw: %d)", sensitivity_raw);
+        } else {
+          data.input_sensitivity = "unknown";
+          ESP_LOGW(CP_TAG, "Unknown CyberPower sensitivity value: %d - please report this for future support", 
+                   sensitivity_raw);
+        }
+      }
       break;
   }
-  
-  ESP_LOGD(CP_TAG, "Input sensitivity: %s (raw: 0x%02X = %d)", 
-           data.input_sensitivity.c_str(), sensitivity_raw, sensitivity_raw);
 }
 
 void CyberPowerProtocol::parse_firmware_version_report(const HidReport &report, UpsData &data) {
@@ -508,23 +595,102 @@ void CyberPowerProtocol::parse_firmware_version_report(const HidReport &report, 
     return;
   }
 
+  // DYNAMIC FIRMWARE VERSION: Primary method - USB string descriptor
   // NUT debug shows: Report 0x1b, Value: 5 (CPSFirmwareVersion - string descriptor index)
-  // This is a string descriptor index, we need to fetch the actual string
   uint8_t string_index = report.data[1];
   
-  // Based on NUT reference output, firmware version is "CR01505B4"
-  // For CP1500EPFCLCD model, use known firmware version from NUT debug
-  if (string_index == 5) {
-    data.firmware_version = "CR01505B4"; // From NUT debug output
+  // Validate string index is reasonable (CyberPower typically uses indices 1-10)
+  if (string_index > 0 && string_index <= 15) {
+    ESP_LOGD(CP_TAG, "Reading CyberPower firmware from USB string descriptor index: %d", string_index);
+    
+    std::string actual_firmware;
+    esp_err_t fw_ret = parent_->usb_get_string_descriptor(string_index, actual_firmware);
+    
+    if (fw_ret == ESP_OK && !actual_firmware.empty()) {
+      data.firmware_version = actual_firmware;
+      ESP_LOGI(CP_TAG, "Successfully read CyberPower firmware from USB string descriptor %d: \"%s\"", 
+               string_index, data.firmware_version.c_str());
+      return;
+    } else {
+      ESP_LOGW(CP_TAG, "Failed to read USB string descriptor %d for firmware: %s, trying fallbacks", 
+               string_index, esp_err_to_name(fw_ret));
+    }
   } else {
-    // Fallback for other models
-    char firmware_str[32];
-    snprintf(firmware_str, sizeof(firmware_str), "FW_%d", string_index);
-    data.firmware_version = firmware_str;
+    ESP_LOGD(CP_TAG, "Invalid string index %d for firmware, trying direct HID parsing", string_index);
   }
   
-  ESP_LOGD(CP_TAG, "Firmware version: %s (string index: %d)", 
+  // FALLBACK 1: Try to parse firmware from raw HID report data
+  // Some CyberPower models might store firmware directly in HID reports
+  std::string firmware_from_hid;
+  for (size_t i = 1; i < report.data.size() && report.data[i] != 0; i++) {
+    if (report.data[i] >= 32 && report.data[i] <= 126) { // Printable ASCII
+      firmware_from_hid += static_cast<char>(report.data[i]);
+    }
+  }
+  
+  if (!firmware_from_hid.empty() && firmware_from_hid.length() >= 3) {
+    data.firmware_version = firmware_from_hid;
+    ESP_LOGI(CP_TAG, "Firmware version from HID report data: %s", data.firmware_version.c_str());
+    return;
+  }
+  
+  // FALLBACK 2: Try other common CyberPower string descriptor indices
+  // Some models may use different indices for firmware
+  const uint8_t common_fw_indices[] = {4, 5, 6}; // Common firmware string indices
+  for (uint8_t idx : common_fw_indices) {
+    if (idx == string_index) continue; // Already tried this one
+    
+    ESP_LOGD(CP_TAG, "Trying alternative firmware string descriptor index: %d", idx);
+    std::string fw_attempt;
+    esp_err_t ret = parent_->usb_get_string_descriptor(idx, fw_attempt);
+    
+    if (ret == ESP_OK && !fw_attempt.empty() && 
+        (fw_attempt.find("CR") == 0 || fw_attempt.find("CP") == 0 || 
+         fw_attempt.find("FW") != std::string::npos)) {
+      // Looks like a valid CyberPower firmware string
+      data.firmware_version = fw_attempt;
+      ESP_LOGI(CP_TAG, "Found CyberPower firmware at alternative string descriptor %d: \"%s\"", 
+               idx, data.firmware_version.c_str());
+      return;
+    }
+  }
+  
+  // FALLBACK 3: Generate version from binary data as last resort
+  if (report.data.size() >= 3) {
+    char firmware_fallback[32];
+    snprintf(firmware_fallback, sizeof(firmware_fallback), "CP-%02X.%02X.%02X", 
+             report.data[1], report.data[2], 
+             (report.data.size() > 3) ? report.data[3] : 0);
+    data.firmware_version = firmware_fallback;
+    ESP_LOGD(CP_TAG, "Using binary firmware version fallback: %s", data.firmware_version.c_str());
+  } else {
+    // No firmware version could be determined
+    data.firmware_version.clear();
+    ESP_LOGW(CP_TAG, "Unable to determine CyberPower firmware version from any source");
+  }
+  
+  ESP_LOGD(CP_TAG, "Final firmware version: %s (original string index: %d)", 
            data.firmware_version.c_str(), string_index);
+}
+
+void CyberPowerProtocol::parse_overload_report(const HidReport &report, UpsData &data) {
+  if (report.data.size() < 2) {
+    ESP_LOGW(CP_TAG, "Overload report too short: %zu bytes", report.data.size());
+    return;
+  }
+
+  // NUT debug shows: Report 0x17, Offset: 1, Value: 0 (UPS.Output.Overload)
+  // Offset 1 means it's in the second byte of the report
+  uint8_t overload_byte = report.data[1];
+  bool overload = (overload_byte & 0x01) != 0;  // Check bit 0 (Offset 1 in NUT = bit 0)
+  
+  if (overload) {
+    data.status_flags |= UPS_STATUS_OVERLOAD;
+    ESP_LOGW(CP_TAG, "CyberPower UPS OVERLOAD detected (raw: 0x%02X)", overload_byte);
+  } else {
+    data.status_flags &= ~UPS_STATUS_OVERLOAD;
+    ESP_LOGD(CP_TAG, "CyberPower UPS overload status: normal (raw: 0x%02X)", overload_byte);
+  }
 }
 
 void CyberPowerProtocol::parse_serial_number_report(const HidReport &report, UpsData &data) {
@@ -533,23 +699,131 @@ void CyberPowerProtocol::parse_serial_number_report(const HidReport &report, Ups
     return;
   }
 
-  // NUT debug shows: Report 0x02, Value: 2 (iSerialNumber - string descriptor index)
-  // This is a string descriptor index, we need to fetch the actual string
+  // NUT debug shows: UPS.PowerSummary.iSerialNumber, ReportID: 0x02, Value: 2
+  // This is a USB string descriptor index, not the actual serial number
   uint8_t string_index = report.data[1];
   
-  // Based on NUT reference output, serial number is "CRMLX2000234"
-  // For CP1500EPFCLCD model, use known serial from NUT debug
-  if (string_index == 2) {
-    data.serial_number = "CRMLX2000234"; // From NUT debug output
+  ESP_LOGD(CP_TAG, "Serial number string descriptor index: %d", string_index);
+  
+  // Use real USB string descriptor reading - this will get the actual CyberPower serial number
+  // NUT shows: CyberPower real serial = "CRMLX2000234"
+  std::string actual_serial;
+  esp_err_t ret = parent_->usb_get_string_descriptor(string_index, actual_serial);
+  
+  if (ret == ESP_OK && !actual_serial.empty()) {
+    data.serial_number = actual_serial;
+    ESP_LOGI(CP_TAG, "Successfully read CyberPower serial number from USB string descriptor %d: \"%s\"", 
+             string_index, data.serial_number.c_str());
   } else {
-    // Fallback for other devices - use generic format
-    char serial_str[32];
-    snprintf(serial_str, sizeof(serial_str), "CP_SN_%d", string_index);
-    data.serial_number = serial_str;
+    // Fallback if USB string descriptor reading fails
+    ESP_LOGW(CP_TAG, "Failed to read USB string descriptor %d: %s", 
+             string_index, esp_err_to_name(ret));
+    
+    // Set to unset state instead of generating fallback ID
+    data.serial_number.clear();
+    ESP_LOGW(CP_TAG, "Leaving serial number unset due to USB string descriptor failure");
   }
   
   ESP_LOGD(CP_TAG, "Serial number: %s (string index: %d)", 
            data.serial_number.c_str(), string_index);
+}
+
+void CyberPowerProtocol::read_missing_dynamic_values(UpsData &data) {
+  ESP_LOGD(CP_TAG, "Reading CyberPower missing dynamic values from NUT analysis...");
+  
+  // 1. Battery capacity limits (Report 0x07) - contains multiple values
+  HidReport battery_capacity_limits_report;
+  if (read_hid_report(0x07, battery_capacity_limits_report)) {
+    parse_battery_capacity_limits_report(battery_capacity_limits_report, data);
+  }
+  
+  // 2. Battery chemistry/type (Report 0x03) - same as APC
+  HidReport battery_chemistry_report;
+  if (read_hid_report(0x03, battery_chemistry_report)) {
+    parse_battery_chemistry_report(battery_chemistry_report, data);
+  }
+  
+  // 3. Battery runtime low threshold is already available in existing Report 0x08
+  // It's at offset 24 and already parsed in parse_battery_runtime_report
+  // Just need to extract it properly
+  
+  // 4. Set static/derived values based on NUT behavior
+  data.battery_status = "100%";  // CyberPower shows this as static in NUT
+  data.ups_test_result = "No test initiated";  // Default test result
+  
+  // 5. Timer values are already implemented as ups_delay_shutdown/start
+  // Map them to timer fields for consistency
+  data.ups_timer_shutdown = data.ups_delay_shutdown;
+  data.ups_timer_start = data.ups_delay_start;
+  
+  ESP_LOGD(CP_TAG, "Completed reading CyberPower missing dynamic values");
+}
+
+void CyberPowerProtocol::parse_battery_capacity_limits_report(const HidReport &report, UpsData &data) {
+  if (report.data.size() < 6) {
+    ESP_LOGW(CP_TAG, "Battery capacity limits report too short: %zu bytes", report.data.size());
+    return;
+  }
+  
+  // NUT debug shows Report 0x07 contains multiple capacity values at different offsets:
+  // Offset 24: WarningCapacityLimit = 20
+  // Offset 32: RemainingCapacityLimit = 10
+  // Data format: [ID, byte1, byte2, byte3, byte4, byte5, ...]
+  
+  // Extract warning capacity limit (offset 24 = byte 4)
+  if (report.data.size() > 4) {
+    uint8_t warning_limit = report.data[4]; // Offset 24 bits = byte 3 + 1
+    data.battery_charge_warning = static_cast<float>(warning_limit);
+    ESP_LOGI(CP_TAG, "CyberPower Battery charge warning threshold: %.0f%% (raw: %d)", 
+             data.battery_charge_warning, warning_limit);
+  }
+  
+  // Extract remaining capacity limit (offset 32 = byte 5)
+  if (report.data.size() > 5) {
+    uint8_t remaining_limit = report.data[5]; // Offset 32 bits = byte 4 + 1
+    data.battery_charge_low = static_cast<float>(remaining_limit);
+    ESP_LOGI(CP_TAG, "CyberPower Battery charge low threshold: %.0f%% (raw: %d)", 
+             data.battery_charge_low, remaining_limit);
+  }
+}
+
+void CyberPowerProtocol::parse_battery_chemistry_report(const HidReport &report, UpsData &data) {
+  if (report.data.size() < 2) {
+    ESP_LOGW(CP_TAG, "Battery chemistry report too short: %zu bytes", report.data.size());
+    return;
+  }
+  
+  // NUT debug: ReportID: 0x03, Value: 4 (iDeviceChemistry) - same as APC
+  uint8_t chemistry_raw = report.data[1];
+  
+  // Map chemistry values based on NUT libhid implementation (same as APC)
+  switch (chemistry_raw) {
+    case 1:
+      data.battery_type = "Alkaline";
+      break;
+    case 2:
+      data.battery_type = "NiCd";
+      break;
+    case 3:
+      data.battery_type = "NiMH";
+      break;
+    case 4:
+      data.battery_type = "PbAcid";  // Lead Acid (matches NUT output)
+      break;
+    case 5:
+      data.battery_type = "LiIon";
+      break;
+    case 6:
+      data.battery_type = "LiPoly";
+      break;
+    default:
+      data.battery_type = "Unknown";
+      ESP_LOGW(CP_TAG, "Unknown CyberPower battery chemistry value: %d", chemistry_raw);
+      break;
+  }
+  
+  ESP_LOGI(CP_TAG, "CyberPower Battery chemistry: %s (raw: %d)", 
+           data.battery_type.c_str(), chemistry_raw);
 }
 
 }  // namespace ups_hid

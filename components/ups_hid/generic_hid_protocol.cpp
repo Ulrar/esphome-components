@@ -158,11 +158,20 @@ bool GenericHidProtocol::read_data(UpsData &data) {
     success = true;
   }
   
-  // 7. Try any other discovered reports with heuristic parsing
+  // 7. Input sensitivity (0x1a - CyberPower style, 0x35 - APC style)
+  if (read_report(0x1a, buffer, buffer_len)) {
+    parse_input_sensitivity(buffer, buffer_len, data, "CyberPower-style");
+    success = true;
+  } else if (read_report(0x35, buffer, buffer_len)) {
+    parse_input_sensitivity(buffer, buffer_len, data, "APC-style");
+    success = true;
+  }
+  
+  // 8. Try any other discovered reports with heuristic parsing
   if (!success) {
     for (uint8_t id : available_input_reports_) {
       if (id == 0x01 || id == 0x06 || id == 0x0C || id == 0x16 || 
-          id == 0x30 || id == 0x31 || id == 0x50) {
+          id == 0x30 || id == 0x31 || id == 0x50 || id == 0x1A || id == 0x35) {
         continue; // Already tried
       }
       
@@ -451,6 +460,83 @@ bool GenericHidProtocol::parse_unknown_report(uint8_t* data, size_t len, UpsData
   }
   
   return found_data;
+}
+
+void GenericHidProtocol::parse_input_sensitivity(uint8_t* data, size_t len, UpsData& ups_data, const char* style) {
+  if (len < 2) {
+    ESP_LOGV(GEN_TAG, "Input sensitivity report too short: %zu bytes", len);
+    return;
+  }
+  
+  uint8_t sensitivity_raw = data[1];
+  ESP_LOGD(GEN_TAG, "Raw input sensitivity (%s): 0x%02X (%d)", style, sensitivity_raw, sensitivity_raw);
+  
+  // DYNAMIC GENERIC SENSITIVITY MAPPING
+  // Handle both APC-style (0x35) and CyberPower-style (0x1a) with intelligent fallbacks
+  switch (sensitivity_raw) {
+    case 0:
+      ups_data.input_sensitivity = "high";
+      ESP_LOGI(GEN_TAG, "Generic input sensitivity (%s): high (raw: %d)", style, sensitivity_raw);
+      break;
+    case 1:
+      ups_data.input_sensitivity = "normal";
+      ESP_LOGI(GEN_TAG, "Generic input sensitivity (%s): normal (raw: %d)", style, sensitivity_raw);
+      break;
+    case 2:
+      ups_data.input_sensitivity = "low";
+      ESP_LOGI(GEN_TAG, "Generic input sensitivity (%s): low (raw: %d)", style, sensitivity_raw);
+      break;
+    case 3:
+      ups_data.input_sensitivity = "auto";
+      ESP_LOGI(GEN_TAG, "Generic input sensitivity (%s): auto (raw: %d)", style, sensitivity_raw);
+      break;
+    default:
+      // GENERIC DYNAMIC HANDLING: For unknown values, be more permissive
+      if (sensitivity_raw >= 100) {
+        // Large values likely indicate wrong report format or encoding
+        ESP_LOGW(GEN_TAG, "Unexpected large sensitivity value (%s): %d (0x%02X)", 
+                 style, sensitivity_raw, sensitivity_raw);
+        
+        // Try alternative byte positions for generic devices
+        for (size_t i = 2; i < len && i < 5; i++) {
+          uint8_t alt_value = data[i];
+          if (alt_value <= 3) {
+            switch (alt_value) {
+              case 0: ups_data.input_sensitivity = "high"; break;
+              case 1: ups_data.input_sensitivity = "normal"; break;
+              case 2: ups_data.input_sensitivity = "low"; break;
+              case 3: ups_data.input_sensitivity = "auto"; break;
+            }
+            ESP_LOGI(GEN_TAG, "Generic input sensitivity (%s, alt byte[%zu]): %s (raw: %d)", 
+                     style, i, ups_data.input_sensitivity.c_str(), alt_value);
+            return;
+          }
+        }
+        
+        // Fallback to reasonable default
+        ups_data.input_sensitivity = "normal";
+        ESP_LOGW(GEN_TAG, "Using default 'normal' sensitivity (%s) due to unexpected value: %d", 
+                 style, sensitivity_raw);
+      } else {
+        // Values 4-99 - provide extended mapping for unknown devices
+        if (sensitivity_raw <= 10) {
+          // Map to nearest known value
+          if (sensitivity_raw <= 3) {
+            ups_data.input_sensitivity = "high";
+          } else if (sensitivity_raw <= 6) {
+            ups_data.input_sensitivity = "normal";
+          } else {
+            ups_data.input_sensitivity = "low";
+          }
+          ESP_LOGI(GEN_TAG, "Generic input sensitivity (%s, mapped): %s (raw: %d)", 
+                   style, ups_data.input_sensitivity.c_str(), sensitivity_raw);
+        } else {
+          ups_data.input_sensitivity = "unknown";
+          ESP_LOGW(GEN_TAG, "Unknown generic sensitivity value (%s): %d", style, sensitivity_raw);
+        }
+      }
+      break;
+  }
 }
 
 }  // namespace ups_hid

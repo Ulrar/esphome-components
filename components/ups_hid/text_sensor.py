@@ -22,6 +22,13 @@ TEXT_SENSOR_TYPES = [
     "firmware_version",
     "ups_beeper_status",
     "input_sensitivity",
+    # Additional missing text sensor types from NUT analysis
+    "battery_status",
+    "battery_type",
+    "battery_mfr_date",
+    "ups_mfr_date",
+    "ups_firmware_aux",
+    "ups_test_result",
 ]
 
 

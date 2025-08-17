@@ -111,6 +111,27 @@ sensor:
     state_class: measurement
     accuracy_decimals: 0
 
+  # Test key missing dynamic values
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Charge Low Threshold"
+    id: battery_charge_low
+    type: battery_charge_low
+    unit_of_measurement: "%"
+    device_class: battery
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Runtime Low Threshold"
+    id: battery_runtime_low
+    type: battery_runtime_low
+    unit_of_measurement: "min"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+
 # Binary Sensors
 binary_sensor:
   - platform: ups_hid
@@ -140,3 +161,41 @@ text_sensor:
     name: "UPS Model"
     id: ups_model
     type: model
+
+  # Device Information Sensors (test APC implementation)
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Serial Number"
+    id: ups_serial_number
+    type: serial_number
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Firmware Version"
+    id: ups_firmware_version
+    type: firmware_version
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Beeper Status"
+    id: ups_beeper_status
+    type: ups_beeper_status
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Input Sensitivity"
+    id: ups_input_sensitivity
+    type: input_sensitivity
+
+  # Test key missing dynamic values
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Type"
+    id: battery_type
+    type: battery_type
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Test Result"
+    id: ups_test_result
+    type: ups_test_result

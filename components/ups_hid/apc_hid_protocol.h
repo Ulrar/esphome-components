@@ -42,6 +42,26 @@ private:
   void read_device_info();
   void parse_device_info_report(const HidReport &report);
   void log_raw_data(const uint8_t* buffer, size_t buffer_len);
+  
+  // Device information parsing
+  void read_device_information(UpsData &data);
+  void parse_serial_number_report(const HidReport &report, UpsData &data);
+  void parse_firmware_version_report(const HidReport &report, UpsData &data);
+  void parse_beeper_status_report(const HidReport &report, UpsData &data);
+  void parse_input_sensitivity_report(const HidReport &report, UpsData &data);
+  
+  // Missing dynamic values from NUT analysis
+  void read_missing_dynamic_values(UpsData &data);
+  void parse_battery_voltage_nominal_report(const HidReport &report, UpsData &data);
+  void parse_battery_voltage_actual_report(const HidReport &report, UpsData &data);
+  void parse_input_voltage_nominal_report(const HidReport &report, UpsData &data);
+  void parse_input_transfer_limits_report(const HidReport &report, UpsData &data);
+  void parse_battery_runtime_low_report(const HidReport &report, UpsData &data);
+  void parse_manufacture_date_report(const HidReport &report, UpsData &data, bool is_battery);
+  void parse_ups_delay_shutdown_report(const HidReport &report, UpsData &data);
+  void parse_battery_charge_threshold_report(const HidReport &report, UpsData &data, bool is_low_threshold);
+  void parse_battery_chemistry_report(const HidReport &report, UpsData &data);
+  std::string convert_apc_date(uint16_t date_value);
 };
 
 } // namespace ups_hid

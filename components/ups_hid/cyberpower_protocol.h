@@ -41,6 +41,7 @@ class CyberPowerProtocol : public UpsProtocolBase {
   static const uint8_t LOAD_PERCENT_REPORT_ID = 0x13;     // Load percentage
   static const uint8_t DELAY_SHUTDOWN_REPORT_ID = 0x15;   // Delay before shutdown
   static const uint8_t DELAY_START_REPORT_ID = 0x16;      // Delay before startup
+  static const uint8_t OVERLOAD_REPORT_ID = 0x17;         // Overload status
   static const uint8_t REALPOWER_NOMINAL_REPORT_ID = 0x18; // Nominal real power
   static const uint8_t INPUT_SENSITIVITY_REPORT_ID = 0x1a; // Input sensitivity
   static const uint8_t FIRMWARE_VERSION_REPORT_ID = 0x1b;  // Firmware version
@@ -75,9 +76,15 @@ class CyberPowerProtocol : public UpsProtocolBase {
   void parse_delay_shutdown_report(const HidReport &report, UpsData &data);
   void parse_delay_start_report(const HidReport &report, UpsData &data);
   void parse_realpower_nominal_report(const HidReport &report, UpsData &data);
+  void parse_overload_report(const HidReport &report, UpsData &data);
   void parse_input_sensitivity_report(const HidReport &report, UpsData &data);
   void parse_firmware_version_report(const HidReport &report, UpsData &data);
   void parse_serial_number_report(const HidReport &report, UpsData &data);
+  
+  // Missing dynamic values from NUT analysis
+  void read_missing_dynamic_values(UpsData &data);
+  void parse_battery_capacity_limits_report(const HidReport &report, UpsData &data);
+  void parse_battery_chemistry_report(const HidReport &report, UpsData &data);
 
   // CyberPower-specific scaling logic
   void check_battery_voltage_scaling(float battery_voltage, float nominal_voltage);

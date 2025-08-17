@@ -92,6 +92,20 @@ namespace esphome
       std::string ups_beeper_status{};
       std::string input_sensitivity{};
       
+      // Additional missing fields from NUT analysis
+      float battery_charge_low{NAN};        // Battery low threshold (%)
+      float battery_charge_warning{NAN};    // Battery warning threshold (%)
+      float battery_runtime_low{NAN};       // Runtime low threshold (minutes)
+      std::string battery_status{};         // Battery status text
+      std::string battery_type{};           // Battery chemistry
+      std::string battery_mfr_date{};       // Battery manufacture date
+      std::string ups_mfr_date{};           // UPS manufacture date
+      std::string ups_firmware_aux{};       // Auxiliary firmware info
+      std::string ups_test_result{};        // Test result
+      int16_t ups_timer_reboot{-1};         // Reboot timer
+      int16_t ups_timer_shutdown{-1};       // Shutdown timer
+      int16_t ups_timer_start{-1};          // Start timer
+      
       // Reset all data to default values
       void reset() {
         battery_level = NAN;
@@ -118,6 +132,20 @@ namespace esphome
         ups_delay_start = -1;
         ups_beeper_status.clear();
         input_sensitivity.clear();
+        
+        // Reset additional missing fields
+        battery_charge_low = NAN;
+        battery_charge_warning = NAN;
+        battery_runtime_low = NAN;
+        battery_status.clear();
+        battery_type.clear();
+        battery_mfr_date.clear();
+        ups_mfr_date.clear();
+        ups_firmware_aux.clear();
+        ups_test_result.clear();
+        ups_timer_reboot = -1;
+        ups_timer_shutdown = -1;
+        ups_timer_start = -1;
       }
       
       // Check if core data is valid
@@ -253,6 +281,9 @@ namespace esphome
       // HID class requests (UPS-specific communication)
       esp_err_t hid_get_report(uint8_t report_type, uint8_t report_id, uint8_t* data, size_t* data_len);
       esp_err_t hid_set_report(uint8_t report_type, uint8_t report_id, const uint8_t* data, size_t data_len);
+      
+      // USB string descriptor reading
+      esp_err_t usb_get_string_descriptor(uint8_t string_index, std::string& result, uint16_t language_id = 0x0409);
 #endif
       
 
@@ -374,6 +405,7 @@ namespace esphome
       void parse_general_status(uint8_t* data, size_t len, UpsData& ups_data);
       void parse_voltage(uint8_t* data, size_t len, UpsData& ups_data, bool is_input);
       void parse_load(uint8_t* data, size_t len, UpsData& ups_data);
+      void parse_input_sensitivity(uint8_t* data, size_t len, UpsData& ups_data, const char* style);
       
       // Heuristic parsing for unknown reports
       bool parse_unknown_report(uint8_t* data, size_t len, UpsData& ups_data);

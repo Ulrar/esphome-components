@@ -114,6 +114,43 @@ SENSOR_TYPES = {
         "state_class": STATE_CLASS_MEASUREMENT,
         "accuracy_decimals": 0,
     },
+    # Additional missing sensor types from NUT analysis
+    "battery_charge_low": {
+        "unit": UNIT_PERCENT,
+        "device_class": DEVICE_CLASS_BATTERY,
+        "state_class": STATE_CLASS_MEASUREMENT,
+        "accuracy_decimals": 0,
+    },
+    "battery_charge_warning": {
+        "unit": UNIT_PERCENT,
+        "device_class": DEVICE_CLASS_BATTERY,
+        "state_class": STATE_CLASS_MEASUREMENT,
+        "accuracy_decimals": 0,
+    },
+    "battery_runtime_low": {
+        "unit": UNIT_MINUTE,
+        "device_class": DEVICE_CLASS_DURATION,
+        "state_class": STATE_CLASS_MEASUREMENT,
+        "accuracy_decimals": 0,
+    },
+    "ups_timer_reboot": {
+        "unit": UNIT_SECOND,
+        "device_class": DEVICE_CLASS_DURATION,
+        "state_class": STATE_CLASS_MEASUREMENT,
+        "accuracy_decimals": 0,
+    },
+    "ups_timer_shutdown": {
+        "unit": UNIT_SECOND,
+        "device_class": DEVICE_CLASS_DURATION,
+        "state_class": STATE_CLASS_MEASUREMENT,
+        "accuracy_decimals": 0,
+    },
+    "ups_timer_start": {
+        "unit": UNIT_SECOND,
+        "device_class": DEVICE_CLASS_DURATION,
+        "state_class": STATE_CLASS_MEASUREMENT,
+        "accuracy_decimals": 0,
+    },
 }
 
 

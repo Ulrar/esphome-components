@@ -246,20 +246,38 @@ binary_sensor:
     device_class: problem
 
 text_sensor:
+  # Device identification (available on all protocols)
   - platform: ups_hid
     ups_hid_id: ups_monitor
     type: manufacturer
     name: "UPS Manufacturer"
+    icon: "mdi:factory"
     
   - platform: ups_hid
     ups_hid_id: ups_monitor
     type: model
     name: "UPS Model"
+    icon: "mdi:information-outline"
+
+  # Device information (protocol-specific)
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    type: serial_number
+    name: "UPS Serial Number"
+    icon: "mdi:identifier"
     
   - platform: ups_hid
     ups_hid_id: ups_monitor
+    type: firmware_version
+    name: "UPS Firmware Version"
+    icon: "mdi:chip"
+
+  # Communication status
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
     type: protocol
-    name: "UPS Protocol"
+    name: "Detected Protocol"
+    icon: "mdi:connection"
     
   - platform: ups_hid
     ups_hid_id: ups_monitor
@@ -536,12 +554,36 @@ text_sensor:
 ```
 
 **Available text sensor types:**
-- `manufacturer`: UPS manufacturer name
-- `model`: UPS model number/name
-- `serial_number`: UPS serial number (if available)
-- `firmware_version`: UPS firmware version (if available)  
-- `protocol`: Currently detected protocol name
-- `status`: Combined UPS status text
+
+### Device Identification (Available on all protocols):
+- `manufacturer`: UPS manufacturer name (e.g., "APC", "CPS", "Generic")
+- `model`: UPS model number/name (e.g., "Back-UPS ES", "CP1500EPFCLCD")
+- `protocol`: Currently detected protocol name (e.g., "APC HID Protocol")
+- `status`: Combined UPS status text (e.g., "Online Charging")
+
+### Device Information (Protocol-specific support):
+- `serial_number`: UPS serial number
+  - ✅ **CyberPower**: Full HID report parsing (e.g., "CRMLX2000234")
+  - ⚠️ **APC**: Basic support (may be limited by device)
+  - ⚠️ **Generic**: Device-dependent parsing
+- `firmware_version`: UPS firmware version
+  - ✅ **CyberPower**: Full HID report parsing (e.g., "CR01505B4")
+  - ⚠️ **APC**: Basic support (may be limited by device)
+  - ⚠️ **Generic**: Device-dependent parsing
+
+### HID Configuration (Protocol-specific support):
+- `ups_beeper_status`: UPS beeper/alarm configuration
+  - ✅ **CyberPower**: Full parsing ("enabled", "disabled", "muted")
+  - ⚠️ **APC**: Basic support (may be limited by device)
+  - ⚠️ **Generic**: Device-dependent parsing
+- `input_sensitivity`: UPS input voltage sensitivity setting
+  - ✅ **CyberPower**: Full parsing ("high", "normal", "low")
+  - ⚠️ **APC**: Basic support (may be limited by device)
+  - ⚠️ **Generic**: Device-dependent parsing
+
+**Legend**: ✅ = Full Support, ⚠️ = Basic/Limited Support
+
+> **Note**: Device information availability depends on the UPS model and protocol implementation. CyberPower devices provide the most comprehensive device information through dedicated HID reports.
 
 ## Advanced Configuration
 
