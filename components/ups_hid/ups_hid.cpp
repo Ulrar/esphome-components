@@ -5,6 +5,7 @@
 
 // Include protocol implementations
 #include "apc_hid_protocol.h"
+#include "cyberpower_protocol.h"
 
 #include <functional>
 #include <cmath>
@@ -601,6 +602,38 @@ namespace esphome
         {
           value = local_data.frequency;
         }
+        else if (type == "battery_voltage")
+        {
+          value = local_data.battery_voltage;
+        }
+        else if (type == "battery_voltage_nominal")
+        {
+          value = local_data.battery_voltage_nominal;
+        }
+        else if (type == "input_voltage_nominal")
+        {
+          value = local_data.input_voltage_nominal;
+        }
+        else if (type == "input_transfer_low")
+        {
+          value = local_data.input_transfer_low;
+        }
+        else if (type == "input_transfer_high")
+        {
+          value = local_data.input_transfer_high;
+        }
+        else if (type == "ups_realpower_nominal")
+        {
+          value = local_data.ups_realpower_nominal;
+        }
+        else if (type == "ups_delay_shutdown")
+        {
+          value = static_cast<float>(local_data.ups_delay_shutdown);
+        }
+        else if (type == "ups_delay_start")
+        {
+          value = static_cast<float>(local_data.ups_delay_start);
+        }
 
         // Only publish if value is valid and within reasonable bounds
         if (!std::isnan(value))
@@ -670,6 +703,22 @@ namespace esphome
         else if (type == "protocol")
         {
           sensor->publish_state(get_protocol_name());
+        }
+        else if (type == "serial_number" && !local_data.serial_number.empty())
+        {
+          sensor->publish_state(local_data.serial_number);
+        }
+        else if (type == "firmware_version" && !local_data.firmware_version.empty())
+        {
+          sensor->publish_state(local_data.firmware_version);
+        }
+        else if (type == "ups_beeper_status" && !local_data.ups_beeper_status.empty())
+        {
+          sensor->publish_state(local_data.ups_beeper_status);
+        }
+        else if (type == "input_sensitivity" && !local_data.input_sensitivity.empty())
+        {
+          sensor->publish_state(local_data.input_sensitivity);
         }
         else if (type == "status")
         {

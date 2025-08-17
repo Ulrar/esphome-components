@@ -79,6 +79,18 @@ namespace esphome
       std::string firmware_version{};
       UpsProtocol detected_protocol{PROTOCOL_UNKNOWN};
       
+      // Additional sensor fields
+      float battery_voltage{NAN};
+      float battery_voltage_nominal{NAN};
+      float input_voltage_nominal{NAN};
+      float input_transfer_low{NAN};
+      float input_transfer_high{NAN};
+      float ups_realpower_nominal{NAN};
+      int16_t ups_delay_shutdown{-1};
+      int16_t ups_delay_start{-1};
+      std::string ups_beeper_status{};
+      std::string input_sensitivity{};
+      
       // Reset all data to default values
       void reset() {
         battery_level = NAN;
@@ -93,6 +105,18 @@ namespace esphome
         serial_number.clear();
         firmware_version.clear();
         detected_protocol = PROTOCOL_UNKNOWN;
+        
+        // Reset additional sensor fields
+        battery_voltage = NAN;
+        battery_voltage_nominal = NAN;
+        input_voltage_nominal = NAN;
+        input_transfer_low = NAN;
+        input_transfer_high = NAN;
+        ups_realpower_nominal = NAN;
+        ups_delay_shutdown = -1;
+        ups_delay_start = -1;
+        ups_beeper_status.clear();
+        input_sensitivity.clear();
       }
       
       // Check if core data is valid
@@ -327,32 +351,6 @@ namespace esphome
       uint32_t parse_status_flags(const std::string &response);
     };
 
-    // CyberPower HID Protocol implementation
-    class CyberPowerProtocol : public UpsProtocolBase
-    {
-    public:
-      explicit CyberPowerProtocol(UpsHidComponent *parent) : UpsProtocolBase(parent) {}
-
-      bool detect() override;
-      bool initialize() override;
-      bool read_data(UpsData &data) override;
-      UpsProtocol get_protocol_type() const override { return PROTOCOL_CYBERPOWER_HID; }
-      std::string get_protocol_name() const override { return "CyberPower HID"; }
-
-    private:
-      struct HidReport
-      {
-        uint8_t report_id;
-        std::vector<uint8_t> data;
-      };
-
-      bool send_hid_report(const HidReport &report, HidReport &response);
-      bool parse_hid_data(const HidReport &report, UpsData &data);
-      bool parse_status_report(const HidReport &report, UpsData &data);
-      bool parse_battery_report(const HidReport &report, UpsData &data);
-      bool parse_voltage_report(const HidReport &report, UpsData &data);
-      bool parse_device_info_report(const HidReport &report, UpsData &data);
-    };
 
     // Generic HID Protocol implementation
     class GenericHidProtocol : public UpsProtocolBase

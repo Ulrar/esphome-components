@@ -20,6 +20,8 @@ TEXT_SENSOR_TYPES = [
     "protocol",
     "serial_number",
     "firmware_version",
+    "ups_beeper_status",
+    "input_sensitivity",
 ]
 
 

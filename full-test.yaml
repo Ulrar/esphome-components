@@ -218,6 +218,92 @@ sensor:
     unit_of_measurement: "Hz"
     state_class: measurement
     accuracy_decimals: 1
+    # Note: Input frequency is not available on CyberPower CP1500 model
+
+  # Additional CyberPower sensors (newly implemented)
+  # All sensors based on NUT debug data for CP1500EPFCLCD model
+  # Available sensor types: battery_voltage, battery_voltage_nominal, 
+  # input_voltage_nominal, input_transfer_low, input_transfer_high,
+  # ups_realpower_nominal, ups_delay_shutdown, ups_delay_start
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Voltage"
+    id: battery_voltage
+    type: battery_voltage
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Voltage Nominal"
+    id: battery_voltage_nominal
+    type: battery_voltage_nominal
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Input Voltage Nominal"
+    id: input_voltage_nominal
+    type: input_voltage_nominal
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Input Transfer Low"
+    id: input_transfer_low
+    type: input_transfer_low
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Input Transfer High"
+    id: input_transfer_high
+    type: input_transfer_high
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Real Power Nominal"
+    id: ups_realpower_nominal
+    type: ups_realpower_nominal
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Delay Shutdown"
+    id: ups_delay_shutdown
+    type: ups_delay_shutdown
+    unit_of_measurement: "s"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Delay Start"
+    id: ups_delay_start
+    type: ups_delay_start
+    unit_of_measurement: "s"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
 
   # System sensors for monitoring ESP32 health
   - platform: uptime
@@ -245,10 +331,40 @@ sensor:
     state_class: measurement
     accuracy_decimals: 1
     lambda: |-
-      if (!std::isnan(id(output_voltage).state) && !std::isnan(id(load_percentage).state)) {
-        // Calculate actual power consumption based on UPS specifications
-        // APC Back-UPS ES 700: 700VA nominal capacity, ~420W max real power
-        float ups_max_power = 420.0; // Watts for Back-UPS ES 700
+      if (!std::isnan(id(load_percentage).state)) {
+        float ups_max_power = 700.0; // Default fallback
+        
+        // Try to use HID nominal power data (CyberPower)
+        if (!std::isnan(id(ups_realpower_nominal).state)) {
+          ups_max_power = id(ups_realpower_nominal).state;
+        }
+        // Otherwise, estimate based on detected protocol/manufacturer
+        else {
+          std::string manufacturer = id(ups_manufacturer).state;
+          std::string model = id(ups_model).state;
+          
+          // CyberPower models
+          if (manufacturer == "CPS") {
+            if (model.find("CP1500") != std::string::npos) {
+              ups_max_power = 900.0; // CP1500EPFCLCD: 900W
+            } else if (model.find("CP1000") != std::string::npos) {
+              ups_max_power = 600.0; // CP1000 series: ~600W
+            } else if (model.find("CP750") != std::string::npos) {
+              ups_max_power = 450.0; // CP750 series: ~450W
+            }
+          }
+          // APC models
+          else if (manufacturer == "APC") {
+            if (model.find("ES 700") != std::string::npos || model.find("Back-UPS ES") != std::string::npos) {
+              ups_max_power = 405.0; // APC Back-UPS ES 700: 405W
+            } else if (model.find("ES 550") != std::string::npos) {
+              ups_max_power = 330.0; // APC Back-UPS ES 550: 330W
+            } else if (model.find("ES 750") != std::string::npos) {
+              ups_max_power = 450.0; // APC Back-UPS ES 750: 450W
+            }
+          }
+        }
+        
         float current_power = (ups_max_power * id(load_percentage).state) / 100.0;
         return current_power;
       }
@@ -347,6 +463,20 @@ text_sensor:
     name: "Detected Protocol"
     id: ups_protocol
     type: protocol
+
+  # Additional CyberPower text sensors (newly implemented)
+  # Available text sensor types: ups_beeper_status, input_sensitivity
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Beeper Status"
+    id: ups_beeper_status
+    type: ups_beeper_status
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Input Sensitivity"
+    id: input_sensitivity
+    type: input_sensitivity
 
   # System text sensors
   - platform: version

@@ -7,10 +7,14 @@ from esphome.const import (
     DEVICE_CLASS_VOLTAGE,
     DEVICE_CLASS_POWER_FACTOR,
     DEVICE_CLASS_DURATION,
+    DEVICE_CLASS_POWER,
+    DEVICE_CLASS_EMPTY,
     UNIT_PERCENT,
     UNIT_VOLT,
     UNIT_MINUTE,
     UNIT_HERTZ,
+    UNIT_WATT,
+    UNIT_SECOND,
 )
 
 # Handle STATE_CLASS_MEASUREMENT import for different ESPHome versions
@@ -61,6 +65,54 @@ SENSOR_TYPES = {
         "unit": UNIT_HERTZ,
         "state_class": STATE_CLASS_MEASUREMENT,
         "accuracy_decimals": 1,
+    },
+    "battery_voltage": {
+        "unit": UNIT_VOLT,
+        "device_class": DEVICE_CLASS_VOLTAGE,
+        "state_class": STATE_CLASS_MEASUREMENT,
+        "accuracy_decimals": 1,
+    },
+    "battery_voltage_nominal": {
+        "unit": UNIT_VOLT,
+        "device_class": DEVICE_CLASS_VOLTAGE,
+        "state_class": STATE_CLASS_MEASUREMENT,
+        "accuracy_decimals": 0,
+    },
+    "input_voltage_nominal": {
+        "unit": UNIT_VOLT,
+        "device_class": DEVICE_CLASS_VOLTAGE,
+        "state_class": STATE_CLASS_MEASUREMENT,
+        "accuracy_decimals": 0,
+    },
+    "input_transfer_low": {
+        "unit": UNIT_VOLT,
+        "device_class": DEVICE_CLASS_VOLTAGE,
+        "state_class": STATE_CLASS_MEASUREMENT,
+        "accuracy_decimals": 0,
+    },
+    "input_transfer_high": {
+        "unit": UNIT_VOLT,
+        "device_class": DEVICE_CLASS_VOLTAGE,
+        "state_class": STATE_CLASS_MEASUREMENT,
+        "accuracy_decimals": 0,
+    },
+    "ups_realpower_nominal": {
+        "unit": UNIT_WATT,
+        "device_class": DEVICE_CLASS_POWER,
+        "state_class": STATE_CLASS_MEASUREMENT,
+        "accuracy_decimals": 0,
+    },
+    "ups_delay_shutdown": {
+        "unit": UNIT_SECOND,
+        "device_class": DEVICE_CLASS_DURATION,
+        "state_class": STATE_CLASS_MEASUREMENT,
+        "accuracy_decimals": 0,
+    },
+    "ups_delay_start": {
+        "unit": UNIT_SECOND,
+        "device_class": DEVICE_CLASS_DURATION,
+        "state_class": STATE_CLASS_MEASUREMENT,
+        "accuracy_decimals": 0,
     },
 }
 
