@@ -343,11 +343,23 @@ void CyberPowerProtocol::parse_present_status_report(const HidReport &report, Up
   
   data.status_flags = status_flags;
   
-  ESP_LOGD(CP_TAG, "Status: AC:%s Charging:%s OnBatt:%s LowBatt:%s", 
+  // Set battery status based on charging/discharging state (not FullChargeCapacity)
+  if (charging) {
+    data.battery_status = "charging";
+  } else if (discharging || !ac_present) {
+    data.battery_status = "discharging";
+  } else if (fully_charged) {
+    data.battery_status = "fully charged";
+  } else {
+    data.battery_status = "normal";
+  }
+  
+  ESP_LOGD(CP_TAG, "Status: AC:%s Charging:%s OnBatt:%s LowBatt:%s BattStatus:\"%s\"", 
            ac_present ? "Yes" : "No",
            charging ? "Yes" : "No", 
            (status_flags & UPS_STATUS_ON_BATTERY) ? "Yes" : "No",
-           (status_flags & UPS_STATUS_LOW_BATTERY) ? "Yes" : "No");
+           (status_flags & UPS_STATUS_LOW_BATTERY) ? "Yes" : "No",
+           data.battery_status.c_str());
 }
 
 void CyberPowerProtocol::parse_input_voltage_report(const HidReport &report, UpsData &data) {
@@ -786,7 +798,7 @@ void CyberPowerProtocol::read_missing_dynamic_values(UpsData &data) {
   // 4. Set static/derived values based on NUT behavior  
   data.ups_test_result = "No test initiated";  // Default test result
   
-  // NOTE: battery_status is now properly read from FullChargeCapacity in parse_battery_capacity_report
+  // NOTE: battery_status is now properly set based on charging state in parse_present_status_report
   
   // 5. Timer values represent active countdown (negative when no countdown active)
   // NUT shows: ups.timer.shutdown: -60, ups.timer.start: -60
@@ -829,15 +841,12 @@ void CyberPowerProtocol::parse_battery_capacity_limits_report(const HidReport &r
              data.battery_charge_low, remaining_limit);
   }
   
-  // Extract full charge capacity (offset 40 = byte 6) - this is used for battery.status 
+  // Extract full charge capacity (offset 40 = byte 6) - this is NOT used for battery.status 
+  // FullChargeCapacity represents maximum capacity (100%), not current status
   if (report.data.size() > 6) {
     uint8_t full_charge_capacity = report.data[6]; // Offset 40 bits = byte 5 + 1
-    // Format as "XX%" like NUT cps_battstatus function does
-    char battery_status_buf[8];
-    snprintf(battery_status_buf, sizeof(battery_status_buf), "%.0f%%", static_cast<float>(full_charge_capacity));
-    data.battery_status = std::string(battery_status_buf);
-    ESP_LOGI(CP_TAG, "CyberPower Battery status (FullChargeCapacity): %s (raw: %d)", 
-             data.battery_status.c_str(), full_charge_capacity);
+    ESP_LOGD(CP_TAG, "CyberPower FullChargeCapacity: %d%% (always 100%% for healthy battery)", full_charge_capacity);
+    // Note: battery_status is now set from charging state in parse_present_status_report
   }
 }
 

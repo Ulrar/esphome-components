@@ -1475,11 +1475,23 @@ namespace esphome
 
     esp_err_t UpsHidComponent::hid_get_report(uint8_t report_type, uint8_t report_id, uint8_t* data, size_t* data_len)
     {
-      if (!device_connected_ || !usb_device_.dev_hdl || !data || !data_len || *data_len == 0) {
-        ESP_LOGE(TAG, "HID GET_REPORT: Invalid parameters or device not connected");
+      if (!device_connected_)
+      {
+        ESP_LOGE(TAG, "HID GET_REPORT: Device not connected (device_connected_=false)");
         return ESP_ERR_INVALID_ARG;
       }
-      
+      if (!usb_device_.dev_hdl)
+      {
+        ESP_LOGE(TAG, "HID GET_REPORT: No device handle (usb_device_.dev_hdl=NULL)");
+        return ESP_ERR_INVALID_ARG;
+      }
+      if (!data || !data_len || *data_len == 0)
+      {
+        ESP_LOGE(TAG, "HID GET_REPORT: Invalid parameters (data=%p, data_len=%p, *data_len=%zu)",
+                 data, data_len, data_len ? *data_len : 0);
+        return ESP_ERR_INVALID_ARG;
+      }
+
       ESP_LOGD(TAG, "HID GET_REPORT: type=0x%02X, id=0x%02X, max_len=%zu", report_type, report_id, *data_len);
       
       // Use specific buffer sizes based on working NUT implementation
