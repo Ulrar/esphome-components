@@ -10,7 +10,7 @@ Monitor UPS devices via direct USB connection on ESP32-S3. Supports APC, CyberPo
 
 **Key Features:**
 - Real-time UPS monitoring (battery, voltage, load, runtime)
-- Multi-protocol support (APC Smart, APC HID, CyberPower HID, Generic HID)
+- Multi-protocol support (APC HID, CyberPower HID, Generic HID)
 - Auto-detection of UPS protocols
 - RGB LED status indicator support
 - Home Assistant integration
