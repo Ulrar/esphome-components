@@ -21,19 +21,27 @@ namespace esphome
       const char *description;
     };
 
-    // Definitive list of known UPS vendors (based on NUT project driver.list)
+    // Definitive list of known UPS vendors (based on NUT project HID driver support)
     static constexpr UpsVendor KNOWN_UPS_VENDORS[] = {
-        //{0x0001, "Generic/Other", "Generic UPS vendors (multiple brands)"},
-        {0x0463, "MGE Office Protection Systems", "MGE Office Protection Systems"},
-        {0x050D, "Belkin", "Belkin (older USB UPS models)"},
-        {0x051D, "APC", "American Power Conversion"},
-        {0x05B8, "SVEN", "SVEN UPS devices"},
-        {0x0665, "Cypress/Belkin", "Cypress or Belkin UPS devices"},
-        {0x06DA, "MGE UPS Systems", "MGE UPS Systems (now Eaton)"},
-        {0x0764, "CyberPower", "CyberPower Systems"},
-        {0x0925, "Richcomm", "Richcomm Technologies (Digitus, Sweex)"},
-        {0x09AE, "Tripp Lite", "Tripp Lite"},
-        {0x09D6, "Micropower", "Micropower UPS devices"},
+        // Vendors with dedicated HID drivers and ESPHome implementations
+        {0x051D, "APC", "American Power Conversion (dedicated ESPHome protocol)"},
+        {0x0764, "CyberPower", "CyberPower Systems (dedicated ESPHome protocol)"},
+
+        // Vendors with dedicated NUT HID drivers (Generic HID protocol support)
+        {0x0463, "MGE Office Protection Systems", "MGE Office Protection Systems (Eaton)"},
+        {0x047C, "Dell", "Dell UPS devices (via MGE HID driver)"},
+        {0x04B3, "IBM", "IBM UPS devices (via MGE HID driver)"},
+        {0x04D8, "OpenUPS", "OpenUPS HID devices"},
+        {0x050D, "Belkin", "Belkin USB UPS models"},
+        {0x0592, "Powerware", "Powerware UPS devices (via MGE HID driver)"},
+        {0x05DD, "Delta Electronics", "Delta UPS devices (Tripp Lite OEM)"},
+        {0x06DA, "MGE UPS Systems", "MGE UPS Systems / Liebert / Phoenixtec (now Eaton)"},
+        {0x075D, "Idowell", "Idowell HID UPS devices"},
+        {0x09AE, "Tripp Lite", "Tripp Lite UPS devices"},
+        {0x09D6, "KSTAR", "KSTAR/Micropower UPS devices"},
+
+        // STMicroelectronics OEM vendor (used by multiple UPS manufacturers)
+        {0x0483, "STMicroelectronics", "STMicro OEM UPS devices (CPS, Ever, others)"},
     };
 
     static constexpr size_t KNOWN_UPS_VENDORS_COUNT = sizeof(KNOWN_UPS_VENDORS) / sizeof(KNOWN_UPS_VENDORS[0]);

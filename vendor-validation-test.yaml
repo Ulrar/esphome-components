@@ -36,11 +36,12 @@ external_components:
       type: local
       path: components
 
-# Test with unknown vendor ID to trigger validation warning
+# Test with unknown vendor ID for troubleshooting mode validation
 ups_hid:
   id: ups_monitor
   update_interval: 30s
-  usb_vendor_id: 0x9999 # Unknown vendor ID - should trigger warning
+  # Using manual USB IDs in troubleshooting mode (component will try auto-detection first)
+  usb_vendor_id: 0x9999 # Unknown vendor ID - should trigger warning but still work
   usb_product_id: 0x0001
   auto_detect_protocol: true
   protocol_timeout: 15s

@@ -20,15 +20,19 @@ CONF_UPS_HID_ID = "ups_hid_id"
 # Known UPS vendor IDs for validation
 KNOWN_VENDOR_IDS = {
     0x0463: "MGE Office Protection Systems",
+    0x047C: "Dell",
+    0x0483: "STMicroelectronics",
+    0x04B3: "IBM",
+    0x04D8: "OpenUPS",
     0x050D: "Belkin",
     0x051D: "APC",
-    0x05B8: "SVEN",
-    0x0665: "Cypress/Belkin",
+    0x0592: "Powerware",
+    0x05DD: "Delta Electronics",
     0x06DA: "MGE UPS Systems",
+    0x075D: "Idowell",
     0x0764: "CyberPower",
-    0x0925: "Richcomm",
     0x09AE: "Tripp Lite",
-    0x09D6: "Micropower",
+    0x09D6: "KSTAR",
 }
 
 ups_hid_ns = cg.esphome_ns.namespace("ups_hid")
@@ -36,17 +40,27 @@ UpsHidComponent = ups_hid_ns.class_("UpsHidComponent", cg.PollingComponent)
 
 
 def validate_usb_config(config):
-    """Validate USB configuration with helpful warnings."""
-    vendor_id = config.get(CONF_USB_VENDOR_ID, 0x051D)
-    product_id = config.get(CONF_USB_PRODUCT_ID, 0x0002)
+    """Validate USB configuration. Manual IDs are now troubleshooting fallbacks only."""
+    vendor_id = config.get(CONF_USB_VENDOR_ID)
+    product_id = config.get(CONF_USB_PRODUCT_ID)
 
-    # Validate non-zero IDs
-    if vendor_id == 0 or product_id == 0:
-        raise cv.Invalid("USB vendor and product IDs must be non-zero")
+    # If either ID is specified, both must be provided for troubleshooting mode
+    if vendor_id is not None or product_id is not None:
+        if vendor_id is None or product_id is None:
+            raise cv.Invalid("When using manual USB IDs for troubleshooting, both vendor_id and product_id must be specified")
+        
+        # Validate non-zero IDs
+        if vendor_id == 0 or product_id == 0:
+            raise cv.Invalid("USB vendor and product IDs must be non-zero")
 
-    # Warn about unknown vendor IDs
-    if vendor_id not in KNOWN_VENDOR_IDS:
-        raise cv.Invalid("Unknown vendor id")
+        # Warn about unknown vendor IDs
+        if vendor_id not in KNOWN_VENDOR_IDS:
+            # Just log a warning instead of failing - this is for troubleshooting
+            import logging
+            logging.getLogger(__name__).warning(
+                f"Unknown USB vendor ID 0x{vendor_id:04X}. "
+                "Component will attempt auto-detection first, then fall back to manual settings."
+            )
 
     return config
 
@@ -87,11 +101,13 @@ CONFIG_SCHEMA = cv.All(
         {
             cv.GenerateID(): cv.declare_id(UpsHidComponent),
             cv.Optional(CONF_SIMULATION_MODE, default=False): cv.boolean,
-            cv.Optional(CONF_USB_VENDOR_ID, default=0x051D): cv.hex_uint16_t,
-            cv.Optional(CONF_USB_PRODUCT_ID, default=0x0002): cv.hex_uint16_t,
+            # Manual USB IDs are now primarily for troubleshooting when auto-detection fails
+            cv.Optional(CONF_USB_VENDOR_ID): cv.hex_uint16_t,
+            cv.Optional(CONF_USB_PRODUCT_ID): cv.hex_uint16_t,
             cv.Optional(
                 CONF_PROTOCOL_TIMEOUT, default="15s"
             ): validate_protocol_timeout,
+            # Auto-detection is now always attempted first, this controls fallback behavior
             cv.Optional(CONF_AUTO_DETECT_PROTOCOL, default=True): cv.boolean,
         }
     ).extend(cv.polling_component_schema("30s"))
@@ -105,7 +121,12 @@ async def to_code(config):
     await cg.register_component(var, config)
 
     cg.add(var.set_simulation_mode(config[CONF_SIMULATION_MODE]))
-    cg.add(var.set_usb_vendor_id(config[CONF_USB_VENDOR_ID]))
-    cg.add(var.set_usb_product_id(config[CONF_USB_PRODUCT_ID]))
+    
+    # USB IDs are now optional - only set if provided for troubleshooting
+    if CONF_USB_VENDOR_ID in config:
+        cg.add(var.set_usb_vendor_id(config[CONF_USB_VENDOR_ID]))
+    if CONF_USB_PRODUCT_ID in config:
+        cg.add(var.set_usb_product_id(config[CONF_USB_PRODUCT_ID]))
+    
     cg.add(var.set_protocol_timeout(config[CONF_PROTOCOL_TIMEOUT]))
     cg.add(var.set_auto_detect_protocol(config[CONF_AUTO_DETECT_PROTOCOL]))

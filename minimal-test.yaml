@@ -76,14 +76,14 @@ external_components:
 # UPS HID Component
 ups_hid:
   id: ups_monitor
-  simulation_mode: false # Test with real APC UPS hardware
+  simulation_mode: false # Test with real hardware
   update_interval: 5s
 
-  # Hardware Configuration
-  usb_vendor_id: 0x051d # APC vendor ID (0x051d)
-  usb_product_id: 0x0002 # APC Back-UPS ES series
-
-  # usb_vendor_id: 0x0764 # CyberPower (0x0764)
+  # Component now auto-detects all USB devices and protocols
+  # Manual USB IDs only needed for troubleshooting:
+  # usb_vendor_id: 0x051d # APC vendor ID (uncomment if auto-detection fails)
+  # usb_product_id: 0x0002 # APC Back-UPS ES series
+  # usb_vendor_id: 0x0764 # CyberPower (uncomment if auto-detection fails)
   # usb_product_id: 0x0501 # CP1500 AVR UPS
 
   protocol_timeout: 10s

@@ -136,11 +136,15 @@ namespace esphome
     class UpsHidComponent : public PollingComponent
     {
     public:
-      UpsHidComponent() : usb_device_{}, usb_mutex_(nullptr), usb_lib_task_handle_(nullptr),
-                          usb_client_task_handle_(nullptr), usb_host_initialized_(false), 
-                          device_connected_(false), usb_tasks_running_(false) {
+      UpsHidComponent() {
 #ifdef USE_ESP32
         memset(&usb_device_, 0, sizeof(usb_device_));
+        usb_mutex_ = nullptr;
+        usb_lib_task_handle_ = nullptr;
+        usb_client_task_handle_ = nullptr;
+        usb_host_initialized_ = false;
+        device_connected_ = false;
+        usb_tasks_running_ = false;
         ups_data_cache_.last_update_time = 0;
         ups_data_cache_.data_valid = false;
 #endif
@@ -163,10 +167,10 @@ namespace esphome
       // Configuration setters with validation
       void set_simulation_mode(bool simulation_mode) { simulation_mode_ = simulation_mode; }
       void set_usb_vendor_id(uint16_t vendor_id) { 
-        if (vendor_id != 0) usb_vendor_id_ = vendor_id; 
+        usb_vendor_id_ = vendor_id; 
       }
       void set_usb_product_id(uint16_t product_id) { 
-        if (product_id != 0) usb_product_id_ = product_id; 
+        usb_product_id_ = product_id; 
       }
       void set_protocol_timeout(uint32_t timeout_ms) { 
         // Bound timeout between 5 seconds and 5 minutes for safety
@@ -186,7 +190,13 @@ namespace esphome
       // USB device info getters
       uint16_t get_usb_vendor_id() const { return usb_vendor_id_; }
       uint16_t get_usb_product_id() const { return usb_product_id_; }
-      bool is_input_only_device() const { return usb_device_.is_input_only; }
+      bool is_input_only_device() const { 
+#ifdef USE_ESP32
+        return usb_device_.is_input_only; 
+#else
+        return false;
+#endif
+      }
 
       // Sensor registration methods
       void register_sensor(sensor::Sensor *sens, const std::string &type);
@@ -195,8 +205,8 @@ namespace esphome
 
     protected:
       bool simulation_mode_{false};
-      uint16_t usb_vendor_id_{0x051D};  // APC default
-      uint16_t usb_product_id_{0x0002}; // Back-UPS ES series default
+      uint16_t usb_vendor_id_{0};  // 0 means auto-detect
+      uint16_t usb_product_id_{0}; // 0 means auto-detect
       uint32_t protocol_timeout_ms_{10000};
       bool auto_detect_protocol_{true};
 
@@ -239,9 +249,11 @@ namespace esphome
       bool usb_write(const std::vector<uint8_t> &data);
       bool usb_read(std::vector<uint8_t> &data, uint32_t timeout_ms = 1000);
       
+#ifdef USE_ESP32
       // HID class requests (UPS-specific communication)
       esp_err_t hid_get_report(uint8_t report_type, uint8_t report_id, uint8_t* data, size_t* data_len);
       esp_err_t hid_set_report(uint8_t report_type, uint8_t report_id, const uint8_t* data, size_t data_len);
+#endif
       
 
     protected:

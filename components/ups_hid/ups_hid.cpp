@@ -323,18 +323,8 @@ namespace esphome
     {
       ESP_LOGD(TAG, "Detecting UPS protocol...");
 
-      if (!auto_detect_protocol_)
-      {
-        // Use APC HID Protocol as default when auto-detection is disabled
-        active_protocol_ = std::make_unique<ApcHidProtocol>(this);
-        if (active_protocol_->initialize())
-        {
-          ESP_LOGI(TAG, "Using pre-configured protocol: %s", active_protocol_->get_protocol_name().c_str());
-          ups_data_.detected_protocol = active_protocol_->get_protocol_type();
-          return true;
-        }
-        return false;
-      }
+      // Always try auto-detection first to discover the actual device
+      ESP_LOGI(TAG, "Starting automatic protocol detection...");
 
       // Get the actual USB device vendor/product IDs (may differ from configured defaults)
       uint16_t detected_vid = usb_vendor_id_;
@@ -346,6 +336,11 @@ namespace esphome
       {
         detected_vid = usb_device_.vid;
         detected_pid = usb_device_.pid;
+        ESP_LOGI(TAG, "Auto-detected USB device: VID=0x%04X, PID=0x%04X", detected_vid, detected_pid);
+      }
+      else 
+      {
+        ESP_LOGW(TAG, "No USB device connected, using configured IDs: VID=0x%04X, PID=0x%04X", detected_vid, detected_pid);
       }
 #endif
 
@@ -353,21 +348,19 @@ namespace esphome
       if (is_known_ups_vendor(detected_vid))
       {
         const char *vendor_name = get_ups_vendor_name(detected_vid);
-        ESP_LOGD(TAG, "Detected known UPS vendor: %s (0x%04X)", vendor_name, detected_vid);
+        ESP_LOGI(TAG, "Detected known UPS vendor: %s (0x%04X)", vendor_name, detected_vid);
       }
       else
       {
-        ESP_LOGD(TAG, "Unknown vendor ID: 0x%04X (trying generic protocols)", detected_vid);
+        ESP_LOGI(TAG, "Unknown/Generic vendor ID: 0x%04X (trying all protocols)", detected_vid);
       }
 
-      // Vendor-specific protocol detection with retry logic
+      // Always attempt auto-detection - try all protocols in intelligent order
       std::vector<std::pair<std::string, std::function<bool()>>> protocol_attempts;
 
-      // Build protocol detection list based on vendor ID
-      switch (detected_vid)
-      {
-      case 0x051D: // APC
-        ESP_LOGD(TAG, "APC device detected, trying HID protocol");
+      if (detected_vid == 0x051D) {
+        // APC device detected - try APC HID first
+        ESP_LOGD(TAG, "APC device detected, trying APC HID protocol first");
         protocol_attempts.push_back({"APC HID", [this]()
                                      {
                                        auto protocol = std::make_unique<ApcHidProtocol>(this);
@@ -379,10 +372,9 @@ namespace esphome
                                        }
                                        return false;
                                      }});
-        break;
-
-      case 0x0764: // CyberPower
-        ESP_LOGD(TAG, "CyberPower device detected, trying CyberPower HID protocol");
+      } else if (detected_vid == 0x0764) {
+        // CyberPower device detected - try CyberPower HID first
+        ESP_LOGD(TAG, "CyberPower device detected, trying CyberPower HID protocol first");
         protocol_attempts.push_back({"CyberPower HID", [this]()
                                      {
                                        auto protocol = std::make_unique<CyberPowerProtocol>(this);
@@ -394,15 +386,15 @@ namespace esphome
                                        }
                                        return false;
                                      }});
-        break;
-
-      case 0x09AE: // Tripp Lite
-      case 0x06DA: // MGE UPS Systems (now Eaton)
-      case 0x0463: // MGE Office Protection Systems
-      case 0x050D: // Belkin
-      case 0x0665: // Cypress/Belkin
-        ESP_LOGD(TAG, "Known UPS vendor detected (0x%04X), trying Generic HID", detected_vid);
-        protocol_attempts.push_back({"Generic HID", [this]()
+      }
+      else if (detected_vid == 0x0463 || detected_vid == 0x047C || detected_vid == 0x04B3 ||
+               detected_vid == 0x04D8 || detected_vid == 0x0483 || detected_vid == 0x050D ||
+               detected_vid == 0x0592 || detected_vid == 0x05DD || detected_vid == 0x06DA ||
+               detected_vid == 0x075D || detected_vid == 0x09AE || detected_vid == 0x09D6)
+      {
+        // Known UPS vendor with NUT HID driver support - try Generic HID first
+        ESP_LOGD(TAG, "Known UPS vendor detected (0x%04X), trying Generic HID first", detected_vid);
+        protocol_attempts.push_back({"Known UPS vendor - Generic HID", [this]()
                                      {
                                        auto protocol = std::make_unique<GenericHidProtocol>(this);
                                        if (protocol->detect() && protocol->initialize())
@@ -413,48 +405,23 @@ namespace esphome
                                        }
                                        return false;
                                      }});
-        break;
-
-      default:
-        // Unknown vendor - try all protocols with enhanced detection
-        ESP_LOGD(TAG, "Unknown vendor (0x%04X), trying all protocols", detected_vid);
-        protocol_attempts.push_back({"APC HID", [this]()
-                                     {
-                                       auto protocol = std::make_unique<ApcHidProtocol>(this);
-                                       if (protocol->detect() && protocol->initialize())
-                                       {
-                                         active_protocol_ = std::move(protocol);
-                                         ups_data_.detected_protocol = PROTOCOL_APC_HID;
-                                         return true;
-                                       }
-                                       return false;
-                                     }});
-        protocol_attempts.push_back({"CyberPower HID", [this]()
-                                     {
-                                       auto protocol = std::make_unique<CyberPowerProtocol>(this);
-                                       if (protocol->detect() && protocol->initialize())
-                                       {
-                                         active_protocol_ = std::move(protocol);
-                                         ups_data_.detected_protocol = PROTOCOL_CYBERPOWER_HID;
-                                         return true;
-                                       }
-                                       return false;
-                                     }});
-        break;
       }
-
-      // Always add Generic HID as final fallback
-      protocol_attempts.push_back({"Generic HID", [this]()
-                                   {
-                                     auto protocol = std::make_unique<GenericHidProtocol>(this);
-                                     if (protocol->detect() && protocol->initialize())
+      else
+      {
+        // Always add Generic HID as final fallback (if not already added)
+        ESP_LOGD(TAG, "Unkown UPS vendor detected (0x%04X), using Generic HID", detected_vid);
+        protocol_attempts.push_back({"Unkown UPS vendor - Generic HID", [this]()
                                      {
-                                       active_protocol_ = std::move(protocol);
-                                       ups_data_.detected_protocol = PROTOCOL_GENERIC_HID;
-                                       return true;
-                                     }
-                                     return false;
-                                   }});
+                                       auto protocol = std::make_unique<GenericHidProtocol>(this);
+                                       if (protocol->detect() && protocol->initialize())
+                                       {
+                                         active_protocol_ = std::move(protocol);
+                                         ups_data_.detected_protocol = PROTOCOL_GENERIC_HID;
+                                         return true;
+                                       }
+                                       return false;
+                                     }});
+      }
 
       // Try each protocol with timeout and retry logic
       for (const auto &attempt : protocol_attempts)
@@ -495,7 +462,8 @@ namespace esphome
         }
       }
 
-      ESP_LOGE(TAG, "No compatible UPS protocol detected for vendor 0x%04X", detected_vid);
+      ESP_LOGW(TAG, "Auto-detection failed for vendor 0x%04X", detected_vid);
+
       return false;
     }
 
