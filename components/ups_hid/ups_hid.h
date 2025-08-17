@@ -113,9 +113,12 @@ namespace esphome
     {
     public:
       UpsHidComponent() : usb_device_{}, usb_mutex_(nullptr), usb_lib_task_handle_(nullptr), 
-                          usb_host_initialized_(false), device_connected_(false) {
+                          usb_client_task_handle_(nullptr), usb_host_initialized_(false), 
+                          device_connected_(false), usb_tasks_running_(false) {
 #ifdef USE_ESP32
         memset(&usb_device_, 0, sizeof(usb_device_));
+        ups_data_cache_.last_update_time = 0;
+        ups_data_cache_.data_valid = false;
 #endif
       }
       
@@ -225,6 +228,7 @@ namespace esphome
         uint16_t vid;
         uint16_t pid;
         bool is_hid_device;
+        bool is_input_only;        // True if device has no OUT endpoint (input-only HID device)
         uint8_t interface_num;
         uint8_t ep_in;
         uint8_t ep_out;
@@ -235,8 +239,18 @@ namespace esphome
       UsbDevice usb_device_;
       SemaphoreHandle_t usb_mutex_;
       TaskHandle_t usb_lib_task_handle_;
+      TaskHandle_t usb_client_task_handle_;
       bool usb_host_initialized_;
       bool device_connected_;
+      volatile bool usb_tasks_running_;
+      
+      // Asynchronous data cache for non-blocking access
+      struct UpsDataCache {
+        UpsData data;
+        std::mutex mutex;
+        uint32_t last_update_time;
+        bool data_valid;
+      } ups_data_cache_;
 
       // ESP32-specific USB handling
       esp_err_t usb_init();
@@ -262,8 +276,13 @@ namespace esphome
       
       // USB Host event handling
       static void usb_host_lib_task(void *arg);
+      static void usb_client_task(void *arg);
       static void usb_client_event_callback(const usb_host_client_event_msg_t *event_msg, void *arg);
       static void usb_transfer_callback(usb_transfer_t *transfer);
+      
+      // Asynchronous USB operations
+      esp_err_t hid_get_report_async(uint8_t report_type, uint8_t report_id);
+      void process_cached_data();
 #endif
     };
 

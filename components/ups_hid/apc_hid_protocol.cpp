@@ -13,12 +13,12 @@ static const uint16_t APC_USAGE_PAGE_UPS = 0x84;
 static const uint16_t APC_USAGE_PAGE_BATTERY = 0x85;
 static const uint16_t APC_USAGE_PAGE_POWER = 0x80;
 
-// HID Report IDs commonly used by APC UPS devices
-static const uint8_t APC_REPORT_ID_STATUS = 0x01;
-static const uint8_t APC_REPORT_ID_BATTERY = 0x02;
-static const uint8_t APC_REPORT_ID_VOLTAGE = 0x03;
-static const uint8_t APC_REPORT_ID_POWER = 0x04;
-static const uint8_t APC_REPORT_ID_CONFIG = 0x05;
+// HID Report IDs used by APC UPS devices (based on working ESP32 NUT server)
+static const uint8_t APC_REPORT_ID_STATUS = 0x01;    // UPS status flags
+static const uint8_t APC_REPORT_ID_BATTERY = 0x06;   // Battery level and runtime  
+static const uint8_t APC_REPORT_ID_LOAD = 0x07;      // UPS load information
+static const uint8_t APC_REPORT_ID_VOLTAGE = 0x0e;   // Input/output voltage
+static const uint8_t APC_REPORT_ID_BEEPER = 0x1f;    // Beeper control
 
 // APC-specific date conversion (hex-as-decimal format)
 static std::string convert_apc_date(uint32_t apc_date) {
@@ -43,14 +43,35 @@ ApcHidProtocol::ApcHidProtocol(UpsHidComponent *parent) : UpsProtocolBase(parent
 bool ApcHidProtocol::detect() {
   ESP_LOGD(APC_HID_TAG, "Detecting APC HID Protocol...");
   
-  // Try to read device descriptor or status report
-  HidReport status_report;
-  if (read_hid_report(APC_REPORT_ID_STATUS, status_report)) {
-    ESP_LOGD(APC_HID_TAG, "APC HID response received, report ID: 0x%02X", status_report.report_id);
-    return true;
+  // Give device time to initialize after connection
+  vTaskDelay(pdMS_TO_TICKS(100));
+  
+  // Try multiple report IDs that are known to work with APC devices
+  // Based on working ESP32 NUT server implementation and NUT drivers
+  const uint8_t test_report_ids[] = {
+    0x01, // Basic status (UPS.PowerSummary.APCStatusFlag) - most common
+    0x06, // Battery info (UPS.PowerSummary.RemainingCapacity) 
+    0x07, // More status (UPS.PowerSummary.PresentStatus)
+    0x0e, // Input voltage
+    0x1f  // Audible alarm control
+  };
+  
+  HidReport test_report;
+  
+  for (uint8_t report_id : test_report_ids) {
+    ESP_LOGD(APC_HID_TAG, "Testing report ID 0x%02X...", report_id);
+    
+    if (read_hid_report(report_id, test_report)) {
+      ESP_LOGI(APC_HID_TAG, "SUCCESS: APC HID Protocol detected with report ID 0x%02X (%zu bytes)", 
+               report_id, test_report.data.size());
+      return true;
+    }
+    
+    // Small delay between attempts
+    vTaskDelay(pdMS_TO_TICKS(50));
   }
   
-  ESP_LOGD(APC_HID_TAG, "No APC HID Protocol response");
+  ESP_LOGD(APC_HID_TAG, "APC HID Protocol detection failed - no reports responded");
   return false;
 }
 
@@ -73,38 +94,46 @@ bool ApcHidProtocol::initialize() {
 bool ApcHidProtocol::read_data(UpsData &data) {
   ESP_LOGV(APC_HID_TAG, "Reading APC HID UPS data...");
   
-  bool success = true;
+  bool success = false;
   
-  // Read status report
+  // Read status report (most important)
   HidReport status_report;
   if (read_hid_report(APC_REPORT_ID_STATUS, status_report)) {
     parse_status_report(status_report, data);
+    success = true;
   } else {
-    ESP_LOGW(APC_HID_TAG, "Failed to read status report");
-    success = false;
+    ESP_LOGV(APC_HID_TAG, "Failed to read status report");
   }
   
   // Read battery report
   HidReport battery_report;
   if (read_hid_report(APC_REPORT_ID_BATTERY, battery_report)) {
     parse_battery_report(battery_report, data);
+    success = true;
   } else {
-    ESP_LOGW(APC_HID_TAG, "Failed to read battery report");
+    ESP_LOGV(APC_HID_TAG, "Failed to read battery report");
   }
   
-  // Read voltage/power report
+  // Read voltage report
   HidReport voltage_report;
   if (read_hid_report(APC_REPORT_ID_VOLTAGE, voltage_report)) {
     parse_voltage_report(voltage_report, data);
+    success = true;
   } else {
-    ESP_LOGW(APC_HID_TAG, "Failed to read voltage report");
+    ESP_LOGV(APC_HID_TAG, "Failed to read voltage report");
   }
   
-  HidReport power_report;
-  if (read_hid_report(APC_REPORT_ID_POWER, power_report)) {
-    parse_power_report(power_report, data);
+  // Read load report
+  HidReport load_report;
+  if (read_hid_report(APC_REPORT_ID_LOAD, load_report)) {
+    parse_power_report(load_report, data);
+    success = true;
   } else {
-    ESP_LOGV(APC_HID_TAG, "No power report available");
+    ESP_LOGV(APC_HID_TAG, "Failed to read load report");
+  }
+  
+  if (success) {
+    ESP_LOGV(APC_HID_TAG, "Successfully read UPS data");
   }
   
   return success;
@@ -117,31 +146,45 @@ bool ApcHidProtocol::init_hid_communication() {
 }
 
 bool ApcHidProtocol::read_hid_report(uint8_t report_id, HidReport &report) {
-  // Use HID Feature Report (0x03) for UPS status data
+  // Use Feature Report (0x03) for HID GET_REPORT requests
   const uint8_t report_type = 0x03; // Feature Report
   uint8_t buffer[64]; // Maximum HID report size
   size_t buffer_len = sizeof(buffer);
   
+  ESP_LOGD(APC_HID_TAG, "Reading HID Feature report 0x%02X...", report_id);
+  
   esp_err_t ret = parent_->hid_get_report(report_type, report_id, buffer, &buffer_len);
   if (ret != ESP_OK) {
-    ESP_LOGD(APC_HID_TAG, "HID GET_REPORT failed: %s", esp_err_to_name(ret));
+    ESP_LOGD(APC_HID_TAG, "HID GET_REPORT (Feature 0x%02X) failed: %s", report_id, esp_err_to_name(ret));
     return false;
   }
   
   if (buffer_len == 0) {
-    ESP_LOGD(APC_HID_TAG, "Empty HID report received");
+    ESP_LOGD(APC_HID_TAG, "Empty HID report received for ID 0x%02X", report_id);
     return false;
   }
   
   report.report_id = report_id;
   report.data.assign(buffer, buffer + buffer_len);
   
-  ESP_LOGD(APC_HID_TAG, "HID report 0x%02X: received %zu bytes", report_id, buffer_len);
+  ESP_LOGD(APC_HID_TAG, "HID Feature report 0x%02X: received %zu bytes", report_id, buffer_len);
+  
+  // Log the raw data for debugging
+  if (buffer_len > 0) {
+    std::string hex_data;
+    for (size_t i = 0; i < buffer_len; i++) {
+      char hex_byte[4];
+      snprintf(hex_byte, sizeof(hex_byte), "%02X ", buffer[i]);
+      hex_data += hex_byte;
+    }
+    ESP_LOGD(APC_HID_TAG, "Raw data: %s", hex_data.c_str());
+  }
+  
   return true;
 }
 
 bool ApcHidProtocol::write_hid_report(const HidReport &report) {
-  // Use HID Feature Report (0x03) for UPS control commands  
+  // Use HID Feature Report for UPS control commands  
   const uint8_t report_type = 0x03; // Feature Report
   
   esp_err_t ret = parent_->hid_set_report(report_type, report.report_id, 
@@ -313,7 +356,7 @@ void ApcHidProtocol::parse_power_report(const HidReport &report, UpsData &data) 
 void ApcHidProtocol::read_device_info() {
   // Read configuration report for device information
   HidReport config_report;
-  if (read_hid_report(APC_REPORT_ID_CONFIG, config_report)) {
+  if (read_hid_report(APC_REPORT_ID_BEEPER, config_report)) {
     parse_device_info_report(config_report);
   }
 }

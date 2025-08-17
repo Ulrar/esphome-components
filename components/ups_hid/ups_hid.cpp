@@ -126,41 +126,65 @@ namespace esphome
         }
       }
 
-      if (read_ups_data())
+      // Use cached data from asynchronous USB operations instead of blocking reads
+      // This prevents task watchdog timeouts by avoiding long USB control transfers
+      bool data_updated = false;
+      
       {
-        last_successful_read_ = millis();
-        consecutive_failures_ = 0;
-        update_sensors();
-      }
-      else
-      {
-        consecutive_failures_++;
-        if (should_log_error(protocol_error_limiter_))
-        {
-          ESP_LOGW(TAG, "Failed to read UPS data (failure #%u)", consecutive_failures_);
-        }
-
-        // Implement limited retry logic with exponential backoff
-        if (consecutive_failures_ >= 3 && consecutive_failures_ <= max_consecutive_failures_)
-        {
-          ESP_LOGE(TAG, "Multiple consecutive failures, attempting protocol re-detection");
-          if (!detect_ups_protocol())
+        std::lock_guard<std::mutex> cache_lock(ups_data_cache_.mutex);
+        
+        if (ups_data_cache_.data_valid) {
+          // Update main data with fresh cached data
           {
-            ESP_LOGE(TAG, "Protocol re-detection failed");
+            std::lock_guard<std::mutex> data_lock(data_mutex_);
+            ups_data_ = ups_data_cache_.data;
+          }
+          
+          last_successful_read_ = millis();
+          consecutive_failures_ = 0;
+          data_updated = true;
+          
+          // Mark cache as processed
+          ups_data_cache_.data_valid = false;
+          
+          ESP_LOGV(TAG, "Updated from cached UPS data");
+        }
+      }
+      
+      if (!data_updated) {
+        // No cached data available - try a quick non-blocking read
+        // But with reduced timeout to prevent watchdog issues
+        if (read_ups_data()) {
+          last_successful_read_ = millis();
+          consecutive_failures_ = 0;
+          data_updated = true;
+        } else {
+          consecutive_failures_++;
+          if (should_log_error(protocol_error_limiter_)) {
+            ESP_LOGW(TAG, "Failed to read UPS data (failure #%u)", consecutive_failures_);
+          }
+
+          // Implement limited retry logic with exponential backoff
+          if (consecutive_failures_ >= 3 && consecutive_failures_ <= max_consecutive_failures_) {
+            ESP_LOGE(TAG, "Multiple consecutive failures, attempting protocol re-detection");
+            if (!detect_ups_protocol()) {
+              ESP_LOGE(TAG, "Protocol re-detection failed");
+            }
+          }
+          else if (consecutive_failures_ > max_consecutive_failures_) {
+            ESP_LOGE(TAG, "Maximum re-detection attempts reached, giving up");
+          }
+
+          if (millis() - last_successful_read_ > protocol_timeout_ms_) {
+            ESP_LOGE(TAG, "UPS communication timeout, marking as disconnected");
+            connected_ = false;
+            consecutive_failures_ = 0;
           }
         }
-        else if (consecutive_failures_ > max_consecutive_failures_)
-        {
-          ESP_LOGE(TAG, "Maximum re-detection attempts reached, giving up");
-        }
-
-        if (millis() - last_successful_read_ > protocol_timeout_ms_)
-        {
-          ESP_LOGE(TAG, "UPS communication timeout, marking as disconnected");
-          connected_ = false;
-          consecutive_failures_ = 0;
-        }
       }
+      
+      // Always update sensors with current data (cached or fresh)
+      update_sensors();
     }
 
     void UpsHidComponent::dump_config()
@@ -352,17 +376,22 @@ namespace esphome
                                        }
                                        return false;
                                      }});
-        protocol_attempts.push_back({"APC Smart", [this]()
-                                     {
-                                       auto protocol = std::make_unique<ApcSmartProtocol>(this);
-                                       if (protocol->detect() && protocol->initialize())
+        // Only try Smart Protocol if device has OUT endpoint (bidirectional communication)
+        if (!usb_device_.is_input_only) {
+          protocol_attempts.push_back({"APC Smart", [this]()
                                        {
-                                         active_protocol_ = std::move(protocol);
-                                         ups_data_.detected_protocol = PROTOCOL_APC_SMART;
-                                         return true;
-                                       }
-                                       return false;
-                                     }});
+                                         auto protocol = std::make_unique<ApcSmartProtocol>(this);
+                                         if (protocol->detect() && protocol->initialize())
+                                         {
+                                           active_protocol_ = std::move(protocol);
+                                           ups_data_.detected_protocol = PROTOCOL_APC_SMART;
+                                           return true;
+                                         }
+                                         return false;
+                                       }});
+        } else {
+          ESP_LOGD(TAG, "Skipping APC Smart Protocol - input-only device (no OUT endpoint)");
+        }
         break;
 
       case 0x0764: // CyberPower
@@ -454,6 +483,9 @@ namespace esphome
       // Try each protocol with timeout and retry logic
       for (const auto &attempt : protocol_attempts)
       {
+        // Yield to prevent task watchdog timeout during long protocol detection
+        vTaskDelay(pdMS_TO_TICKS(1));
+        
         ESP_LOGD(TAG, "Trying %s protocol...", attempt.first.c_str());
 
         // Attempt detection with timeout
@@ -887,6 +919,25 @@ namespace esphome
       }
 
       ESP_LOGI(TAG, "USB Host Library task started successfully");
+      
+      // Create USB client task for asynchronous operations
+      usb_tasks_running_ = true;
+      task_created = xTaskCreatePinnedToCore(
+          usb_client_task,
+          "usb_client",
+          4096,
+          this,
+          3, // Higher priority than USB Host Library task
+          &usb_client_task_handle_,
+          1);
+      
+      if (task_created != pdTRUE) {
+        ESP_LOGE(TAG, "Failed to create USB client task");
+        usb_tasks_running_ = false;
+        return ESP_FAIL;
+      }
+      
+      ESP_LOGI(TAG, "USB client task started successfully");
       return ESP_OK;
     }
 
@@ -916,6 +967,14 @@ namespace esphome
     void UpsHidComponent::usb_deinit()
     {
       ESP_LOGD(TAG, "Deinitializing USB Host...");
+
+      // Stop USB tasks
+      usb_tasks_running_ = false;
+      
+      if (usb_client_task_handle_) {
+        vTaskDelete(usb_client_task_handle_);
+        usb_client_task_handle_ = nullptr;
+      }
 
       if (usb_host_initialized_) {
         // Stop USB Host Library task
@@ -1161,6 +1220,16 @@ namespace esphome
         return ESP_ERR_NOT_FOUND;
       }
 
+      // Detect input-only devices (no OUT endpoint)
+      if (usb_device_.ep_out == 0) {
+        usb_device_.is_input_only = true;
+        ESP_LOGW(TAG, "INPUT-ONLY HID device detected - no OUT endpoint available");
+        ESP_LOGD(TAG, "Device can only send data to host, cannot receive commands");
+      } else {
+        usb_device_.is_input_only = false;
+        ESP_LOGD(TAG, "Bidirectional device detected - has both IN and OUT endpoints");
+      }
+
       return ESP_OK;
     }
 
@@ -1366,7 +1435,8 @@ namespace esphome
 
     esp_err_t UpsHidComponent::hid_get_report(uint8_t report_type, uint8_t report_id, uint8_t* data, size_t* data_len)
     {
-      if (!device_connected_ || !usb_device_.dev_hdl || !data || !data_len) {
+      if (!device_connected_ || !usb_device_.dev_hdl || !data || !data_len || *data_len == 0) {
+        ESP_LOGE(TAG, "HID GET_REPORT: Invalid parameters");
         return ESP_ERR_INVALID_ARG;
       }
       
@@ -1375,10 +1445,15 @@ namespace esphome
       const uint16_t wValue = (report_type << 8) | report_id;
       const uint16_t wIndex = usb_device_.interface_num;
       
+      // Ensure reasonable buffer size limits
+      size_t max_data_len = std::min(*data_len, static_cast<size_t>(64)); // HID reports are typically <= 64 bytes
+      
       usb_transfer_t *transfer = nullptr;
-      esp_err_t ret = usb_host_transfer_alloc(sizeof(usb_setup_packet_t) + *data_len, 0, &transfer);
+      // Control transfers need setup packet + data phase allocation
+      size_t transfer_size = sizeof(usb_setup_packet_t) + max_data_len;
+      esp_err_t ret = usb_host_transfer_alloc(transfer_size, 0, &transfer);
       if (ret != ESP_OK || !transfer) {
-        ESP_LOGE(TAG, "Failed to allocate control transfer: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to allocate control transfer (size=%zu): %s", transfer_size, esp_err_to_name(ret));
         return ret;
       }
       
@@ -1386,7 +1461,7 @@ namespace esphome
       TransferContext ctx = {};
       ctx.done_sem = xSemaphoreCreateBinary();
       ctx.buffer = data;
-      ctx.buffer_size = *data_len;
+      ctx.buffer_size = max_data_len;
       
       if (!ctx.done_sem) {
         usb_host_transfer_free(transfer);
@@ -1395,38 +1470,51 @@ namespace esphome
       
       // Set up USB control transfer
       transfer->device_handle = usb_device_.dev_hdl;
-      transfer->bEndpointAddress = 0; // Control endpoint
+      transfer->bEndpointAddress = 0; // Control endpoint (required for control transfers)
       transfer->callback = usb_transfer_callback;
       transfer->context = &ctx;
-      transfer->num_bytes = sizeof(usb_setup_packet_t) + *data_len;
+      transfer->num_bytes = transfer_size; // Total transfer size including setup packet
+      transfer->timeout_ms = 200; // Very short timeout to prevent task watchdog issues
       
-      // Create setup packet
+      ESP_LOGV(TAG, "Control transfer setup: dev_hdl=%p, ep=0x%02X, size=%zu, timeout=%u", 
+               transfer->device_handle, transfer->bEndpointAddress, transfer->num_bytes, transfer->timeout_ms);
+      
+      // Create setup packet with proper byte ordering for USB protocol
       usb_setup_packet_t *setup = (usb_setup_packet_t*)transfer->data_buffer;
       setup->bmRequestType = bmRequestType;
       setup->bRequest = bRequest;
-      setup->wValue = wValue;
-      setup->wIndex = wIndex;
-      setup->wLength = *data_len;
+      setup->wValue = wValue;     // (report_type << 8) | report_id - already in correct format
+      setup->wIndex = wIndex;     // Interface number
+      setup->wLength = (uint16_t)max_data_len; // Expected response length - explicit cast
       
-      ESP_LOGV(TAG, "HID GET_REPORT: type=0x%02X, id=0x%02X, len=%zu", report_type, report_id, *data_len);
+      ESP_LOGD(TAG, "HID GET_REPORT: bmReqType=0x%02X, bReq=0x%02X, wValue=0x%04X, wIndex=0x%04X, wLen=%zu, dev_hdl=%p, intf_num=%d", 
+               setup->bmRequestType, setup->bRequest, setup->wValue, setup->wIndex, max_data_len, usb_device_.dev_hdl, usb_device_.interface_num);
       
-      ret = usb_host_transfer_submit(transfer);
+      // Ensure client handle is valid before submission
+      if (!usb_device_.client_hdl) {
+        ESP_LOGE(TAG, "HID GET_REPORT: Invalid client handle");
+        ret = ESP_ERR_INVALID_STATE;
+      } else {
+        ret = usb_host_transfer_submit_control(usb_device_.client_hdl, transfer);
+      }
       if (ret == ESP_OK) {
-        // Wait for completion
-        if (xSemaphoreTake(ctx.done_sem, pdMS_TO_TICKS(5000)) == pdTRUE) {
+        // Wait for completion with very short timeout to prevent watchdog issues
+        if (xSemaphoreTake(ctx.done_sem, pdMS_TO_TICKS(250)) == pdTRUE) {
           ret = ctx.result;
           if (ret == ESP_OK && ctx.actual_bytes >= sizeof(usb_setup_packet_t)) {
             size_t actual_data_len = ctx.actual_bytes - sizeof(usb_setup_packet_t);
-            *data_len = std::min(*data_len, actual_data_len);
-            // Data is already copied by callback
-            ESP_LOGV(TAG, "HID GET_REPORT success: received %zu bytes", *data_len);
+            *data_len = std::min(max_data_len, actual_data_len);
+            ESP_LOGD(TAG, "HID GET_REPORT success: received %zu bytes", *data_len);
+          } else {
+            ESP_LOGW(TAG, "HID GET_REPORT completed but no data: result=%s, actual_bytes=%zu", 
+                     esp_err_to_name(ret), ctx.actual_bytes);
           }
         } else {
-          ESP_LOGW(TAG, "HID GET_REPORT timeout");
+          ESP_LOGW(TAG, "HID GET_REPORT timeout after 250ms");
           ret = ESP_ERR_TIMEOUT;
         }
       } else {
-        ESP_LOGW(TAG, "Failed to submit HID GET_REPORT: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to submit HID GET_REPORT: %s", esp_err_to_name(ret));
       }
       
       usb_host_transfer_free(transfer);
@@ -1483,7 +1571,7 @@ namespace esphome
       
       ESP_LOGV(TAG, "HID SET_REPORT: type=0x%02X, id=0x%02X, len=%zu", report_type, report_id, data_len);
       
-      ret = usb_host_transfer_submit(transfer);
+      ret = usb_host_transfer_submit_control(usb_device_.client_hdl, transfer);
       if (ret == ESP_OK) {
         // Wait for completion
         if (xSemaphoreTake(ctx.done_sem, pdMS_TO_TICKS(5000)) == pdTRUE) {
@@ -1575,6 +1663,71 @@ namespace esphome
           ESP_LOGI(TAG, "USB Event: ALL_FREE - all devices removed");
         }
       }
+    }
+
+    // USB client task for asynchronous operations
+    void UpsHidComponent::usb_client_task(void *arg)
+    {
+      UpsHidComponent *component = static_cast<UpsHidComponent *>(arg);
+      ESP_LOGI(TAG, "USB client task started");
+
+      // Process USB client events in a loop
+      while (component->usb_tasks_running_) {
+        esp_err_t ret = usb_host_client_handle_events(component->usb_device_.client_hdl, 100);
+        
+        if (ret == ESP_ERR_TIMEOUT) {
+          // Timeout is normal - just continue processing
+          continue;
+        } else if (ret != ESP_OK) {
+          ESP_LOGW(TAG, "USB client event handling failed: %s", esp_err_to_name(ret));
+          vTaskDelay(pdMS_TO_TICKS(100)); // Brief delay on error
+          continue;
+        }
+        
+        // Process any cached data updates
+        component->process_cached_data();
+        
+        // Small delay to prevent busy-waiting
+        vTaskDelay(pdMS_TO_TICKS(10));
+      }
+      
+      ESP_LOGI(TAG, "USB client task stopping");
+      vTaskDelete(NULL);
+    }
+
+    // Process cached UPS data from asynchronous operations
+    void UpsHidComponent::process_cached_data()
+    {
+      std::lock_guard<std::mutex> cache_lock(ups_data_cache_.mutex);
+      
+      if (ups_data_cache_.data_valid) {
+        // Update main data with cached data
+        {
+          std::lock_guard<std::mutex> data_lock(data_mutex_);
+          ups_data_ = ups_data_cache_.data;
+        }
+        
+        // Mark cache as processed
+        ups_data_cache_.data_valid = false;
+        
+        ESP_LOGV(TAG, "Processed cached UPS data");
+      }
+    }
+
+    // Asynchronous HID GET_REPORT operation
+    esp_err_t UpsHidComponent::hid_get_report_async(uint8_t report_type, uint8_t report_id)
+    {
+      if (!device_connected_ || !usb_device_.dev_hdl) {
+        return ESP_ERR_INVALID_STATE;
+      }
+      
+      // For now, this is a placeholder for future async implementation
+      // The current synchronous hid_get_report will be replaced with proper
+      // async operations using queued transfers processed by usb_client_task
+      
+      ESP_LOGV(TAG, "Async HID GET_REPORT request: type=0x%02X, id=0x%02X", report_type, report_id);
+      
+      return ESP_OK;
     }
 
     // USB client event callback

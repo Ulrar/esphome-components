@@ -31,6 +31,9 @@ static const uint8_t HID_REPORT_INPUT = 0x01;
 bool GenericHidProtocol::detect() {
   ESP_LOGD(GEN_TAG, "Detecting Generic HID Protocol...");
   
+  // Yield to prevent task watchdog timeout
+  vTaskDelay(pdMS_TO_TICKS(1));
+  
   // Try HID Get Feature Report (like NUT does)
   std::vector<uint8_t> get_feature_request = {
     0x21, // bmRequestType: Class, Interface, Host-to-device
