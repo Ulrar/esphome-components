@@ -57,7 +57,6 @@ namespace esphome
     enum UpsProtocol
     {
       PROTOCOL_UNKNOWN = 0,
-      PROTOCOL_APC_SMART,
       PROTOCOL_APC_HID,
       PROTOCOL_CYBERPOWER_HID,
       PROTOCOL_GENERIC_HID
@@ -128,7 +127,6 @@ namespace esphome
 
     // Forward declarations
     class UpsProtocolBase;
-    class ApcSmartProtocol;
     class ApcHidProtocol;
     class CyberPowerProtocol;
     class GenericHidProtocol;
@@ -330,25 +328,6 @@ namespace esphome
 
       bool send_command(const std::vector<uint8_t> &cmd, std::vector<uint8_t> &response, uint32_t timeout_ms = 1000);
       std::string bytes_to_string(const std::vector<uint8_t> &data);
-    };
-
-    // APC Smart Protocol implementation
-    class ApcSmartProtocol : public UpsProtocolBase
-    {
-    public:
-      explicit ApcSmartProtocol(UpsHidComponent *parent) : UpsProtocolBase(parent) {}
-
-      bool detect() override;
-      bool initialize() override;
-      bool read_data(UpsData &data) override;
-      UpsProtocol get_protocol_type() const override { return PROTOCOL_APC_SMART; }
-      std::string get_protocol_name() const override { return "APC Smart Protocol"; }
-
-    private:
-      bool send_smart_command(char cmd, std::string &response);
-      float parse_voltage(const std::string &response);
-      float parse_percentage(const std::string &response);
-      uint32_t parse_status_flags(const std::string &response);
     };
 
 

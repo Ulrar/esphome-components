@@ -7,7 +7,7 @@ A production-ready ESPHome component for monitoring UPS devices via USB connecti
 - 🔋 **Real-time UPS monitoring**: Battery level, voltages, load, runtime, status
 - 🌈 **Visual status indicator**: RGB LED with customizable status colors
 - 🏠 **Home Assistant integration**: Automatic entity discovery via ESPHome API
-- 🔌 **Multi-protocol support**: APC Smart, APC HID, CyberPower HID, Generic HID
+- 🔌 **Multi-protocol support**: APC HID, CyberPower HID, Generic HID
 - 🎯 **Auto-detection**: Intelligent protocol detection based on USB vendor IDs
 - 🛡️ **Production-ready**: Thread-safe, error rate limiting, comprehensive logging
 - 🧪 **Simulation mode**: Test integration without physical UPS device
@@ -341,7 +341,7 @@ GND → RGB LED GND
 
 | Vendor | Models | Protocol | Vendor ID |
 |--------|--------|----------|-----------|
-| **APC** | Back-UPS ES Series, Smart-UPS | APC Smart, APC HID | 0x051D |
+| **APC** | Back-UPS ES Series, Smart-UPS | APC HID | 0x051D |
 | **CyberPower** | CP1500EPFCLCD, CP1000PFCLCD | CyberPower HID | 0x0764 |
 | **Tripp Lite** | SMART1500LCDT, UPS series | Generic HID | 0x09AE |
 | **Eaton/MGE** | Ellipse, Evolution series | Generic HID | 0x06DA |
@@ -351,7 +351,6 @@ GND → RGB LED GND
 
 | Protocol | Communication | Auto-Detection | Features |
 |----------|---------------|----------------|----------|
-| **APC Smart** | Serial over USB | ✅ | Full monitoring, legacy APC |
 | **APC HID** | USB HID reports | ✅ | Modern APC, enhanced features |
 | **CyberPower HID** | Vendor-specific HID | ✅ | CyberPower optimized |
 | **Generic HID** | Standard HID-PDC | ✅ | Universal fallback |
@@ -551,7 +550,7 @@ text_sensor:
 ```yaml
 ups_hid:
   auto_detect_protocol: false    # Disable auto-detection
-  # Component will use APC Smart Protocol by default
+  # Component will use APC HID Protocol by default
 ```
 
 ### Performance Tuning

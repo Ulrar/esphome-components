@@ -47,7 +47,7 @@ namespace esphome
         // Initialize simulation data consistently
         {
           std::lock_guard<std::mutex> lock(data_mutex_);
-          ups_data_.detected_protocol = PROTOCOL_APC_SMART;
+          ups_data_.detected_protocol = PROTOCOL_APC_HID;
           ups_data_.manufacturer = "Simulated";
           ups_data_.model = "Virtual UPS Pro";
           ups_data_.serial_number = "SIM123456789";
@@ -325,8 +325,8 @@ namespace esphome
 
       if (!auto_detect_protocol_)
       {
-        // Use APC Smart Protocol as default when auto-detection is disabled
-        active_protocol_ = std::make_unique<ApcSmartProtocol>(this);
+        // Use APC HID Protocol as default when auto-detection is disabled
+        active_protocol_ = std::make_unique<ApcHidProtocol>(this);
         if (active_protocol_->initialize())
         {
           ESP_LOGI(TAG, "Using pre-configured protocol: %s", active_protocol_->get_protocol_name().c_str());
@@ -367,7 +367,7 @@ namespace esphome
       switch (detected_vid)
       {
       case 0x051D: // APC
-        ESP_LOGD(TAG, "APC device detected, trying HID first, then Smart protocol");
+        ESP_LOGD(TAG, "APC device detected, trying HID protocol");
         protocol_attempts.push_back({"APC HID", [this]()
                                      {
                                        auto protocol = std::make_unique<ApcHidProtocol>(this);
@@ -379,22 +379,6 @@ namespace esphome
                                        }
                                        return false;
                                      }});
-        // Only try Smart Protocol if device has OUT endpoint (bidirectional communication)
-        if (!usb_device_.is_input_only) {
-          protocol_attempts.push_back({"APC Smart", [this]()
-                                       {
-                                         auto protocol = std::make_unique<ApcSmartProtocol>(this);
-                                         if (protocol->detect() && protocol->initialize())
-                                         {
-                                           active_protocol_ = std::move(protocol);
-                                           ups_data_.detected_protocol = PROTOCOL_APC_SMART;
-                                           return true;
-                                         }
-                                         return false;
-                                       }});
-        } else {
-          ESP_LOGD(TAG, "Skipping APC Smart Protocol - input-only device (no OUT endpoint)");
-        }
         break;
 
       case 0x0764: // CyberPower
@@ -441,17 +425,6 @@ namespace esphome
                                        {
                                          active_protocol_ = std::move(protocol);
                                          ups_data_.detected_protocol = PROTOCOL_APC_HID;
-                                         return true;
-                                       }
-                                       return false;
-                                     }});
-        protocol_attempts.push_back({"APC Smart", [this]()
-                                     {
-                                       auto protocol = std::make_unique<ApcSmartProtocol>(this);
-                                       if (protocol->detect() && protocol->initialize())
-                                       {
-                                         active_protocol_ = std::move(protocol);
-                                         ups_data_.detected_protocol = PROTOCOL_APC_SMART;
                                          return true;
                                        }
                                        return false;
