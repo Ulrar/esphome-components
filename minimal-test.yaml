@@ -8,6 +8,7 @@ esp32:
   variant: esp32s3
   framework:
     type: esp-idf
+    version: 5.3.2
 
 # Enable logging
 logger:
@@ -75,7 +76,7 @@ external_components:
 # UPS HID Component
 ups_hid:
   id: ups_monitor
-  simulation_mode: false # Set to false for production
+  simulation_mode: false # Test with real APC UPS hardware
   update_interval: 5s
 
   # Hardware Configuration

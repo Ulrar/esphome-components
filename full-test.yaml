@@ -13,12 +13,22 @@ esp32:
   flash_size: 16MB
   framework:
     type: esp-idf
+    version: 5.3.2
 
 # Enable logging with verbose output for debugging
 logger:
   level: VERBOSE
   logs:
     ups_hid: DEBUG
+    usb_host: VERBOSE
+    usb-host: VERBOSE
+    USB_HOST: VERBOSE
+    hcd: VERBOSE
+    HCD: VERBOSE
+    hub: VERBOSE
+    HUB: VERBOSE
+    usbh: VERBOSE
+    USBH: VERBOSE
   baud_rate: 115200
   hardware_uart: UART0
 
@@ -76,7 +86,7 @@ light:
               duration: 150ms
             - state: false
               duration: 150ms
-      
+
       # Battery operation - Slow orange fade (amber warning pattern)
       - pulse:
           name: "Battery Warning"
@@ -84,7 +94,7 @@ light:
           update_interval: 1.5s
           min_brightness: 10%
           max_brightness: 95%
-      
+
       # Charging status - Quick yellow double-blink (charging pattern)
       - strobe:
           name: "Charging Pattern"
@@ -105,7 +115,7 @@ light:
               duration: 200ms
             - state: false
               duration: 1400ms
-      
+
       # Normal operation - Slow green breathing (peaceful pattern)
       - pulse:
           name: "Normal Status"
@@ -113,7 +123,7 @@ light:
           update_interval: 3s
           min_brightness: 20%
           max_brightness: 60%
-      
+
       # Fault/offline - Blue fade (distinct from other states)
       - pulse:
           name: "System Offline"
@@ -137,15 +147,15 @@ ups_hid:
   #usb_vendor_id: 0x051d # APC vendor ID (0x051d)
   #usb_product_id: 0x0002 # APC Back-UPS ES series
 
-  # usb_vendor_id: 0x0764 # CyberPower (0x0764)
-  # usb_product_id: 0x0501 # CP1500 AVR UPS
+  usb_vendor_id: 0x0764 # CyberPower (0x0764)
+  usb_product_id: 0x0501 # CP1500 AVR UPS
 
   # Protocol Configuration
   auto_detect_protocol: true
   protocol_timeout: 15s
 
   # Development/Testing Configuration
-  simulation_mode: true # Set to false for production with real hardware
+  simulation_mode: false # Set to false for production with real hardware
 
 # Numeric Sensors
 sensor:

@@ -16,6 +16,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/portmacro.h"
+#include "freertos/queue.h"
 #include "usb/usb_host.h"
 #include "usb/usb_types_ch9.h"
 #include <cstring>
@@ -274,6 +275,7 @@ namespace esphome
       return false;
 #endif
     }
+
 
     bool UpsHidComponent::should_log_error(ErrorRateLimit &limiter)
     {
@@ -1436,89 +1438,102 @@ namespace esphome
     esp_err_t UpsHidComponent::hid_get_report(uint8_t report_type, uint8_t report_id, uint8_t* data, size_t* data_len)
     {
       if (!device_connected_ || !usb_device_.dev_hdl || !data || !data_len || *data_len == 0) {
-        ESP_LOGE(TAG, "HID GET_REPORT: Invalid parameters");
+        ESP_LOGE(TAG, "HID GET_REPORT: Invalid parameters or device not connected");
         return ESP_ERR_INVALID_ARG;
       }
       
+      ESP_LOGD(TAG, "HID GET_REPORT: type=0x%02X, id=0x%02X, max_len=%zu", report_type, report_id, *data_len);
+      
+      // Use specific buffer sizes based on working NUT implementation
+      uint8_t buffer[8] = {0}; // Fixed size like working NUT implementation
+      size_t expected_len = 8;  // Standard HID report size for APC UPS devices
+      
+      // Create USB control transfer for HID GET_REPORT
       const uint8_t bmRequestType = USB_BM_REQUEST_TYPE_DIR_IN | USB_BM_REQUEST_TYPE_TYPE_CLASS | USB_BM_REQUEST_TYPE_RECIP_INTERFACE;
       const uint8_t bRequest = 0x01; // HID GET_REPORT
       const uint16_t wValue = (report_type << 8) | report_id;
       const uint16_t wIndex = usb_device_.interface_num;
-      
-      // Ensure reasonable buffer size limits
-      size_t max_data_len = std::min(*data_len, static_cast<size_t>(64)); // HID reports are typically <= 64 bytes
+      const uint16_t wLength = expected_len;
       
       usb_transfer_t *transfer = nullptr;
-      // Control transfers need setup packet + data phase allocation
-      size_t transfer_size = sizeof(usb_setup_packet_t) + max_data_len;
+      size_t transfer_size = sizeof(usb_setup_packet_t) + expected_len;
       esp_err_t ret = usb_host_transfer_alloc(transfer_size, 0, &transfer);
-      if (ret != ESP_OK || !transfer) {
-        ESP_LOGE(TAG, "Failed to allocate control transfer (size=%zu): %s", transfer_size, esp_err_to_name(ret));
+      if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to allocate transfer: %s", esp_err_to_name(ret));
         return ret;
       }
       
-      // Create transfer context for synchronization
-      TransferContext ctx = {};
-      ctx.done_sem = xSemaphoreCreateBinary();
-      ctx.buffer = data;
-      ctx.buffer_size = max_data_len;
+      // Setup control transfer like working implementation
+      transfer->device_handle = usb_device_.dev_hdl;
+      transfer->bEndpointAddress = 0;
+      transfer->num_bytes = transfer_size;
+      transfer->timeout_ms = 500; // Reasonable timeout
       
-      if (!ctx.done_sem) {
+      // Create setup packet
+      usb_setup_packet_t *setup = (usb_setup_packet_t*)transfer->data_buffer;
+      setup->bmRequestType = bmRequestType;
+      setup->bRequest = bRequest;
+      setup->wValue = wValue;
+      setup->wIndex = wIndex;
+      setup->wLength = wLength;
+      
+      // Use semaphore for synchronous operation
+      SemaphoreHandle_t done_sem = xSemaphoreCreateBinary();
+      if (!done_sem) {
         usb_host_transfer_free(transfer);
         return ESP_ERR_NO_MEM;
       }
       
-      // Set up USB control transfer
-      transfer->device_handle = usb_device_.dev_hdl;
-      transfer->bEndpointAddress = 0; // Control endpoint (required for control transfers)
-      transfer->callback = usb_transfer_callback;
+      // Simple context for completion
+      struct {
+        SemaphoreHandle_t sem;
+        esp_err_t result;
+        size_t actual_bytes;
+      } ctx = {done_sem, ESP_ERR_TIMEOUT, 0};
+      
       transfer->context = &ctx;
-      transfer->num_bytes = transfer_size; // Total transfer size including setup packet
-      transfer->timeout_ms = 200; // Very short timeout to prevent task watchdog issues
+      transfer->callback = [](usb_transfer_t *t) {
+        auto *c = static_cast<decltype(ctx)*>(t->context);
+        c->result = (t->status == USB_TRANSFER_STATUS_COMPLETED) ? ESP_OK : ESP_FAIL;
+        c->actual_bytes = t->actual_num_bytes;
+        xSemaphoreGive(c->sem);
+      };
       
-      ESP_LOGV(TAG, "Control transfer setup: dev_hdl=%p, ep=0x%02X, size=%zu, timeout=%u", 
-               transfer->device_handle, transfer->bEndpointAddress, transfer->num_bytes, transfer->timeout_ms);
-      
-      // Create setup packet with proper byte ordering for USB protocol
-      usb_setup_packet_t *setup = (usb_setup_packet_t*)transfer->data_buffer;
-      setup->bmRequestType = bmRequestType;
-      setup->bRequest = bRequest;
-      setup->wValue = wValue;     // (report_type << 8) | report_id - already in correct format
-      setup->wIndex = wIndex;     // Interface number
-      setup->wLength = (uint16_t)max_data_len; // Expected response length - explicit cast
-      
-      ESP_LOGD(TAG, "HID GET_REPORT: bmReqType=0x%02X, bReq=0x%02X, wValue=0x%04X, wIndex=0x%04X, wLen=%zu, dev_hdl=%p, intf_num=%d", 
-               setup->bmRequestType, setup->bRequest, setup->wValue, setup->wIndex, max_data_len, usb_device_.dev_hdl, usb_device_.interface_num);
-      
-      // Ensure client handle is valid before submission
-      if (!usb_device_.client_hdl) {
-        ESP_LOGE(TAG, "HID GET_REPORT: Invalid client handle");
-        ret = ESP_ERR_INVALID_STATE;
-      } else {
-        ret = usb_host_transfer_submit_control(usb_device_.client_hdl, transfer);
-      }
+      ret = usb_host_transfer_submit_control(usb_device_.client_hdl, transfer);
       if (ret == ESP_OK) {
-        // Wait for completion with very short timeout to prevent watchdog issues
-        if (xSemaphoreTake(ctx.done_sem, pdMS_TO_TICKS(250)) == pdTRUE) {
+        if (xSemaphoreTake(done_sem, pdMS_TO_TICKS(500)) == pdTRUE) {
           ret = ctx.result;
-          if (ret == ESP_OK && ctx.actual_bytes >= sizeof(usb_setup_packet_t)) {
-            size_t actual_data_len = ctx.actual_bytes - sizeof(usb_setup_packet_t);
-            *data_len = std::min(max_data_len, actual_data_len);
+          if (ret == ESP_OK && ctx.actual_bytes > sizeof(usb_setup_packet_t)) {
+            size_t data_received = ctx.actual_bytes - sizeof(usb_setup_packet_t);
+            size_t copy_len = std::min(data_received, *data_len);
+            memcpy(data, transfer->data_buffer + sizeof(usb_setup_packet_t), copy_len);
+            *data_len = copy_len;
+            
             ESP_LOGD(TAG, "HID GET_REPORT success: received %zu bytes", *data_len);
+            if (*data_len > 0) {
+              std::string hex_str;
+              for (size_t i = 0; i < std::min(*data_len, (size_t)8); i++) {
+                char hex_byte[4];
+                snprintf(hex_byte, sizeof(hex_byte), "%02X ", data[i]);
+                hex_str += hex_byte;
+              }
+              ESP_LOGD(TAG, "Data: %s", hex_str.c_str());
+            }
           } else {
-            ESP_LOGW(TAG, "HID GET_REPORT completed but no data: result=%s, actual_bytes=%zu", 
-                     esp_err_to_name(ret), ctx.actual_bytes);
+            ESP_LOGW(TAG, "HID GET_REPORT: No data received");
+            *data_len = 0;
+            ret = ESP_FAIL;
           }
         } else {
-          ESP_LOGW(TAG, "HID GET_REPORT timeout after 250ms");
+          ESP_LOGW(TAG, "HID GET_REPORT timeout");
           ret = ESP_ERR_TIMEOUT;
         }
       } else {
-        ESP_LOGE(TAG, "Failed to submit HID GET_REPORT: %s", esp_err_to_name(ret));
+        ESP_LOGW(TAG, "Failed to submit HID GET_REPORT: %s", esp_err_to_name(ret));
       }
       
+      vSemaphoreDelete(done_sem);
       usb_host_transfer_free(transfer);
-      vSemaphoreDelete(ctx.done_sem);
       return ret;
     }
 

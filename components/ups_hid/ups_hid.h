@@ -112,7 +112,7 @@ namespace esphome
     class UpsHidComponent : public PollingComponent
     {
     public:
-      UpsHidComponent() : usb_device_{}, usb_mutex_(nullptr), usb_lib_task_handle_(nullptr), 
+      UpsHidComponent() : usb_device_{}, usb_mutex_(nullptr), usb_lib_task_handle_(nullptr),
                           usb_client_task_handle_(nullptr), usb_host_initialized_(false), 
                           device_connected_(false), usb_tasks_running_(false) {
 #ifdef USE_ESP32
@@ -162,6 +162,7 @@ namespace esphome
       // USB device info getters
       uint16_t get_usb_vendor_id() const { return usb_vendor_id_; }
       uint16_t get_usb_product_id() const { return usb_product_id_; }
+      bool is_input_only_device() const { return usb_device_.is_input_only; }
 
       // Sensor registration methods
       void register_sensor(sensor::Sensor *sens, const std::string &type);
@@ -217,6 +218,7 @@ namespace esphome
       // HID class requests (UPS-specific communication)
       esp_err_t hid_get_report(uint8_t report_type, uint8_t report_id, uint8_t* data, size_t* data_len);
       esp_err_t hid_set_report(uint8_t report_type, uint8_t report_id, const uint8_t* data, size_t data_len);
+      
 
     protected:
 #ifdef USE_ESP32
