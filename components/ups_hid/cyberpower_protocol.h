@@ -29,6 +29,7 @@ class CyberPowerProtocol : public UpsProtocolBase {
 
  private:
   // Report ID constants (based on NUT debug logs)
+  static const uint8_t BATTERY_CAPACITY_REPORT_ID = 0x07;  // Battery capacity limits
   static const uint8_t BATTERY_RUNTIME_REPORT_ID = 0x08;  // Battery % + Runtime
   static const uint8_t BATTERY_VOLTAGE_NOMINAL_REPORT_ID = 0x09;  // Battery voltage nominal
   static const uint8_t BATTERY_VOLTAGE_REPORT_ID = 0x0a;  // Battery voltage
@@ -63,6 +64,7 @@ class CyberPowerProtocol : public UpsProtocolBase {
   bool read_hid_report(uint8_t report_id, HidReport &report);
   
   // Parser methods for different reports
+  void parse_battery_capacity_report(const HidReport &report, UpsData &data);
   void parse_battery_runtime_report(const HidReport &report, UpsData &data);
   void parse_battery_voltage_report(const HidReport &report, UpsData &data); 
   void parse_battery_voltage_nominal_report(const HidReport &report, UpsData &data);
@@ -85,6 +87,9 @@ class CyberPowerProtocol : public UpsProtocolBase {
   void read_missing_dynamic_values(UpsData &data);
   void parse_battery_capacity_limits_report(const HidReport &report, UpsData &data);
   void parse_battery_chemistry_report(const HidReport &report, UpsData &data);
+  
+  // String cleaning utilities
+  std::string clean_firmware_string(const std::string &raw_firmware);
 
   // CyberPower-specific scaling logic
   void check_battery_voltage_scaling(float battery_voltage, float nominal_voltage);

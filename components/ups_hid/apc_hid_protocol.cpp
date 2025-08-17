@@ -1235,35 +1235,34 @@ void ApcHidProtocol::parse_ups_delay_shutdown_report(const HidReport &report, Up
 }
 
 std::string ApcHidProtocol::convert_apc_date(uint16_t date_value) {
-  // Convert APC date format to "YYYY/MM/DD" string
-  // Based on NUT libhid date conversion: 19257 → "2017/09/25"
-  // This appears to be days since epoch (1970-01-01)
+  ESP_LOGD(APC_HID_TAG, "Converting USB PDC date value: %u (0x%04X)", date_value, date_value);
   
   if (date_value == 0) {
     return "not set";
   }
   
-  // Calculate date from days since epoch
-  // 19257 days from 1970-01-01 = 2017-09-25
-  const uint32_t days_since_epoch = date_value;
-  const uint32_t seconds_per_day = 24 * 60 * 60;
-  const uint32_t epoch_timestamp = days_since_epoch * seconds_per_day;
+  // USB Power Device Class date format (per USB PDC spec v1.1, page 38):
+  // ManufacturerDate: The date the pack was manufactured in a packed integer.
+  // The date is packed as: (year – 1980)*512 + month*32 + day
+  // This matches NUT's date_conversion_fun() in usbhid-ups.c
   
-  // Convert to calendar date
-  time_t timestamp = epoch_timestamp;
-  struct tm *date_tm = gmtime(&timestamp);
+  // Extract date components using bit operations (matching NUT implementation)
+  int day = date_value & 0x1F;           // Last 5 bits (0-31)
+  int month = (date_value >> 5) & 0x0F;  // Next 4 bits (0-15, but valid 1-12)  
+  int year = 1980 + (date_value >> 9);   // Upper bits shifted right 9 positions + 1980
   
-  if (date_tm == nullptr) {
-    ESP_LOGW(APC_HID_TAG, "Failed to convert APC date value %d", date_value);
-    return "unknown";
+  ESP_LOGD(APC_HID_TAG, "USB PDC date extraction: day=%d, month=%d, year=%d", day, month, year);
+  
+  // Validate date components
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    ESP_LOGW(APC_HID_TAG, "Invalid date components: year=%d, month=%d, day=%d", year, month, day);
+    return "invalid date";
   }
   
   char date_str[16];
-  snprintf(date_str, sizeof(date_str), "%04d/%02d/%02d", 
-           1900 + date_tm->tm_year, 
-           1 + date_tm->tm_mon, 
-           date_tm->tm_mday);
+  snprintf(date_str, sizeof(date_str), "%04d/%02d/%02d", year, month, day);
   
+  ESP_LOGD(APC_HID_TAG, "Converted USB PDC date %u to %s", date_value, date_str);
   return std::string(date_str);
 }
 

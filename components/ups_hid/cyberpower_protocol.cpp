@@ -4,6 +4,8 @@
 #include "freertos/task.h"
 #include "esp_err.h"
 #include "esphome/core/log.h"
+#include <algorithm>
+#include <cctype>
 
 namespace esphome {
 namespace ups_hid {
@@ -61,6 +63,13 @@ bool CyberPowerProtocol::read_data(UpsData &data) {
   bool success = false;
 
   // Core sensors (essential for operation)
+  // Read battery capacity limits (Report 0x07) - includes FullChargeCapacity for battery.status
+  HidReport battery_capacity_report;
+  if (read_hid_report(BATTERY_CAPACITY_REPORT_ID, battery_capacity_report)) {
+    parse_battery_capacity_report(battery_capacity_report, data);
+    success = true;
+  }
+  
   // Read battery level and runtime (Report 0x08)
   HidReport battery_runtime_report;
   if (read_hid_report(BATTERY_RUNTIME_REPORT_ID, battery_runtime_report)) {
@@ -414,8 +423,9 @@ void CyberPowerProtocol::parse_battery_voltage_nominal_report(const HidReport &r
   }
 
   // NUT debug shows: Report 0x09, Value: 24 (ConfigVoltage)
+  // Some CyberPower models report in decivolts (240 = 24.0V)
   uint8_t voltage_raw = report.data[1];
-  data.battery_voltage_nominal = static_cast<float>(voltage_raw);
+  data.battery_voltage_nominal = static_cast<float>(voltage_raw) / 10.0f;
   
   ESP_LOGD(CP_TAG, "Battery voltage nominal: %.0fV (raw: 0x%02X = %d)", 
            data.battery_voltage_nominal, voltage_raw, voltage_raw);
@@ -490,10 +500,17 @@ void CyberPowerProtocol::parse_delay_shutdown_report(const HidReport &report, Up
   }
 
   // NUT debug shows: Report 0x15, Value: -60 (DelayBeforeShutdown)
-  int16_t delay_raw = static_cast<int16_t>(report.data[1] | (report.data[2] << 8));
-  data.ups_delay_shutdown = delay_raw;
-  
-  ESP_LOGD(CP_TAG, "UPS delay shutdown: %d seconds", data.ups_delay_shutdown);
+  // Handle 0xFFFF as "disabled" (not -1)
+  uint16_t delay_raw_unsigned = report.data[1] | (report.data[2] << 8);
+  if (delay_raw_unsigned == 0xFFFF) {
+    // When disabled, use NUT default for CyberPower (DEFAULT_OFFDELAY_CPS = 60)
+    data.ups_delay_shutdown = 60;  
+    ESP_LOGD(CP_TAG, "UPS delay shutdown: 60 seconds (default, raw: 0xFFFF)");
+  } else {
+    int16_t delay_raw = static_cast<int16_t>(delay_raw_unsigned);
+    data.ups_delay_shutdown = delay_raw;
+    ESP_LOGD(CP_TAG, "UPS delay shutdown: %d seconds", data.ups_delay_shutdown);
+  }
 }
 
 void CyberPowerProtocol::parse_delay_start_report(const HidReport &report, UpsData &data) {
@@ -503,10 +520,17 @@ void CyberPowerProtocol::parse_delay_start_report(const HidReport &report, UpsDa
   }
 
   // NUT debug shows: Report 0x16, Value: -60 (DelayBeforeStartup)
-  int16_t delay_raw = static_cast<int16_t>(report.data[1] | (report.data[2] << 8));
-  data.ups_delay_start = delay_raw;
-  
-  ESP_LOGD(CP_TAG, "UPS delay start: %d seconds", data.ups_delay_start);
+  // Handle 0xFFFF as "disabled" (not -1)
+  uint16_t delay_raw_unsigned = report.data[1] | (report.data[2] << 8);
+  if (delay_raw_unsigned == 0xFFFF) {
+    // When disabled, use NUT default for CyberPower (DEFAULT_ONDELAY_CPS = 120)
+    data.ups_delay_start = 120;
+    ESP_LOGD(CP_TAG, "UPS delay start: 120 seconds (default, raw: 0xFFFF)");
+  } else {
+    int16_t delay_raw = static_cast<int16_t>(delay_raw_unsigned);
+    data.ups_delay_start = delay_raw;
+    ESP_LOGD(CP_TAG, "UPS delay start: %d seconds", data.ups_delay_start);
+  }
 }
 
 void CyberPowerProtocol::parse_realpower_nominal_report(const HidReport &report, UpsData &data) {
@@ -607,9 +631,15 @@ void CyberPowerProtocol::parse_firmware_version_report(const HidReport &report, 
     esp_err_t fw_ret = parent_->usb_get_string_descriptor(string_index, actual_firmware);
     
     if (fw_ret == ESP_OK && !actual_firmware.empty()) {
-      data.firmware_version = actual_firmware;
+      // Clean up firmware string - remove invalid characters and trim
+      std::string cleaned_firmware = clean_firmware_string(actual_firmware);
+      data.firmware_version = cleaned_firmware;
       ESP_LOGI(CP_TAG, "Successfully read CyberPower firmware from USB string descriptor %d: \"%s\"", 
                string_index, data.firmware_version.c_str());
+      if (cleaned_firmware != actual_firmware) {
+        ESP_LOGD(CP_TAG, "Cleaned firmware string from \"%s\" to \"%s\"", 
+                 actual_firmware.c_str(), cleaned_firmware.c_str());
+      }
       return;
     } else {
       ESP_LOGW(CP_TAG, "Failed to read USB string descriptor %d for firmware: %s, trying fallbacks", 
@@ -644,14 +674,20 @@ void CyberPowerProtocol::parse_firmware_version_report(const HidReport &report, 
     std::string fw_attempt;
     esp_err_t ret = parent_->usb_get_string_descriptor(idx, fw_attempt);
     
-    if (ret == ESP_OK && !fw_attempt.empty() && 
-        (fw_attempt.find("CR") == 0 || fw_attempt.find("CP") == 0 || 
-         fw_attempt.find("FW") != std::string::npos)) {
-      // Looks like a valid CyberPower firmware string
-      data.firmware_version = fw_attempt;
-      ESP_LOGI(CP_TAG, "Found CyberPower firmware at alternative string descriptor %d: \"%s\"", 
-               idx, data.firmware_version.c_str());
-      return;
+    if (ret == ESP_OK && !fw_attempt.empty()) {
+      std::string cleaned_fw = clean_firmware_string(fw_attempt);
+      if ((cleaned_fw.find("CR") == 0 || cleaned_fw.find("CP") == 0 || 
+           cleaned_fw.find("FW") != std::string::npos)) {
+        // Looks like a valid CyberPower firmware string
+        data.firmware_version = cleaned_fw;
+        ESP_LOGI(CP_TAG, "Found CyberPower firmware at alternative string descriptor %d: \"%s\"", 
+                 idx, data.firmware_version.c_str());
+        if (cleaned_fw != fw_attempt) {
+          ESP_LOGD(CP_TAG, "Cleaned alternative firmware string from \"%s\" to \"%s\"", 
+                   fw_attempt.c_str(), cleaned_fw.c_str());
+        }
+        return;
+      }
     }
   }
   
@@ -747,16 +783,23 @@ void CyberPowerProtocol::read_missing_dynamic_values(UpsData &data) {
   // It's at offset 24 and already parsed in parse_battery_runtime_report
   // Just need to extract it properly
   
-  // 4. Set static/derived values based on NUT behavior
-  data.battery_status = "100%";  // CyberPower shows this as static in NUT
+  // 4. Set static/derived values based on NUT behavior  
   data.ups_test_result = "No test initiated";  // Default test result
   
-  // 5. Timer values are already implemented as ups_delay_shutdown/start
-  // Map them to timer fields for consistency
-  data.ups_timer_shutdown = data.ups_delay_shutdown;
-  data.ups_timer_start = data.ups_delay_start;
+  // NOTE: battery_status is now properly read from FullChargeCapacity in parse_battery_capacity_report
+  
+  // 5. Timer values represent active countdown (negative when no countdown active)
+  // NUT shows: ups.timer.shutdown: -60, ups.timer.start: -60
+  data.ups_timer_shutdown = -data.ups_delay_shutdown;  // Negative indicates no active countdown
+  data.ups_timer_start = -data.ups_delay_start;        // Negative indicates no active countdown  
+  data.ups_timer_reboot = -10;  // CyberPower doesn't have separate reboot timer, use default
   
   ESP_LOGD(CP_TAG, "Completed reading CyberPower missing dynamic values");
+}
+
+void CyberPowerProtocol::parse_battery_capacity_report(const HidReport &report, UpsData &data) {
+  // This is the same as the capacity limits report - just a cleaner interface
+  parse_battery_capacity_limits_report(report, data);
 }
 
 void CyberPowerProtocol::parse_battery_capacity_limits_report(const HidReport &report, UpsData &data) {
@@ -784,6 +827,17 @@ void CyberPowerProtocol::parse_battery_capacity_limits_report(const HidReport &r
     data.battery_charge_low = static_cast<float>(remaining_limit);
     ESP_LOGI(CP_TAG, "CyberPower Battery charge low threshold: %.0f%% (raw: %d)", 
              data.battery_charge_low, remaining_limit);
+  }
+  
+  // Extract full charge capacity (offset 40 = byte 6) - this is used for battery.status 
+  if (report.data.size() > 6) {
+    uint8_t full_charge_capacity = report.data[6]; // Offset 40 bits = byte 5 + 1
+    // Format as "XX%" like NUT cps_battstatus function does
+    char battery_status_buf[8];
+    snprintf(battery_status_buf, sizeof(battery_status_buf), "%.0f%%", static_cast<float>(full_charge_capacity));
+    data.battery_status = std::string(battery_status_buf);
+    ESP_LOGI(CP_TAG, "CyberPower Battery status (FullChargeCapacity): %s (raw: %d)", 
+             data.battery_status.c_str(), full_charge_capacity);
   }
 }
 
@@ -824,6 +878,39 @@ void CyberPowerProtocol::parse_battery_chemistry_report(const HidReport &report,
   
   ESP_LOGI(CP_TAG, "CyberPower Battery chemistry: %s (raw: %d)", 
            data.battery_type.c_str(), chemistry_raw);
+}
+
+std::string CyberPowerProtocol::clean_firmware_string(const std::string &raw_firmware) {
+  if (raw_firmware.empty()) {
+    return raw_firmware;
+  }
+  
+  std::string cleaned = raw_firmware;
+  
+  // Remove non-printable characters and common USB string descriptor artifacts
+  cleaned.erase(std::remove_if(cleaned.begin(), cleaned.end(), [](unsigned char c) {
+    // Keep alphanumeric, dots, dashes, and spaces
+    return !(std::isalnum(c) || c == '.' || c == '-' || c == ' ');
+  }), cleaned.end());
+  
+  // Trim trailing and leading whitespace
+  // Trim leading whitespace
+  cleaned.erase(cleaned.begin(), std::find_if(cleaned.begin(), cleaned.end(), [](unsigned char ch) {
+    return !std::isspace(ch);
+  }));
+  
+  // Trim trailing whitespace
+  cleaned.erase(std::find_if(cleaned.rbegin(), cleaned.rend(), [](unsigned char ch) {
+    return !std::isspace(ch);
+  }).base(), cleaned.end());
+  
+  // If the string is now empty, return the original
+  if (cleaned.empty()) {
+    ESP_LOGW(CP_TAG, "Firmware string cleaning resulted in empty string, keeping original");
+    return raw_firmware;
+  }
+  
+  return cleaned;
 }
 
 }  // namespace ups_hid
