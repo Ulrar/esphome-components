@@ -46,14 +46,13 @@ bool ApcHidProtocol::detect() {
   // Give device time to initialize after connection
   vTaskDelay(pdMS_TO_TICKS(100));
   
-  // Try multiple report IDs that are known to work with APC devices
-  // Based on working ESP32 NUT server implementation and NUT drivers
+  // Try key report IDs based on NUT analysis - these are the critical ones
   const uint8_t test_report_ids[] = {
-    0x01, // Basic status (UPS.PowerSummary.APCStatusFlag) - most common
-    0x06, // Battery info (UPS.PowerSummary.RemainingCapacity) 
-    0x07, // More status (UPS.PowerSummary.PresentStatus)
-    0x0e, // Input voltage
-    0x1f  // Audible alarm control
+    0x0C, // CRITICAL: PowerSummary.RemainingCapacity + RunTimeToEmpty (NUT primary data)
+    0x16, // CRITICAL: PowerSummary.PresentStatus bitmap (status flags) 
+    0x06, // PowerSummary.APCStatusFlag (basic status byte)
+    0x01, // Legacy status check
+    0x09  // PowerSummary.Voltage
   };
   
   HidReport test_report;
@@ -100,41 +99,65 @@ bool ApcHidProtocol::read_data(UpsData &data) {
   data.manufacturer = "APC";
   data.model = "Back-UPS ES"; // Generic model name for APC VID=0x051d, PID=0x0002
   
-  // Read status report (most important)
-  HidReport status_report;
-  if (read_hid_report(APC_REPORT_ID_STATUS, status_report)) {
-    parse_status_report(status_report, data);
+  // CRITICAL FIX: Read NUT-compatible reports in the correct order
+  
+  // 1. Read PowerSummary report 0x0C (MOST IMPORTANT - battery % + runtime)
+  HidReport power_summary_report;
+  if (read_hid_report(0x0C, power_summary_report)) {
+    parse_power_summary_report(power_summary_report, data);
     success = true;
   } else {
-    ESP_LOGV(APC_HID_TAG, "Failed to read status report");
+    ESP_LOGV(APC_HID_TAG, "Failed to read PowerSummary report 0x0C");
   }
   
-  // Read battery report
-  HidReport battery_report;
-  if (read_hid_report(APC_REPORT_ID_BATTERY, battery_report)) {
-    parse_battery_report(battery_report, data);
+  // 2. Read PresentStatus report 0x16 (status bitmap - AC, charging, discharging, etc.)
+  HidReport present_status_report;
+  if (read_hid_report(0x16, present_status_report)) {
+    parse_present_status_report(present_status_report, data);
     success = true;
   } else {
-    ESP_LOGV(APC_HID_TAG, "Failed to read battery report");
+    ESP_LOGV(APC_HID_TAG, "Failed to read PresentStatus report 0x16");
   }
   
-  // Read voltage report
+  // 3. Read APCStatusFlag report 0x06 (legacy status byte)
+  HidReport apc_status_report;
+  if (read_hid_report(0x06, apc_status_report)) {
+    parse_apc_status_report(apc_status_report, data);
+    success = true;
+  } else {
+    ESP_LOGV(APC_HID_TAG, "Failed to read APCStatusFlag report 0x06");
+  }
+  
+  // 4. Read input voltage report 0x31 (NUT: UPS.Input.Voltage) 
+  HidReport input_voltage_report;
+  if (read_hid_report(0x31, input_voltage_report)) {
+    parse_input_voltage_report(input_voltage_report, data);
+    success = true;
+  } else {
+    ESP_LOGV(APC_HID_TAG, "Failed to read input voltage report 0x31");
+  }
+  
+  // 5. Read load percentage report 0x50 (NUT: UPS.PowerConverter.PercentLoad)
+  HidReport load_report;
+  if (read_hid_report(0x50, load_report)) {
+    parse_load_report(load_report, data);
+    success = true;
+  } else {
+    ESP_LOGV(APC_HID_TAG, "Failed to read load report 0x50");
+  }
+  
+  // 6. Read output voltage report 0x09 (legacy voltage reading)
   HidReport voltage_report;
-  if (read_hid_report(APC_REPORT_ID_VOLTAGE, voltage_report)) {
+  if (read_hid_report(0x09, voltage_report)) {
     parse_voltage_report(voltage_report, data);
     success = true;
   } else {
-    ESP_LOGV(APC_HID_TAG, "Failed to read voltage report");
+    ESP_LOGV(APC_HID_TAG, "Failed to read voltage report 0x09");
   }
   
-  // Read load report
-  HidReport load_report;
-  if (read_hid_report(APC_REPORT_ID_LOAD, load_report)) {
-    parse_power_report(load_report, data);
-    success = true;
-  } else {
-    ESP_LOGV(APC_HID_TAG, "Failed to read load report");
-  }
+  // Set frequency to NaN - not available in debug logs for this APC model
+  data.frequency = NAN;
+  ESP_LOGV(APC_HID_TAG, "Frequency: Not available on this UPS model");
   
   if (success) {
     ESP_LOGV(APC_HID_TAG, "Successfully read UPS data");
@@ -150,30 +173,39 @@ bool ApcHidProtocol::init_hid_communication() {
 }
 
 bool ApcHidProtocol::read_hid_report(uint8_t report_id, HidReport &report) {
-  // Use Feature Report (0x03) for HID GET_REPORT requests
-  const uint8_t report_type = 0x03; // Feature Report
   uint8_t buffer[64]; // Maximum HID report size
   size_t buffer_len = sizeof(buffer);
+  esp_err_t ret;
   
-  ESP_LOGD(APC_HID_TAG, "Reading HID Feature report 0x%02X...", report_id);
-  
-  esp_err_t ret = parent_->hid_get_report(report_type, report_id, buffer, &buffer_len);
-  if (ret != ESP_OK) {
-    ESP_LOGD(APC_HID_TAG, "HID GET_REPORT (Feature 0x%02X) failed: %s", report_id, esp_err_to_name(ret));
-    return false;
+  // CRITICAL FIX: Try Input Report first (0x01) - this is what NUT uses for real-time data
+  // Based on NUT logs showing PowerSummary fields work with Input Reports
+  ESP_LOGV(APC_HID_TAG, "Trying Input report 0x%02X...", report_id);
+  ret = parent_->hid_get_report(0x01, report_id, buffer, &buffer_len);
+  if (ret == ESP_OK && buffer_len > 0) {
+    report.report_id = report_id;
+    report.data.assign(buffer, buffer + buffer_len);
+    ESP_LOGD(APC_HID_TAG, "HID Input report 0x%02X: received %zu bytes", report_id, buffer_len);
+    log_raw_data(buffer, buffer_len);
+    return true;
   }
   
-  if (buffer_len == 0) {
-    ESP_LOGD(APC_HID_TAG, "Empty HID report received for ID 0x%02X", report_id);
-    return false;
+  // Fall back to Feature Report (0x03) for static/config data
+  buffer_len = sizeof(buffer); // Reset buffer length
+  ESP_LOGV(APC_HID_TAG, "Trying Feature report 0x%02X...", report_id);
+  ret = parent_->hid_get_report(0x03, report_id, buffer, &buffer_len);
+  if (ret == ESP_OK && buffer_len > 0) {
+    report.report_id = report_id;
+    report.data.assign(buffer, buffer + buffer_len);
+    ESP_LOGD(APC_HID_TAG, "HID Feature report 0x%02X: received %zu bytes", report_id, buffer_len);
+    log_raw_data(buffer, buffer_len);
+    return true;
   }
   
-  report.report_id = report_id;
-  report.data.assign(buffer, buffer + buffer_len);
-  
-  ESP_LOGD(APC_HID_TAG, "HID Feature report 0x%02X: received %zu bytes", report_id, buffer_len);
-  
-  // Log the raw data for debugging
+  ESP_LOGD(APC_HID_TAG, "Both Input and Feature report 0x%02X failed", report_id);
+  return false;
+}
+
+void ApcHidProtocol::log_raw_data(const uint8_t* buffer, size_t buffer_len) {
   if (buffer_len > 0) {
     std::string hex_data;
     for (size_t i = 0; i < buffer_len; i++) {
@@ -181,10 +213,13 @@ bool ApcHidProtocol::read_hid_report(uint8_t report_id, HidReport &report) {
       snprintf(hex_byte, sizeof(hex_byte), "%02X ", buffer[i]);
       hex_data += hex_byte;
     }
-    ESP_LOGD(APC_HID_TAG, "Raw data: %s", hex_data.c_str());
+    ESP_LOGD(APC_HID_TAG, "Raw data (%zu bytes): %s", buffer_len, hex_data.c_str());
+    
+    // Detailed byte-by-byte analysis
+    for (size_t i = 0; i < buffer_len; i++) {
+      ESP_LOGV(APC_HID_TAG, "  Byte[%zu]: 0x%02X (%d decimal)", i, buffer[i], buffer[i]);
+    }
   }
-  
-  return true;
 }
 
 bool ApcHidProtocol::write_hid_report(const HidReport &report) {
@@ -316,17 +351,25 @@ void ApcHidProtocol::parse_voltage_report(const HidReport &report, UpsData &data
   
   // If we have a second byte, treat it as high byte for 16-bit value
   if (report.data.size() >= 3) {
-    voltage_raw += (report.data[2] << 8);
+    voltage_raw |= (report.data[2] << 8);
     ESP_LOGV(APC_HID_TAG, "16-bit voltage: 0x%04X", voltage_raw);
   } else {
     ESP_LOGV(APC_HID_TAG, "8-bit voltage: 0x%02X", voltage_raw);
   }
   
-  // Voltage is typically reported directly in volts for APC devices
-  data.input_voltage = static_cast<float>(voltage_raw);
-  data.output_voltage = data.input_voltage; // Assume same for most UPS devices
+  // This report 0x09 provides output voltage, apply proper scaling
+  // Raw values like 0x0557 (1367) need to be scaled to reasonable voltage
+  float voltage_scaled;
+  if (voltage_raw > 1000) {
+    // Assume raw value needs scaling (e.g., 1367 → 136.7V)
+    voltage_scaled = voltage_raw / 10.0f;
+  } else {
+    voltage_scaled = static_cast<float>(voltage_raw);
+  }
   
-  ESP_LOGI(APC_HID_TAG, "Voltage: %.0fV", data.input_voltage);
+  data.output_voltage = voltage_scaled;
+  
+  ESP_LOGI(APC_HID_TAG, "Output voltage: %.1fV", data.output_voltage);
 }
 
 void ApcHidProtocol::parse_power_report(const HidReport &report, UpsData &data) {
@@ -406,6 +449,146 @@ void ApcHidProtocol::parse_device_info_report(const HidReport &report) {
       ESP_LOGD(APC_HID_TAG, "Battery Date: %s", date_str.c_str());
     }
   }
+}
+
+// NUT-compatible parser implementations based on real device data analysis
+void ApcHidProtocol::parse_power_summary_report(const HidReport &report, UpsData &data) {
+  // Report 0x0C: PowerSummary.RemainingCapacity + RunTimeToEmpty
+  // CORRECTED: ESP32 data [0C 64 B2 02] - byte 1 is battery %, bytes 2-3 are runtime
+  if (report.data.size() < 2) {
+    ESP_LOGW(APC_HID_TAG, "PowerSummary report too short: %zu bytes", report.data.size());
+    return;
+  }
+  
+  // ESP32 data format: [0C 63 67 02] where 0x63 = 99% battery
+  // Battery percentage at byte 1 (NUT offset 0 within report payload)
+  data.battery_level = static_cast<float>(report.data[1]);
+  ESP_LOGD(APC_HID_TAG, "Raw battery byte: 0x%02X = %d%%", report.data[1], report.data[1]);
+  ESP_LOGI(APC_HID_TAG, "PowerSummary: Battery %.0f%%", data.battery_level);
+  
+  // Runtime at bytes 2-3 (16-bit little-endian, NUT offset 8)
+  if (report.data.size() >= 4) {
+    uint16_t runtime_raw = report.data[2] | (report.data[3] << 8);
+    if (runtime_raw > 0 && runtime_raw < 65535) {
+      data.runtime_minutes = static_cast<float>(runtime_raw);
+      ESP_LOGI(APC_HID_TAG, "PowerSummary: Runtime %d minutes", runtime_raw);
+    }
+  }
+}
+
+void ApcHidProtocol::parse_present_status_report(const HidReport &report, UpsData &data) {
+  // Report 0x16: PowerSummary.PresentStatus - HID field structure
+  // Based on NUT logs showing exact offsets for each 1-bit field:
+  // Offset 0: Charging, Offset 1: Discharging, Offset 2: ACPresent, Offset 3: BatteryPresent, etc.
+  if (report.data.size() < 2) {
+    ESP_LOGW(APC_HID_TAG, "PresentStatus report too short: %zu bytes", report.data.size());
+    return;
+  }
+  
+  // ESP32 receives packed data, but NUT shows individual bit fields at offsets
+  // The HID descriptor defines how these bits are packed into the report
+  uint8_t packed_status = report.data[1];
+  ESP_LOGD(APC_HID_TAG, "PresentStatus packed data: 0x%02X", packed_status);
+  
+  // Extract individual status bits based on NUT field offsets
+  // NUT shows these are 1-bit fields at specific offsets within the report
+  bool charging = (packed_status & 0x01) != 0;        // Offset 0, Size 1
+  bool discharging = (packed_status & 0x02) != 0;     // Offset 1, Size 1
+  bool ac_present = (packed_status & 0x04) != 0;      // Offset 2, Size 1  
+  bool battery_present = (packed_status & 0x08) != 0; // Offset 3, Size 1
+  bool below_capacity = (packed_status & 0x10) != 0;  // Offset 4, Size 1
+  bool shutdown_imminent = (packed_status & 0x20) != 0; // Offset 5, Size 1
+  bool time_limit_expired = (packed_status & 0x40) != 0; // Offset 6, Size 1
+  bool need_replacement = (packed_status & 0x80) != 0;   // Offset 7, Size 1
+  
+  // Check for Overload at Offset 8 (second byte if available)
+  bool overload = false;
+  if (report.data.size() >= 3) {
+    uint8_t second_byte = report.data[2];
+    overload = (second_byte & 0x01) != 0;  // Offset 8 = bit 0 of second byte
+    ESP_LOGD(APC_HID_TAG, "Second status byte: 0x%02X, Overload: %d", second_byte, overload);
+  }
+  
+  uint32_t status_flags = 0;
+  
+  // Set UPS status flags based on NUT behavior patterns
+  if (ac_present && !discharging) {
+    status_flags |= UPS_STATUS_ONLINE;
+  } else if (discharging || !ac_present) {
+    status_flags |= UPS_STATUS_ON_BATTERY;
+  }
+  
+  if (charging) status_flags |= UPS_STATUS_CHARGING;
+  if (below_capacity || shutdown_imminent) status_flags |= UPS_STATUS_LOW_BATTERY;
+  if (need_replacement || !battery_present) status_flags |= UPS_STATUS_FAULT;
+  if (overload) status_flags |= UPS_STATUS_OVERLOAD;
+  
+  data.status_flags = status_flags;
+  
+  ESP_LOGI(APC_HID_TAG, "PresentStatus: 0x%02X AC:%d Discharge:%d Charge:%d Battery:%d → Status:0x%02X", 
+           packed_status, ac_present, discharging, charging, battery_present, status_flags);
+}
+
+void ApcHidProtocol::parse_apc_status_report(const HidReport &report, UpsData &data) {
+  // Report 0x06: PowerSummary.APCStatusFlag (single byte legacy status)
+  // ESP32 data format: [06 XX] where XX is the status value
+  if (report.data.size() < 2) {
+    ESP_LOGW(APC_HID_TAG, "APCStatus report too short: %zu bytes", report.data.size());
+    return;
+  }
+  
+  // ESP32 data format: [06 08] where 0x08 = AC present  
+  uint8_t apc_status = report.data[1]; // Byte 1 contains the status value
+  ESP_LOGD(APC_HID_TAG, "Raw APCStatusFlag byte: 0x%02X", apc_status);
+  ESP_LOGI(APC_HID_TAG, "APCStatusFlag: 0x%02X", apc_status);
+  
+  // Parse APC legacy status values from NUT logs:
+  // Value 8 = AC present (UPS online)
+  // Value 16 = discharging (UPS on battery) 
+  bool apc_ac_present = (apc_status == 8);
+  bool apc_discharging = (apc_status == 16);
+  
+  // Use APCStatusFlag as backup/confirmation for PresentStatus
+  // This provides additional validation of the UPS state
+  if (apc_ac_present) {
+    ESP_LOGD(APC_HID_TAG, "APCStatusFlag confirms: UPS online (AC present)");
+  } else if (apc_discharging) {
+    ESP_LOGD(APC_HID_TAG, "APCStatusFlag confirms: UPS on battery (discharging)");
+  } else {
+    ESP_LOGW(APC_HID_TAG, "APCStatusFlag unknown value: 0x%02X", apc_status);
+  }
+  
+  // Don't override PresentStatus data, just log for debugging
+  // PresentStatus (report 0x16) is more detailed and authoritative
+}
+
+void ApcHidProtocol::parse_input_voltage_report(const HidReport &report, UpsData &data) {
+  // Report 0x31: UPS.Input.Voltage (16-bit value)
+  // NUT logs show values like 236V, 232V (AC input voltage)
+  if (report.data.size() < 3) {
+    ESP_LOGW(APC_HID_TAG, "Input voltage report too short: %zu bytes", report.data.size());
+    return;
+  }
+  
+  // Parse 16-bit voltage value (little-endian)
+  uint16_t voltage_raw = report.data[1] | (report.data[2] << 8);
+  data.input_voltage = static_cast<float>(voltage_raw);
+  
+  ESP_LOGI(APC_HID_TAG, "Input voltage: %.1fV", data.input_voltage);
+}
+
+void ApcHidProtocol::parse_load_report(const HidReport &report, UpsData &data) {
+  // Report 0x50: UPS.PowerConverter.PercentLoad (8-bit percentage)
+  // NUT logs show values like 23%, 16% (load percentage)
+  if (report.data.size() < 2) {
+    ESP_LOGW(APC_HID_TAG, "Load report too short: %zu bytes", report.data.size());
+    return;
+  }
+  
+  // Parse 8-bit load percentage
+  data.load_percent = static_cast<float>(report.data[1]);
+  
+  ESP_LOGI(APC_HID_TAG, "Load percentage: %.0f%%", data.load_percent);
 }
 
 } // namespace ups_hid

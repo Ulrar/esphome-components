@@ -144,11 +144,11 @@ ups_hid:
   update_interval: 10s
 
   # Hardware Configuration
-  #usb_vendor_id: 0x051d # APC vendor ID (0x051d)
-  #usb_product_id: 0x0002 # APC Back-UPS ES series
+  usb_vendor_id: 0x051d # APC vendor ID (0x051d)
+  usb_product_id: 0x0002 # APC Back-UPS ES series
 
-  usb_vendor_id: 0x0764 # CyberPower (0x0764)
-  usb_product_id: 0x0501 # CP1500 AVR UPS
+  #usb_vendor_id: 0x0764 # CyberPower (0x0764)
+  #usb_product_id: 0x0501 # CP1500 AVR UPS
 
   # Protocol Configuration
   auto_detect_protocol: true
@@ -246,9 +246,11 @@ sensor:
     accuracy_decimals: 1
     lambda: |-
       if (!std::isnan(id(output_voltage).state) && !std::isnan(id(load_percentage).state)) {
-        // Estimate power assuming typical UPS efficiency and load factor
-        float estimated_power = (id(output_voltage).state * id(load_percentage).state) / 100.0;
-        return estimated_power * 8.0; // Assume 8A max current for estimation
+        // Calculate actual power consumption based on UPS specifications
+        // APC Back-UPS ES 700: 700VA nominal capacity, ~420W max real power
+        float ups_max_power = 420.0; // Watts for Back-UPS ES 700
+        float current_power = (ups_max_power * id(load_percentage).state) / 100.0;
+        return current_power;
       }
       return NAN;
     update_interval: 30s
@@ -307,12 +309,7 @@ binary_sensor:
     name: "Overload Warning"
     id: overload_warning
     type: overload
-    device_class: problem
-
-  # System binary sensors
-  - platform: status
-    name: "Device Status"
-    id: device_status
+    device_class: power
 
   # Temperature warning
   - platform: template

@@ -32,8 +32,16 @@ private:
   void parse_battery_report(const HidReport &report, UpsData &data);
   void parse_voltage_report(const HidReport &report, UpsData &data);
   void parse_power_report(const HidReport &report, UpsData &data);
+  
+  // NUT-compatible parsers
+  void parse_power_summary_report(const HidReport &report, UpsData &data);
+  void parse_present_status_report(const HidReport &report, UpsData &data);
+  void parse_apc_status_report(const HidReport &report, UpsData &data);
+  void parse_input_voltage_report(const HidReport &report, UpsData &data);
+  void parse_load_report(const HidReport &report, UpsData &data);
   void read_device_info();
   void parse_device_info_report(const HidReport &report);
+  void log_raw_data(const uint8_t* buffer, size_t buffer_len);
 };
 
 } // namespace ups_hid
