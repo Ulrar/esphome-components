@@ -32,6 +32,13 @@ class CyberPowerProtocol : public UpsProtocolBase {
   bool beeper_disable() override;
   bool beeper_mute() override;
   bool beeper_test() override;
+  
+  // UPS and battery test methods
+  bool start_battery_test_quick() override;
+  bool start_battery_test_deep() override;
+  bool stop_battery_test() override;
+  bool start_ups_test() override;
+  bool stop_ups_test() override;
 
  private:
   // Report ID constants (based on NUT debug logs)

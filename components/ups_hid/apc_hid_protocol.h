@@ -21,6 +21,13 @@ public:
   bool beeper_disable() override;
   bool beeper_mute() override;
   bool beeper_test() override;
+  
+  // UPS and battery test methods
+  bool start_battery_test_quick() override;
+  bool start_battery_test_deep() override;
+  bool stop_battery_test() override;
+  bool start_ups_test() override;
+  bool stop_ups_test() override;
 
 private:
   struct HidReport {
@@ -67,6 +74,7 @@ private:
   void parse_ups_delay_shutdown_report(const HidReport &report, UpsData &data);
   void parse_battery_charge_threshold_report(const HidReport &report, UpsData &data, bool is_low_threshold);
   void parse_battery_chemistry_report(const HidReport &report, UpsData &data);
+  void parse_test_result_report(const HidReport &report, UpsData &data);
   std::string convert_apc_date(uint16_t date_value);
 };
 

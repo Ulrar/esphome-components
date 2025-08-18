@@ -228,6 +228,11 @@ bool ApcHidProtocol::read_data(UpsData &data) {
     data.model.clear();
   }
   
+  // Set default test result
+  if (data.ups_test_result.empty()) {
+    data.ups_test_result = "No test initiated";
+  }
+  
   return success;
 }
 
@@ -1102,6 +1107,13 @@ void ApcHidProtocol::read_missing_dynamic_values(UpsData &data) {
     ESP_LOGI(APC_HID_TAG, "APC Battery status: %s (%.0f%%)", data.battery_status.c_str(), data.battery_level);
   }
   
+  // 8. Test result reading (Report 0x52 - same as test command)
+  // Based on NUT: "UPS.Battery.Test" maps to test result
+  HidReport test_result_report;
+  if (read_hid_report(0x52, test_result_report)) {
+    parse_test_result_report(test_result_report, data);
+  }
+  
   ESP_LOGD(APC_HID_TAG, "Completed reading APC missing dynamic values");
 }
 
@@ -1486,6 +1498,137 @@ bool ApcHidProtocol::beeper_test() {
     ESP_LOGW(APC_HID_TAG, "Beeper test completed but failed to restore original state: %s", esp_err_to_name(ret));
     return true; // Test succeeded even if restore failed
   }
+}
+
+// UPS and Battery Test implementations based on NUT analysis
+bool ApcHidProtocol::start_battery_test_quick() {
+  ESP_LOGI(APC_HID_TAG, "Starting APC quick battery test");
+  
+  // Based on NUT debug logs, APC uses report ID 0x52 for battery test
+  // Command value 1 = Quick test (based on NUT test_write_info struct)
+  uint8_t test_data[2] = {0x52, 1};
+  
+  esp_err_t ret = parent_->hid_set_report(0x03, 0x52, test_data, sizeof(test_data));
+  if (ret == ESP_OK) {
+    ESP_LOGI(APC_HID_TAG, "APC quick battery test command sent successfully");
+    return true;
+  } else {
+    ESP_LOGW(APC_HID_TAG, "Failed to send APC quick battery test: %s", esp_err_to_name(ret));
+    return false;
+  }
+}
+
+bool ApcHidProtocol::start_battery_test_deep() {
+  ESP_LOGI(APC_HID_TAG, "Starting APC deep battery test");
+  
+  // Based on NUT debug logs, APC uses report ID 0x52 for battery test
+  // Command value 2 = Deep test (based on NUT test_write_info struct)
+  uint8_t test_data[2] = {0x52, 2};
+  
+  esp_err_t ret = parent_->hid_set_report(0x03, 0x52, test_data, sizeof(test_data));
+  if (ret == ESP_OK) {
+    ESP_LOGI(APC_HID_TAG, "APC deep battery test command sent successfully");
+    return true;
+  } else {
+    ESP_LOGW(APC_HID_TAG, "Failed to send APC deep battery test: %s", esp_err_to_name(ret));
+    return false;
+  }
+}
+
+bool ApcHidProtocol::stop_battery_test() {
+  ESP_LOGI(APC_HID_TAG, "Stopping APC battery test");
+  
+  // Based on NUT debug logs, APC uses report ID 0x52 for battery test
+  // Command value 3 = Abort test (based on NUT test_write_info struct)
+  uint8_t test_data[2] = {0x52, 3};
+  
+  esp_err_t ret = parent_->hid_set_report(0x03, 0x52, test_data, sizeof(test_data));
+  if (ret == ESP_OK) {
+    ESP_LOGI(APC_HID_TAG, "APC battery test stop command sent successfully");
+    return true;
+  } else {
+    ESP_LOGW(APC_HID_TAG, "Failed to send APC battery test stop: %s", esp_err_to_name(ret));
+    return false;
+  }
+}
+
+bool ApcHidProtocol::start_ups_test() {
+  ESP_LOGI(APC_HID_TAG, "Starting APC UPS panel test");
+  
+  // Based on NUT debug logs, APC uses report ID 0x79 for panel test
+  // Command value 1 = Start panel test (based on NUT analysis)
+  uint8_t test_data[2] = {0x79, 1};
+  
+  esp_err_t ret = parent_->hid_set_report(0x03, 0x79, test_data, sizeof(test_data));
+  if (ret == ESP_OK) {
+    ESP_LOGI(APC_HID_TAG, "APC UPS panel test command sent successfully");
+    return true;
+  } else {
+    ESP_LOGW(APC_HID_TAG, "Failed to send APC UPS panel test: %s", esp_err_to_name(ret));
+    return false;
+  }
+}
+
+bool ApcHidProtocol::stop_ups_test() {
+  ESP_LOGI(APC_HID_TAG, "Stopping APC UPS panel test");
+  
+  // Based on NUT debug logs, APC uses report ID 0x79 for panel test
+  // Command value 0 = Stop/abort panel test (based on NUT analysis)
+  uint8_t test_data[2] = {0x79, 0};
+  
+  esp_err_t ret = parent_->hid_set_report(0x03, 0x79, test_data, sizeof(test_data));
+  if (ret == ESP_OK) {
+    ESP_LOGI(APC_HID_TAG, "APC UPS panel test stop command sent successfully");
+    return true;
+  } else {
+    ESP_LOGW(APC_HID_TAG, "Failed to send APC UPS panel test stop: %s", esp_err_to_name(ret));
+    return false;
+  }
+}
+
+void ApcHidProtocol::parse_test_result_report(const HidReport &report, UpsData &data) {
+  if (report.data.size() < 2) {
+    ESP_LOGW(APC_HID_TAG, "Test result report too short: %zu bytes", report.data.size());
+    data.ups_test_result = "Error reading test result";
+    return;
+  }
+  
+  // Based on NUT test_read_info lookup table:
+  // 1 = "Done and passed", 2 = "Done and warning", 3 = "Done and error",
+  // 4 = "Aborted", 5 = "In progress", 6 = "No test initiated", 7 = "Test scheduled"
+  uint8_t test_result_value = report.data[1];
+  
+  ESP_LOGD(APC_HID_TAG, "Raw test result from report 0x52: 0x%02X (%d)", test_result_value, test_result_value);
+  
+  switch (test_result_value) {
+    case 1:
+      data.ups_test_result = "Done and passed";
+      break;
+    case 2:
+      data.ups_test_result = "Done and warning";
+      break;
+    case 3:
+      data.ups_test_result = "Done and error";
+      break;
+    case 4:
+      data.ups_test_result = "Aborted";
+      break;
+    case 5:
+      data.ups_test_result = "In progress";
+      break;
+    case 6:
+      data.ups_test_result = "No test initiated";
+      break;
+    case 7:
+      data.ups_test_result = "Test scheduled";
+      break;
+    default:
+      data.ups_test_result = "Unknown test result (" + std::to_string(test_result_value) + ")";
+      ESP_LOGW(APC_HID_TAG, "Unknown APC test result value: %d", test_result_value);
+      break;
+  }
+  
+  ESP_LOGI(APC_HID_TAG, "APC Test result: %s (raw: %d)", data.ups_test_result.c_str(), test_result_value);
 }
 
 } // namespace ups_hid

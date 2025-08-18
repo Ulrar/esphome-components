@@ -34,9 +34,9 @@ logger:
   hardware_uart: UART0
 
 # Enable Home Assistant API
-api:
-  encryption:
-    key: !secret api_encryption_key
+#api:
+#  encryption:
+#    key: !secret api_encryption_key
 
 # Enable OTA updates
 ota:
@@ -801,6 +801,45 @@ button:
     icon: "mdi:bell-ring"
     # Note: Tests enable/disable functionality - no audible sound unless UPS has alarm condition
     # To hear actual beeper: unplug UPS briefly while beeper is enabled
+
+  # UPS Testing Buttons - NEW FEATURE
+  # Based on NUT test command implementation for APC and CyberPower protocols
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    test_action: battery_quick
+    name: "UPS Quick Battery Test"
+    icon: "mdi:battery-check"
+    # Performs a short battery test (typically 10 seconds)
+    # Tests battery condition and capacity
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    test_action: battery_deep
+    name: "UPS Deep Battery Test"
+    icon: "mdi:battery-plus"
+    # Performs comprehensive battery test (may run several minutes)
+    # Full battery capacity and health check
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    test_action: battery_stop
+    name: "UPS Stop Battery Test"
+    icon: "mdi:battery-remove"
+    # Aborts any running battery test
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    test_action: ups_test
+    name: "UPS Panel Test"
+    icon: "mdi:test-tube"
+    # Tests UPS panel indicators and systems
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    test_action: ups_stop
+    name: "UPS Stop Panel Test"
+    icon: "mdi:stop"
+    # Stops UPS panel test
 
 # Enable safe mode for recovery
 safe_mode:

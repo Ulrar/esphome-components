@@ -1055,5 +1055,68 @@ bool CyberPowerProtocol::beeper_test() {
   }
 }
 
+// Test control methods implementation (based on NUT CPS-HID driver analysis)
+bool CyberPowerProtocol::start_battery_test_quick() {
+  ESP_LOGI(CP_TAG, "Initiating quick battery test");
+  
+  // CyberPower uses UPS.Output.Test path, HID report ID 0x14
+  // Quick test command value is 1 (from NUT test_write_info)
+  uint8_t test_data[2] = {0x14, 1}; // Report ID 0x14, value 1 = Quick test
+  
+  esp_err_t ret = parent_->hid_set_report(0x03, 0x14, test_data, 2);
+  if (ret == ESP_OK) {
+    ESP_LOGI(CP_TAG, "Quick battery test command sent successfully");
+    return true;
+  } else {
+    ESP_LOGW(CP_TAG, "Failed to send quick battery test command: %s", esp_err_to_name(ret));
+    return false;
+  }
+}
+
+bool CyberPowerProtocol::start_battery_test_deep() {
+  ESP_LOGI(CP_TAG, "Initiating deep battery test");
+  
+  // Deep test command value is 2 (from NUT test_write_info)
+  uint8_t test_data[2] = {0x14, 2}; // Report ID 0x14, value 2 = Deep test
+  
+  esp_err_t ret = parent_->hid_set_report(0x03, 0x14, test_data, 2);
+  if (ret == ESP_OK) {
+    ESP_LOGI(CP_TAG, "Deep battery test command sent successfully");
+    return true;
+  } else {
+    ESP_LOGW(CP_TAG, "Failed to send deep battery test command: %s", esp_err_to_name(ret));
+    return false;
+  }
+}
+
+bool CyberPowerProtocol::stop_battery_test() {
+  ESP_LOGI(CP_TAG, "Stopping battery test");
+  
+  // Abort test command value is 3 (from NUT test_write_info)
+  uint8_t test_data[2] = {0x14, 3}; // Report ID 0x14, value 3 = Abort test
+  
+  esp_err_t ret = parent_->hid_set_report(0x03, 0x14, test_data, 2);
+  if (ret == ESP_OK) {
+    ESP_LOGI(CP_TAG, "Battery test stop command sent successfully");
+    return true;
+  } else {
+    ESP_LOGW(CP_TAG, "Failed to send battery test stop command: %s", esp_err_to_name(ret));
+    return false;
+  }
+}
+
+bool CyberPowerProtocol::start_ups_test() {
+  // CyberPower doesn't seem to have separate UPS test from battery test
+  // Redirect to battery test quick as the closest equivalent
+  ESP_LOGI(CP_TAG, "CyberPower UPS test redirected to quick battery test");
+  return start_battery_test_quick();
+}
+
+bool CyberPowerProtocol::stop_ups_test() {
+  // Redirect to battery test stop
+  ESP_LOGI(CP_TAG, "CyberPower UPS test stop redirected to battery test stop");
+  return stop_battery_test();
+}
+
 }  // namespace ups_hid
 }  // namespace esphome

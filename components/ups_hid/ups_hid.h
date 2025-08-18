@@ -234,6 +234,13 @@ namespace esphome
         return false;
 #endif
       }
+      
+      // Test control methods
+      bool start_battery_test_quick();
+      bool start_battery_test_deep();
+      bool stop_battery_test();
+      bool start_ups_test();
+      bool stop_ups_test();
 
       // Sensor registration methods
       void register_sensor(sensor::Sensor *sens, const std::string &type);
@@ -279,6 +286,7 @@ namespace esphome
       bool read_ups_data();
       void update_sensors();
       void simulate_ups_data();
+      bool test_device_communication();
       
       // Error rate limiting helpers
       bool should_log_error(ErrorRateLimit& limiter);
@@ -385,6 +393,13 @@ namespace esphome
       virtual bool beeper_disable() { return false; }
       virtual bool beeper_mute() { return false; }
       virtual bool beeper_test() { return false; }
+      
+      // UPS and battery test methods
+      virtual bool start_battery_test_quick() { return false; }
+      virtual bool start_battery_test_deep() { return false; }
+      virtual bool stop_battery_test() { return false; }
+      virtual bool start_ups_test() { return false; }
+      virtual bool stop_ups_test() { return false; }
 
     protected:
       UpsHidComponent *parent_;
@@ -405,6 +420,13 @@ namespace esphome
       bool read_data(UpsData &data) override;
       UpsProtocol get_protocol_type() const override { return PROTOCOL_GENERIC_HID; }
       std::string get_protocol_name() const override { return "Generic HID"; }
+      
+      // Test method overrides
+      bool start_battery_test_quick() override;
+      bool start_battery_test_deep() override;
+      bool stop_battery_test() override;
+      bool start_ups_test() override;
+      bool stop_ups_test() override;
       
     private:
       // Report discovery and caching

@@ -5,11 +5,13 @@ A production-ready ESPHome component for monitoring UPS devices via USB connecti
 ## Features
 
 - 🔋 **Real-time UPS monitoring**: Battery level, voltages, load, runtime, status
+- 🧪 **UPS self-test control**: Battery tests (quick/deep), panel tests, with real-time result monitoring
 - 🔊 **Beeper control**: Enable/disable/mute/test UPS audible alarms via HID write operations
 - 🌈 **Visual status indicator**: RGB LED with customizable status colors
 - 🏠 **Home Assistant integration**: Automatic entity discovery via ESPHome API
 - 🔌 **Multi-protocol support**: APC HID, CyberPower HID, Generic HID
 - 🎯 **Auto-detection**: Intelligent protocol detection based on USB vendor IDs
+- 🔧 **USB recovery**: Enhanced ESP-IDF v5.3 connection handling with automatic recovery
 - 🛡️ **Production-ready**: Thread-safe, error rate limiting, comprehensive logging
 - 🧪 **Simulation mode**: Test integration without physical UPS device
 
@@ -680,6 +682,123 @@ text_sensor:
     type: ups_beeper_status         # Shows: "enabled", "disabled", or "muted"
     name: "UPS Beeper Status"
     icon: "mdi:volume-high"
+```
+
+### UPS Test Control (Battery & Panel Tests)
+
+The component supports UPS self-test operations compatible with Network UPS Tools (NUT) standard:
+
+```yaml
+button:
+  # Battery Tests
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    test_action: battery_quick      # Quick battery test (10-15 seconds)
+    name: "UPS Quick Battery Test"
+    icon: "mdi:battery-plus"
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    test_action: battery_deep       # Deep battery test (2-5 minutes)
+    name: "UPS Deep Battery Test"
+    icon: "mdi:battery-charging"
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    test_action: battery_stop       # Stop any running battery test
+    name: "UPS Stop Battery Test"
+    icon: "mdi:battery-remove"
+
+  # Panel Tests  
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    test_action: ups_test          # Panel/system test (LEDs, buzzer)
+    name: "UPS Panel Test"
+    icon: "mdi:test-tube"
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    test_action: ups_stop          # Stop panel test
+    name: "UPS Stop Panel Test"
+    icon: "mdi:stop"
+```
+
+**Available test actions:**
+- `battery_quick`: Quick battery capacity test (10-15 seconds)
+- `battery_deep`: Comprehensive battery test (2-5 minutes)
+- `battery_stop`: Abort any running battery test
+- `ups_test`: Test panel indicators and systems
+- `ups_stop`: Stop panel/system test
+
+**Test Result Monitoring:**
+```yaml
+text_sensor:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    type: ups_test_result          # Current test status
+    name: "UPS Test Result"
+    icon: "mdi:test-tube"
+```
+
+**Test Result Values (NUT Compatible):**
+- `"No test initiated"` - Default state
+- `"In progress"` - Test currently running
+- `"Done and passed"` - ✅ Test completed successfully
+- `"Done and warning"` - ⚠️ Test completed with warnings
+- `"Done and error"` - ❌ Test failed
+- `"Aborted"` - 🛑 Test was stopped/aborted
+- `"Test scheduled"` - 📅 Test scheduled but not started
+
+**Protocol Support:**
+- ✅ **APC Devices**: Battery test (0x52), Panel test (0x79) - Full NUT compatibility
+- ✅ **CyberPower Devices**: Battery test (0x14), Generic test support
+- ⚠️ **Generic HID**: Multi-report fallback (device-dependent)
+
+**Important Test Behavior:**
+- **Battery Tests**: UPS may switch to battery power briefly during testing
+- **Deep Tests**: Can take several minutes - don't interrupt
+- **Panel Tests**: Test LED indicators and audible alarms
+- **Automatic Results**: Test results update automatically in real-time
+- **State Persistence**: Test results persist until next test is initiated
+
+**Testing Best Practices:**
+```yaml
+# Monitor test progress with automation
+automation:
+  - alias: "UPS Test Completed"
+    trigger:
+      platform: state
+      entity_id: text_sensor.ups_test_result
+      from: "In progress"
+    condition:
+      condition: not
+      conditions:
+        - condition: state
+          entity_id: text_sensor.ups_test_result
+          state: "In progress"
+    action:
+      service: notify.mobile_app
+      data:
+        message: "UPS test completed: {{ states('text_sensor.ups_test_result') }}"
+```
+
+**USB Connection Recovery:**
+
+Enhanced connection handling for ESP-IDF v5.3 issues:
+
+- **Automatic Recovery**: Handles `ESP_ERR_INVALID_STATE` USB library errors
+- **Connection Reuse**: Maintains existing connections when possible
+- **State Trust**: Trusts previous device configuration during ESP-IDF bugs
+- **Multi-Strategy**: Dual recovery approach for maximum reliability
+
+```yaml
+# Enable detailed USB debugging if needed
+logger:
+  level: DEBUG
+  logs:
+    ups_hid: DEBUG                 # Component debugging
+    ups_hid.apc: DEBUG            # APC protocol debugging
+    ups_hid.cyberpower: DEBUG     # CyberPower protocol debugging
 ```
 
 ## Advanced Configuration

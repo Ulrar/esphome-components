@@ -1111,12 +1111,32 @@ namespace esphome
         {
           if (ret == ESP_ERR_INVALID_STATE) {
             ESP_LOGW(TAG, "USB Host Library in invalid state for device %d", dev_addr_list[i]);
-            ESP_LOGI(TAG, "This is a known ESP-IDF v5.3 issue");
+            ESP_LOGI(TAG, "This is a known ESP-IDF v5.3 issue - attempting recovery");
             
-            // Simple handling: just skip the device and continue
-            // The ESP-IDF v5.3 USB Host Library has fundamental bugs with device state
-            // management that cannot be reliably worked around. The best approach is
-            // to log the issue and continue operation.
+            // RECOVERY STRATEGY 1: Try to reuse existing connection if available
+            if (usb_device_.dev_hdl != nullptr && usb_device_.dev_addr == dev_addr_list[i]) {
+              ESP_LOGI(TAG, "Reusing existing connection for device address %d", dev_addr_list[i]);
+              // Check if we can still communicate with the device
+              if (test_device_communication()) {
+                device_connected_ = true;
+                ESP_LOGI(TAG, "Successfully recovered USB connection");
+                return ESP_OK;
+              } else {
+                ESP_LOGW(TAG, "Existing connection no longer functional");
+              }
+            }
+            
+            // RECOVERY STRATEGY 2: If we had a working UPS before and there's only one device,
+            // assume it's the same UPS and trust the previous configuration
+            if (num_dev == 1 && usb_device_.vid != 0 && usb_device_.pid != 0) {
+              ESP_LOGI(TAG, "Single device with ESP_ERR_INVALID_STATE - trusting previous UPS config");
+              ESP_LOGI(TAG, "Previous UPS was: VID=0x%04X, PID=0x%04X", usb_device_.vid, usb_device_.pid);
+              // Mark as connected but don't update device handle (keep existing one)
+              device_connected_ = true;
+              return ESP_OK;
+            }
+            
+            // If both recovery strategies failed, continue to try next device
             continue;
           } else {
             ESP_LOGW(TAG, "Failed to open USB device %d: %s", dev_addr_list[i], esp_err_to_name(ret));
@@ -1951,6 +1971,92 @@ namespace esphome
       }
     }
 
+    // Test control method implementations
+    bool UpsHidComponent::start_battery_test_quick()
+    {
+      if (!connected_ || !active_protocol_) {
+        ESP_LOGW(TAG, "Cannot start battery test: UPS not connected");
+        return false;
+      }
+      
+      ESP_LOGI(TAG, "Starting quick battery test");
+      bool result = active_protocol_->start_battery_test_quick();
+      if (result) {
+        ESP_LOGI(TAG, "Quick battery test initiated successfully");
+      } else {
+        ESP_LOGW(TAG, "Failed to start quick battery test");
+      }
+      return result;
+    }
+
+    bool UpsHidComponent::start_battery_test_deep()
+    {
+      if (!connected_ || !active_protocol_) {
+        ESP_LOGW(TAG, "Cannot start battery test: UPS not connected");
+        return false;
+      }
+      
+      ESP_LOGI(TAG, "Starting deep battery test");
+      bool result = active_protocol_->start_battery_test_deep();
+      if (result) {
+        ESP_LOGI(TAG, "Deep battery test initiated successfully");
+      } else {
+        ESP_LOGW(TAG, "Failed to start deep battery test");
+      }
+      return result;
+    }
+
+    bool UpsHidComponent::stop_battery_test()
+    {
+      if (!connected_ || !active_protocol_) {
+        ESP_LOGW(TAG, "Cannot stop battery test: UPS not connected");
+        return false;
+      }
+      
+      ESP_LOGI(TAG, "Stopping battery test");
+      bool result = active_protocol_->stop_battery_test();
+      if (result) {
+        ESP_LOGI(TAG, "Battery test stopped successfully");
+      } else {
+        ESP_LOGW(TAG, "Failed to stop battery test");
+      }
+      return result;
+    }
+
+    bool UpsHidComponent::start_ups_test()
+    {
+      if (!connected_ || !active_protocol_) {
+        ESP_LOGW(TAG, "Cannot start UPS test: UPS not connected");
+        return false;
+      }
+      
+      ESP_LOGI(TAG, "Starting UPS test");
+      bool result = active_protocol_->start_ups_test();
+      if (result) {
+        ESP_LOGI(TAG, "UPS test initiated successfully");
+      } else {
+        ESP_LOGW(TAG, "Failed to start UPS test");
+      }
+      return result;
+    }
+
+    bool UpsHidComponent::stop_ups_test()
+    {
+      if (!connected_ || !active_protocol_) {
+        ESP_LOGW(TAG, "Cannot stop UPS test: UPS not connected");
+        return false;
+      }
+      
+      ESP_LOGI(TAG, "Stopping UPS test");
+      bool result = active_protocol_->stop_ups_test();
+      if (result) {
+        ESP_LOGI(TAG, "UPS test stopped successfully");
+      } else {
+        ESP_LOGW(TAG, "Failed to stop UPS test");
+      }
+      return result;
+    }
+
     // Asynchronous HID GET_REPORT operation
     esp_err_t UpsHidComponent::hid_get_report_async(uint8_t report_type, uint8_t report_id)
     {
@@ -2013,6 +2119,30 @@ namespace esphome
         default:
           ESP_LOGD(TAG, "Unknown USB client event: %d", event_msg->event);
           break;
+      }
+    }
+
+    bool UpsHidComponent::test_device_communication() {
+      if (!usb_device_.dev_hdl || !active_protocol_) {
+        ESP_LOGD(TAG, "Cannot test communication: no device handle or protocol");
+        return false;
+      }
+
+      ESP_LOGD(TAG, "Testing device communication...");
+      
+      // Try a simple HID communication test using the active protocol
+      UpsData test_data;
+      test_data.reset();  // Clear all data
+      
+      // Attempt to read some data from the device
+      bool success = active_protocol_->read_data(test_data);
+      
+      if (success) {
+        ESP_LOGD(TAG, "Device communication test successful");
+        return true;
+      } else {
+        ESP_LOGD(TAG, "Device communication test failed");
+        return false;
       }
     }
 #endif

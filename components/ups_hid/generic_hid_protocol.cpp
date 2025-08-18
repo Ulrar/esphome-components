@@ -221,6 +221,9 @@ bool GenericHidProtocol::read_data(UpsData &data) {
     data.status_flags = UPS_STATUS_ONLINE;
   }
   
+  // Set default test result
+  data.ups_test_result = "No test initiated";
+  
   return success;
 }
 
@@ -573,6 +576,133 @@ void GenericHidProtocol::parse_input_sensitivity(uint8_t* data, size_t len, UpsD
       }
       break;
   }
+}
+
+// Generic HID test implementations (basic functionality for unknown devices)
+bool GenericHidProtocol::start_battery_test_quick() {
+  ESP_LOGI(GEN_TAG, "Starting Generic HID quick battery test");
+  
+  // Try common test report IDs used by various UPS vendors
+  // Based on NUT analysis: report IDs 0x14 (CyberPower), 0x52 (APC), and common alternatives
+  uint8_t test_report_ids[] = {0x14, 0x52, 0x0f, 0x1a};
+  
+  for (size_t i = 0; i < sizeof(test_report_ids); i++) {
+    uint8_t report_id = test_report_ids[i];
+    uint8_t test_data[2] = {report_id, 1}; // Command value 1 = Quick test
+    
+    ESP_LOGD(GEN_TAG, "Trying quick battery test with report ID 0x%02X", report_id);
+    esp_err_t ret = parent_->hid_set_report(0x03, report_id, test_data, sizeof(test_data));
+    
+    if (ret == ESP_OK) {
+      ESP_LOGI(GEN_TAG, "Generic quick battery test command sent with report ID 0x%02X", report_id);
+      return true;
+    } else {
+      ESP_LOGD(GEN_TAG, "Failed with report ID 0x%02X: %s", report_id, esp_err_to_name(ret));
+    }
+  }
+  
+  ESP_LOGW(GEN_TAG, "Failed to send generic quick battery test with all tried report IDs");
+  return false;
+}
+
+bool GenericHidProtocol::start_battery_test_deep() {
+  ESP_LOGI(GEN_TAG, "Starting Generic HID deep battery test");
+  
+  // Try common test report IDs used by various UPS vendors
+  uint8_t test_report_ids[] = {0x14, 0x52, 0x0f, 0x1a};
+  
+  for (size_t i = 0; i < sizeof(test_report_ids); i++) {
+    uint8_t report_id = test_report_ids[i];
+    uint8_t test_data[2] = {report_id, 2}; // Command value 2 = Deep test
+    
+    ESP_LOGD(GEN_TAG, "Trying deep battery test with report ID 0x%02X", report_id);
+    esp_err_t ret = parent_->hid_set_report(0x03, report_id, test_data, sizeof(test_data));
+    
+    if (ret == ESP_OK) {
+      ESP_LOGI(GEN_TAG, "Generic deep battery test command sent with report ID 0x%02X", report_id);
+      return true;
+    } else {
+      ESP_LOGD(GEN_TAG, "Failed with report ID 0x%02X: %s", report_id, esp_err_to_name(ret));
+    }
+  }
+  
+  ESP_LOGW(GEN_TAG, "Failed to send generic deep battery test with all tried report IDs");
+  return false;
+}
+
+bool GenericHidProtocol::stop_battery_test() {
+  ESP_LOGI(GEN_TAG, "Stopping Generic HID battery test");
+  
+  // Try common test report IDs used by various UPS vendors
+  uint8_t test_report_ids[] = {0x14, 0x52, 0x0f, 0x1a};
+  
+  for (size_t i = 0; i < sizeof(test_report_ids); i++) {
+    uint8_t report_id = test_report_ids[i];
+    uint8_t test_data[2] = {report_id, 3}; // Command value 3 = Abort test
+    
+    ESP_LOGD(GEN_TAG, "Trying battery test stop with report ID 0x%02X", report_id);
+    esp_err_t ret = parent_->hid_set_report(0x03, report_id, test_data, sizeof(test_data));
+    
+    if (ret == ESP_OK) {
+      ESP_LOGI(GEN_TAG, "Generic battery test stop command sent with report ID 0x%02X", report_id);
+      return true;
+    } else {
+      ESP_LOGD(GEN_TAG, "Failed with report ID 0x%02X: %s", report_id, esp_err_to_name(ret));
+    }
+  }
+  
+  ESP_LOGW(GEN_TAG, "Failed to send generic battery test stop with all tried report IDs");
+  return false;
+}
+
+bool GenericHidProtocol::start_ups_test() {
+  ESP_LOGI(GEN_TAG, "Starting Generic HID UPS test");
+  
+  // Try common panel test report IDs (less standardized than battery test)
+  uint8_t test_report_ids[] = {0x79, 0x0c, 0x1f, 0x15};
+  
+  for (size_t i = 0; i < sizeof(test_report_ids); i++) {
+    uint8_t report_id = test_report_ids[i];
+    uint8_t test_data[2] = {report_id, 1}; // Command value 1 = Start test
+    
+    ESP_LOGD(GEN_TAG, "Trying UPS test with report ID 0x%02X", report_id);
+    esp_err_t ret = parent_->hid_set_report(0x03, report_id, test_data, sizeof(test_data));
+    
+    if (ret == ESP_OK) {
+      ESP_LOGI(GEN_TAG, "Generic UPS test command sent with report ID 0x%02X", report_id);
+      return true;
+    } else {
+      ESP_LOGD(GEN_TAG, "Failed with report ID 0x%02X: %s", report_id, esp_err_to_name(ret));
+    }
+  }
+  
+  ESP_LOGW(GEN_TAG, "Failed to send generic UPS test with all tried report IDs");
+  return false;
+}
+
+bool GenericHidProtocol::stop_ups_test() {
+  ESP_LOGI(GEN_TAG, "Stopping Generic HID UPS test");
+  
+  // Try common panel test report IDs
+  uint8_t test_report_ids[] = {0x79, 0x0c, 0x1f, 0x15};
+  
+  for (size_t i = 0; i < sizeof(test_report_ids); i++) {
+    uint8_t report_id = test_report_ids[i];
+    uint8_t test_data[2] = {report_id, 0}; // Command value 0 = Stop test
+    
+    ESP_LOGD(GEN_TAG, "Trying UPS test stop with report ID 0x%02X", report_id);
+    esp_err_t ret = parent_->hid_set_report(0x03, report_id, test_data, sizeof(test_data));
+    
+    if (ret == ESP_OK) {
+      ESP_LOGI(GEN_TAG, "Generic UPS test stop command sent with report ID 0x%02X", report_id);
+      return true;
+    } else {
+      ESP_LOGD(GEN_TAG, "Failed with report ID 0x%02X: %s", report_id, esp_err_to_name(ret));
+    }
+  }
+  
+  ESP_LOGW(GEN_TAG, "Failed to send generic UPS test stop with all tried report IDs");
+  return false;
 }
 
 }  // namespace ups_hid
