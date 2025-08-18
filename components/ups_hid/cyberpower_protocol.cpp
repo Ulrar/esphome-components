@@ -15,6 +15,12 @@ static const char *const CP_TAG = "ups_hid.cyberpower_hid";
 bool CyberPowerProtocol::detect() {
   ESP_LOGD(CP_TAG, "Detecting CyberPower HID protocol");
   
+  // Check device connection status first
+  if (!parent_->is_device_connected()) {
+    ESP_LOGD(CP_TAG, "Device not connected, skipping protocol detection");
+    return false;
+  }
+  
   // Give device time to initialize after connection (same as APC)
   vTaskDelay(pdMS_TO_TICKS(100));
   
@@ -31,6 +37,12 @@ bool CyberPowerProtocol::detect() {
   HidReport test_report;
   
   for (uint8_t report_id : test_report_ids) {
+    // Check device connection before each report attempt
+    if (!parent_->is_device_connected()) {
+      ESP_LOGD(CP_TAG, "Device disconnected during protocol detection");
+      return false;
+    }
+    
     ESP_LOGD(CP_TAG, "Testing report ID 0x%02X...", report_id);
     
     if (read_hid_report(report_id, test_report)) {
@@ -225,6 +237,12 @@ bool CyberPowerProtocol::read_data(UpsData &data) {
 }
 
 bool CyberPowerProtocol::read_hid_report(uint8_t report_id, HidReport &report) {
+  // Check device connection before any HID communication
+  if (!parent_->is_device_connected()) {
+    ESP_LOGV(CP_TAG, "Device not connected, skipping HID report 0x%02X", report_id);
+    return false;
+  }
+  
   uint8_t buffer[64]; // Maximum HID report size
   size_t buffer_len = sizeof(buffer);
   esp_err_t ret;
@@ -243,6 +261,12 @@ bool CyberPowerProtocol::read_hid_report(uint8_t report_id, HidReport &report) {
   
   // Log the specific error for Feature Report
   ESP_LOGD(CP_TAG, "Feature Report 0x%02X failed: %s", report_id, esp_err_to_name(ret));
+  
+  // Check connection again before trying Input report
+  if (!parent_->is_device_connected()) {
+    ESP_LOGV(CP_TAG, "Device disconnected during HID communication for report 0x%02X", report_id);
+    return false;
+  }
   
   // Fallback: try Input Report (0x01) for real-time data
   buffer_len = sizeof(buffer);

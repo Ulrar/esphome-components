@@ -38,6 +38,12 @@ static const uint8_t HID_REPORT_TYPE_FEATURE = 0x03;
 bool GenericHidProtocol::detect() {
   ESP_LOGD(GEN_TAG, "Detecting Generic HID Protocol...");
   
+  // Check device connection status first
+  if (!parent_->is_device_connected()) {
+    ESP_LOGD(GEN_TAG, "Device not connected, skipping protocol detection");
+    return false;
+  }
+  
   // Check if this is a known vendor that should use a specific protocol
   uint16_t vid = parent_->get_usb_vendor_id();
   if (vid == 0x051D || vid == 0x0764) { // APC or CyberPower
@@ -50,6 +56,12 @@ bool GenericHidProtocol::detect() {
   size_t buffer_len;
   
   for (uint8_t report_id : COMMON_REPORT_IDS) {
+    // Check connection status before each attempt
+    if (!parent_->is_device_connected()) {
+      ESP_LOGD(GEN_TAG, "Device disconnected during protocol detection");
+      return false;
+    }
+    
     // Try Input Report first (real-time data)
     buffer_len = sizeof(buffer);
     esp_err_t ret = parent_->hid_get_report(HID_REPORT_TYPE_INPUT, report_id, buffer, &buffer_len);
@@ -58,6 +70,12 @@ bool GenericHidProtocol::detect() {
       ESP_LOGI(GEN_TAG, "Found Input report 0x%02X (%zu bytes)", report_id, buffer_len);
       report_sizes_[report_id] = buffer_len;
       return true;
+    }
+    
+    // Check connection again before trying Feature report
+    if (!parent_->is_device_connected()) {
+      ESP_LOGD(GEN_TAG, "Device disconnected during protocol detection");
+      return false;
     }
     
     // Try Feature Report (static/configuration data)
@@ -215,6 +233,12 @@ void GenericHidProtocol::enumerate_reports() {
   
   // First try common report IDs
   for (uint8_t id : COMMON_REPORT_IDS) {
+    // Check device connection before each report
+    if (!parent_->is_device_connected()) {
+      ESP_LOGD(GEN_TAG, "Device disconnected during report enumeration");
+      return;
+    }
+    
     // Check Input reports
     buffer_len = sizeof(buffer);
     esp_err_t ret = parent_->hid_get_report(HID_REPORT_TYPE_INPUT, id, buffer, &buffer_len);
@@ -223,6 +247,12 @@ void GenericHidProtocol::enumerate_reports() {
       report_sizes_[id] = buffer_len;
       discovered_count++;
       ESP_LOGV(GEN_TAG, "Found Input report 0x%02X (%zu bytes)", id, buffer_len);
+    }
+    
+    // Check connection again before Feature report
+    if (!parent_->is_device_connected()) {
+      ESP_LOGD(GEN_TAG, "Device disconnected during report enumeration");
+      return;
     }
     
     // Check Feature reports
@@ -249,6 +279,12 @@ void GenericHidProtocol::enumerate_reports() {
   // Extended search for less common report IDs
   ESP_LOGD(GEN_TAG, "Performing extended report search...");
   for (uint8_t id : EXTENDED_REPORT_IDS) {
+    // Check device connection before each extended report
+    if (!parent_->is_device_connected()) {
+      ESP_LOGD(GEN_TAG, "Device disconnected during extended report search");
+      return;
+    }
+    
     // Limit total discovery time
     if (discovered_count >= 10) {
       break;

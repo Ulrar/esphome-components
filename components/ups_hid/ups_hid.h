@@ -225,6 +225,15 @@ namespace esphome
         return false;
 #endif
       }
+      
+      // Connection status for protocols
+      bool is_device_connected() const { 
+#ifdef USE_ESP32
+        return device_connected_; 
+#else
+        return false;
+#endif
+      }
 
       // Sensor registration methods
       void register_sensor(sensor::Sensor *sens, const std::string &type);

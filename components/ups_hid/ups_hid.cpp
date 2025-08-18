@@ -7,6 +7,20 @@
 #include "apc_hid_protocol.h"
 #include "cyberpower_protocol.h"
 
+// ==============================================================================
+// ESP-IDF v5.3 KNOWN ISSUES:
+// 
+// The ESP-IDF v5.3 USB Host Library has fundamental bugs that cannot be fully
+// worked around:
+// 
+// 1. ESP_ERR_INVALID_STATE from usb_host_device_open after disconnect/reconnect
+// 2. Endpoint allocation corruption preventing interface claims
+// 3. USB Host Library state corruption during device enumeration
+//
+// These issues are fixed in ESP-IDF v5.4+. With v5.3, a power cycle may be
+// required after USB disconnect/reconnect cycles.
+// ==============================================================================
+
 #include <functional>
 #include <cmath>
 
@@ -114,18 +128,26 @@ namespace esphome
         if (ret == ESP_OK)
         {
           ESP_LOGI(TAG, "USB device enumeration successful, attempting protocol detection");
-        }
-#endif
-
-        if (detect_ups_protocol())
-        {
-          connected_ = true;
-          ESP_LOGI(TAG, "Reconnected to UPS");
+          
+          if (detect_ups_protocol())
+          {
+            connected_ = true;
+            ESP_LOGI(TAG, "Reconnected to UPS");
+          }
+          else
+          {
+            ESP_LOGW(TAG, "Protocol detection failed after successful USB enumeration");
+            return;
+          }
         }
         else
         {
+          ESP_LOGW(TAG, "USB device enumeration failed: %s", esp_err_to_name(ret));
           return;
         }
+#else
+        return;  // Non-ESP32 platforms can't reconnect
+#endif
       }
 
       // Use cached data from asynchronous USB operations instead of blocking reads
@@ -1044,6 +1066,19 @@ namespace esphome
     {
       ESP_LOGD(TAG, "Enumerating USB devices...");
 
+      // Check and re-register USB client if needed
+      if (!usb_device_.client_hdl) {
+        ESP_LOGW(TAG, "USB client not registered, attempting re-registration");
+        esp_err_t client_ret = usb_client_register();
+        if (client_ret != ESP_OK) {
+          ESP_LOGE(TAG, "Failed to re-register USB client: %s", esp_err_to_name(client_ret));
+          return client_ret;
+        }
+      }
+      
+      // Test if we can get device list to check for USB Host Library state issues
+      // This is a quick check before attempting more expensive operations
+
       // Check USB host status first
       ESP_LOGD(TAG, "Checking USB host library status...");
 
@@ -1074,7 +1109,19 @@ namespace esphome
         ret = usb_host_device_open(usb_device_.client_hdl, dev_addr_list[i], &dev_hdl);
         if (ret != ESP_OK)
         {
-          continue;
+          if (ret == ESP_ERR_INVALID_STATE) {
+            ESP_LOGW(TAG, "USB Host Library in invalid state for device %d", dev_addr_list[i]);
+            ESP_LOGI(TAG, "This is a known ESP-IDF v5.3 issue");
+            
+            // Simple handling: just skip the device and continue
+            // The ESP-IDF v5.3 USB Host Library has fundamental bugs with device state
+            // management that cannot be reliably worked around. The best approach is
+            // to log the issue and continue operation.
+            continue;
+          } else {
+            ESP_LOGW(TAG, "Failed to open USB device %d: %s", dev_addr_list[i], esp_err_to_name(ret));
+            continue;
+          }
         }
 
         const usb_device_desc_t *dev_desc;
@@ -1194,6 +1241,13 @@ namespace esphome
                                      usb_device_.interface_num, 0);
       if (ret != ESP_OK)
       {
+        if (ret == ESP_ERR_INVALID_STATE) {
+          ESP_LOGE(TAG, "Interface claim failed due to ESP-IDF v5.3 endpoint allocation bug");
+          ESP_LOGW(TAG, "The USB Host Library has stale endpoint allocations from a previous session");
+          ESP_LOGI(TAG, "This typically happens after USB disconnect/reconnect cycles");
+          ESP_LOGI(TAG, "Solutions: 1) Power cycle the ESP32, 2) Upgrade to ESP-IDF v5.4+");
+        }
+        
         ESP_LOGE(TAG, "Failed to claim interface: %s", esp_err_to_name(ret));
         return ret;
       }
@@ -1928,8 +1982,31 @@ namespace esphome
         case USB_HOST_CLIENT_EVENT_DEV_GONE:
           ESP_LOGI(TAG, "USB_HOST_CLIENT_EVENT_DEV_GONE: device handle %p", event_msg->dev_gone.dev_hdl);
           if (component->usb_device_.dev_hdl == event_msg->dev_gone.dev_hdl) {
+            ESP_LOGI(TAG, "Cleaning up disconnected UPS device");
             component->device_connected_ = false;
-            component->usb_device_.dev_hdl = nullptr;
+            component->connected_ = false;
+            
+            // Clear USB device state completely
+            memset(&component->usb_device_, 0, sizeof(component->usb_device_));
+            
+            // Clear active protocol to force re-detection on reconnect
+            component->active_protocol_.reset();
+            
+            // Reset UPS data to avoid showing stale values
+            {
+              std::lock_guard<std::mutex> data_lock(component->data_mutex_);
+              component->ups_data_.reset(); // Reset to default/invalid values
+            }
+            
+            // Also clear the cached data
+            {
+              std::lock_guard<std::mutex> cache_lock(component->ups_data_cache_.mutex);
+              component->ups_data_cache_.data.reset();
+              component->ups_data_cache_.data_valid = false;
+              component->ups_data_cache_.last_update_time = 0;
+            }
+            
+            ESP_LOGI(TAG, "USB device state and UPS data cleared, ready for reconnection");
           }
           break;
 

@@ -52,6 +52,12 @@ ApcHidProtocol::ApcHidProtocol(UpsHidComponent *parent) : UpsProtocolBase(parent
 bool ApcHidProtocol::detect() {
   ESP_LOGD(APC_HID_TAG, "Detecting APC HID Protocol...");
   
+  // Check device connection status first
+  if (!parent_->is_device_connected()) {
+    ESP_LOGD(APC_HID_TAG, "Device not connected, skipping protocol detection");
+    return false;
+  }
+  
   // Give device time to initialize after connection
   vTaskDelay(pdMS_TO_TICKS(100));
   
@@ -67,6 +73,12 @@ bool ApcHidProtocol::detect() {
   HidReport test_report;
   
   for (uint8_t report_id : test_report_ids) {
+    // Check device connection before each report attempt
+    if (!parent_->is_device_connected()) {
+      ESP_LOGD(APC_HID_TAG, "Device disconnected during protocol detection");
+      return false;
+    }
+    
     ESP_LOGD(APC_HID_TAG, "Testing report ID 0x%02X...", report_id);
     
     if (read_hid_report(report_id, test_report)) {
@@ -226,6 +238,12 @@ bool ApcHidProtocol::init_hid_communication() {
 }
 
 bool ApcHidProtocol::read_hid_report(uint8_t report_id, HidReport &report) {
+  // Check device connection before any HID communication
+  if (!parent_->is_device_connected()) {
+    ESP_LOGV(APC_HID_TAG, "Device not connected, skipping HID report 0x%02X", report_id);
+    return false;
+  }
+  
   uint8_t buffer[64]; // Maximum HID report size
   size_t buffer_len = sizeof(buffer);
   esp_err_t ret;
@@ -240,6 +258,12 @@ bool ApcHidProtocol::read_hid_report(uint8_t report_id, HidReport &report) {
     ESP_LOGD(APC_HID_TAG, "HID Input report 0x%02X: received %zu bytes", report_id, buffer_len);
     log_raw_data(buffer, buffer_len);
     return true;
+  }
+  
+  // Check connection again before trying Feature report
+  if (!parent_->is_device_connected()) {
+    ESP_LOGV(APC_HID_TAG, "Device disconnected during HID communication for report 0x%02X", report_id);
+    return false;
   }
   
   // Fall back to Feature Report (0x03) for static/config data
