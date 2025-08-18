@@ -15,6 +15,12 @@ public:
   bool read_data(UpsData &data) override;
   UpsProtocol get_protocol_type() const override { return PROTOCOL_APC_HID; }
   std::string get_protocol_name() const override { return "APC HID Protocol"; }
+  
+  // Beeper control methods
+  bool beeper_enable() override;
+  bool beeper_disable() override;
+  bool beeper_mute() override;
+  bool beeper_test() override;
 
 private:
   struct HidReport {

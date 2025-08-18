@@ -1,0 +1,128 @@
+esphome:
+  name: ups-hid-beeper-test
+  friendly_name: "UPS HID Beeper Test"
+  comment: "USB Beeper Control Test"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  framework:
+    type: esp-idf
+    version: 5.3.2
+
+# Enable logging
+logger:
+  level: DEBUG
+  baud_rate: 115200
+  hardware_uart: UART0
+  logs:
+    ups_hid: DEBUG
+    ups_hid.apc: DEBUG
+    ups_hid.apc_hid: DEBUG
+    ups_hid.generic: DEBUG
+    usb_host: DEBUG
+    esp32.usb_host: DEBUG
+    usb: DEBUG
+    usb-otg: DEBUG
+    HCD: DEBUG
+    USBH: DEBUG
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "UPS-HID-Monitor"
+    password: !secret ap_password
+
+captive_portal:
+web_server:
+
+# RGB LED for status indication
+light:
+  - platform: esp32_rmt_led_strip
+    chipset: WS2812
+    pin: GPIO48
+    num_leds: 1
+    rgb_order: GRB
+    name: "UPS Status LED"
+    id: status_led
+    effects:
+      - strobe:
+          name: "Critical Strobe"
+          colors:
+            - state: true
+              brightness: 100%
+              red: 100%
+              green: 0%
+              blue: 0%
+              duration: 250ms
+            - state: false
+              duration: 250ms
+# External components
+external_components:
+  - source:
+      type: local
+      path: components
+
+ups_hid:
+  id: ups_monitor
+  update_interval: 30s
+  auto_detect_protocol: true
+  protocol_timeout: 15s
+
+# Beeper control buttons
+button:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    beeper_action: enable
+    name: "UPS Beeper Enable"
+    icon: "mdi:volume-high"
+  
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    beeper_action: disable
+    name: "UPS Beeper Disable"
+    icon: "mdi:volume-off"
+  
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    beeper_action: mute
+    name: "UPS Beeper Mute"
+    icon: "mdi:volume-mute"
+  
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    beeper_action: test
+    name: "UPS Beeper Test"
+    icon: "mdi:bell-ring"
+
+# Status sensors for monitoring
+text_sensor:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    type: ups_beeper_status
+    name: "UPS Beeper Status"
+
+sensor:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    type: battery_level
+    name: "UPS Battery Level"
+    unit_of_measurement: "%"
+    device_class: battery
+
+binary_sensor:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    type: online
+    name: "UPS Online"
+    device_class: power

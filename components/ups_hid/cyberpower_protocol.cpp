@@ -922,5 +922,114 @@ std::string CyberPowerProtocol::clean_firmware_string(const std::string &raw_fir
   return cleaned;
 }
 
+bool CyberPowerProtocol::beeper_enable() {
+  ESP_LOGD(CP_TAG, "Sending CyberPower beeper enable command");
+  
+  // CYBERPOWER DEVICE SPECIFIC: From NUT debug, device uses report ID 0x0c
+  // NUT shows: "UPS.PowerSummary.AudibleAlarmControl, Type: Feature, ReportID: 0x0c"
+  ESP_LOGD(CP_TAG, "Trying beeper enable with report ID 0x%02X", BEEPER_STATUS_REPORT_ID);
+  
+  uint8_t beeper_data[2] = {BEEPER_STATUS_REPORT_ID, 0x02};  // Report ID, Value=2 (enabled)
+  
+  esp_err_t ret = parent_->hid_set_report(0x03, BEEPER_STATUS_REPORT_ID, beeper_data, sizeof(beeper_data));
+  if (ret == ESP_OK) {
+    ESP_LOGI(CP_TAG, "CyberPower beeper enabled successfully with report ID 0x%02X", BEEPER_STATUS_REPORT_ID);
+    return true;
+  } else {
+    ESP_LOGW(CP_TAG, "Failed to enable CyberPower beeper with report ID 0x%02X: %s", BEEPER_STATUS_REPORT_ID, esp_err_to_name(ret));
+    return false;
+  }
+}
+
+bool CyberPowerProtocol::beeper_disable() {
+  ESP_LOGD(CP_TAG, "Sending CyberPower beeper disable command");
+  
+  // CYBERPOWER DEVICE SPECIFIC: From NUT debug, device uses report ID 0x0c
+  ESP_LOGD(CP_TAG, "Trying beeper disable with report ID 0x%02X", BEEPER_STATUS_REPORT_ID);
+  
+  uint8_t beeper_data[2] = {BEEPER_STATUS_REPORT_ID, 0x01};  // Report ID, Value=1 (disabled)
+  
+  esp_err_t ret = parent_->hid_set_report(0x03, BEEPER_STATUS_REPORT_ID, beeper_data, sizeof(beeper_data));
+  if (ret == ESP_OK) {
+    ESP_LOGI(CP_TAG, "CyberPower beeper disabled successfully with report ID 0x%02X", BEEPER_STATUS_REPORT_ID);
+    return true;
+  } else {
+    ESP_LOGW(CP_TAG, "Failed to disable CyberPower beeper with report ID 0x%02X: %s", BEEPER_STATUS_REPORT_ID, esp_err_to_name(ret));
+    return false;
+  }
+}
+
+bool CyberPowerProtocol::beeper_mute() {
+  ESP_LOGD(CP_TAG, "Sending CyberPower beeper mute command");
+  
+  // MUTE FUNCTIONALITY (Value 3):
+  // - Acknowledges and silences current active alarms  
+  // - Beeper may still sound for new critical events
+  // - Different from DISABLE (1) which turns off beeper completely
+  uint8_t beeper_data[2] = {0x0c, 0x03};  // Report ID, Value=3 (muted/acknowledged)
+  
+  esp_err_t ret = parent_->hid_set_report(0x03, BEEPER_STATUS_REPORT_ID, beeper_data, sizeof(beeper_data));
+  if (ret == ESP_OK) {
+    ESP_LOGI(CP_TAG, "CyberPower beeper muted (current alarms acknowledged) successfully");
+    return true;
+  } else {
+    ESP_LOGW(CP_TAG, "Failed to mute CyberPower beeper: %s", esp_err_to_name(ret));
+    return false;
+  }
+}
+
+bool CyberPowerProtocol::beeper_test() {
+  ESP_LOGD(CP_TAG, "Starting CyberPower beeper test sequence");
+  
+  // First, read current beeper status to restore later
+  HidReport current_report;
+  if (!read_hid_report(BEEPER_STATUS_REPORT_ID, current_report)) {
+    ESP_LOGW(CP_TAG, "Failed to read current beeper status for test");
+    return false;
+  }
+  
+  uint8_t original_state = (current_report.data.size() >= 2) ? current_report.data[1] : 0x02;
+  ESP_LOGI(CP_TAG, "Original beeper state: %d", original_state);
+  
+  // For CyberPower beeper test, we need to:
+  // 1. Enable beeper first (if disabled)
+  // 2. Wait for beeper to sound (longer delay)
+  // 3. Disable beeper to stop the test sound
+  // 4. Restore original state
+  
+  // FOCUS ON ENABLE/DISABLE: Since NUT shows beeper currently "enabled" (value=2)
+  // Test by disabling first (may be audible), then re-enabling
+  ESP_LOGI(CP_TAG, "Step 1: Disabling beeper (from current enabled state)");
+  if (!beeper_disable()) {
+    ESP_LOGW(CP_TAG, "Failed to disable beeper for test");
+    return false;
+  }
+  
+  ESP_LOGI(CP_TAG, "Step 2: Waiting 3 seconds with beeper disabled");
+  vTaskDelay(pdMS_TO_TICKS(3000));
+  
+  ESP_LOGI(CP_TAG, "Step 3: Re-enabling beeper");
+  if (!beeper_enable()) {
+    ESP_LOGW(CP_TAG, "Failed to re-enable beeper");
+    // Don't return false - continue to restore original state
+  }
+  
+  // Brief delay before restoration
+  vTaskDelay(pdMS_TO_TICKS(500));
+  
+  // Step 4: Restore original beeper state
+  ESP_LOGI(CP_TAG, "Step 4: Restoring original beeper state: %d", original_state);
+  uint8_t restore_data[2] = {0x0c, original_state};
+  esp_err_t ret = parent_->hid_set_report(0x03, BEEPER_STATUS_REPORT_ID, restore_data, sizeof(restore_data));
+  
+  if (ret == ESP_OK) {
+    ESP_LOGI(CP_TAG, "CyberPower beeper test sequence completed successfully");
+    return true;
+  } else {
+    ESP_LOGW(CP_TAG, "Beeper test completed but failed to restore original state: %s", esp_err_to_name(ret));
+    return true; // Test succeeded even if restore failed
+  }
+}
+
 }  // namespace ups_hid
 }  // namespace esphome

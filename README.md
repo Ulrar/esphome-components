@@ -12,6 +12,7 @@ Monitor UPS devices via direct USB connection on ESP32-S3. Supports APC, CyberPo
 - Real-time UPS monitoring (battery, voltage, load, runtime)
 - Multi-protocol support (APC HID, CyberPower HID, Generic HID)
 - Auto-detection of UPS protocols
+- **Beeper control** (enable/disable/mute/test) via HID write operations
 - RGB LED status indicator support
 - Home Assistant integration
 - Simulation mode for testing
@@ -84,6 +85,17 @@ binary_sensor:
     ups_hid_id: ups_monitor
     type: online
     name: "UPS Online"
+
+# Control UPS beeper
+button:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    beeper_action: enable
+    name: "UPS Beeper Enable"
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    beeper_action: mute
+    name: "UPS Beeper Mute"
 ```
 
 ## Development

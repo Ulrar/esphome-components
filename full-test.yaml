@@ -770,6 +770,38 @@ script:
 debug:
   update_interval: 30s
 
+# UPS Beeper Control Buttons
+# Based on confirmed working implementation for APC and CyberPower devices
+button:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    beeper_action: enable
+    name: "UPS Beeper Enable"
+    icon: "mdi:volume-high"
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    beeper_action: disable
+    name: "UPS Beeper Disable"
+    icon: "mdi:volume-off"
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    beeper_action: mute
+    name: "UPS Beeper Mute"
+    icon: "mdi:volume-mute"
+    # Note: Mute only works when UPS is actively beeping (during alarms)
+    # Use during power outages to acknowledge and silence current alarms
+    # Confirmed working: Mute button silences beeper during power loss events
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    beeper_action: test
+    name: "UPS Beeper Test"
+    icon: "mdi:bell-ring"
+    # Note: Tests enable/disable functionality - no audible sound unless UPS has alarm condition
+    # To hear actual beeper: unplug UPS briefly while beeper is enabled
+
 # Enable safe mode for recovery
 safe_mode:
   disabled: false

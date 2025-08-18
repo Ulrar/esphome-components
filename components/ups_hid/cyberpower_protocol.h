@@ -26,6 +26,12 @@ class CyberPowerProtocol : public UpsProtocolBase {
   bool read_data(UpsData &data) override;
   UpsProtocol get_protocol_type() const override { return PROTOCOL_CYBERPOWER_HID; }
   std::string get_protocol_name() const override { return "CyberPower HID"; }
+  
+  // Beeper control methods
+  bool beeper_enable() override;
+  bool beeper_disable() override;
+  bool beeper_mute() override;
+  bool beeper_test() override;
 
  private:
   // Report ID constants (based on NUT debug logs)

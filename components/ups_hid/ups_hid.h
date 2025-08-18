@@ -230,6 +230,9 @@ namespace esphome
       void register_sensor(sensor::Sensor *sens, const std::string &type);
       void register_binary_sensor(binary_sensor::BinarySensor *sens, const std::string &type);
       void register_text_sensor(text_sensor::TextSensor *sens, const std::string &type);
+      
+      // Protocol access for button components
+      UpsProtocolBase* get_active_protocol() const { return active_protocol_.get(); }
 
     protected:
       bool simulation_mode_{false};
@@ -367,6 +370,12 @@ namespace esphome
       virtual bool read_data(UpsData &data) = 0;
       virtual UpsProtocol get_protocol_type() const = 0;
       virtual std::string get_protocol_name() const = 0;
+      
+      // Beeper control methods
+      virtual bool beeper_enable() { return false; }
+      virtual bool beeper_disable() { return false; }
+      virtual bool beeper_mute() { return false; }
+      virtual bool beeper_test() { return false; }
 
     protected:
       UpsHidComponent *parent_;

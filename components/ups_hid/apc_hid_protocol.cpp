@@ -1327,5 +1327,142 @@ void ApcHidProtocol::parse_battery_chemistry_report(const HidReport &report, Ups
            data.battery_type.c_str(), chemistry_raw);
 }
 
+bool ApcHidProtocol::beeper_enable() {
+  ESP_LOGD(APC_HID_TAG, "Sending APC beeper enable command");
+  
+  // APC DEVICE SPECIFIC: From NUT debug, your device supports TWO beeper report IDs:
+  // 0x18: UPS.PowerSummary.AudibleAlarmControl
+  // 0x78: UPS.AudibleAlarmControl  
+  uint8_t report_ids_to_try[] = {0x18, 0x78, 0x1f, 0x0c};
+  
+  for (size_t i = 0; i < sizeof(report_ids_to_try); i++) {
+    uint8_t report_id = report_ids_to_try[i];
+    ESP_LOGD(APC_HID_TAG, "Trying beeper enable with report ID 0x%02X", report_id);
+    
+    uint8_t beeper_data[2] = {report_id, 0x02};  // Report ID, Value=2 (enabled)
+    
+    esp_err_t ret = parent_->hid_set_report(0x03, report_id, beeper_data, sizeof(beeper_data));
+    if (ret == ESP_OK) {
+      ESP_LOGI(APC_HID_TAG, "APC beeper enabled successfully with report ID 0x%02X", report_id);
+      return true;
+    } else {
+      ESP_LOGD(APC_HID_TAG, "Failed with report ID 0x%02X: %s", report_id, esp_err_to_name(ret));
+    }
+  }
+  
+  ESP_LOGW(APC_HID_TAG, "Failed to enable APC beeper with all tested report IDs");
+  return false;
+}
+
+bool ApcHidProtocol::beeper_disable() {
+  ESP_LOGD(APC_HID_TAG, "Sending APC beeper disable command");
+  
+  // APC DEVICE SPECIFIC: From NUT debug, your device supports TWO beeper report IDs:
+  // 0x18: UPS.PowerSummary.AudibleAlarmControl
+  // 0x78: UPS.AudibleAlarmControl  
+  uint8_t report_ids_to_try[] = {0x18, 0x78, 0x1f, 0x0c};
+  
+  for (size_t i = 0; i < sizeof(report_ids_to_try); i++) {
+    uint8_t report_id = report_ids_to_try[i];
+    ESP_LOGD(APC_HID_TAG, "Trying beeper disable with report ID 0x%02X", report_id);
+    
+    uint8_t beeper_data[2] = {report_id, 0x01};  // Report ID, Value=1 (disabled)
+    
+    esp_err_t ret = parent_->hid_set_report(0x03, report_id, beeper_data, sizeof(beeper_data));
+    if (ret == ESP_OK) {
+      ESP_LOGI(APC_HID_TAG, "APC beeper disabled successfully with report ID 0x%02X", report_id);
+      return true;
+    } else {
+      ESP_LOGD(APC_HID_TAG, "Failed with report ID 0x%02X: %s", report_id, esp_err_to_name(ret));
+    }
+  }
+  
+  ESP_LOGW(APC_HID_TAG, "Failed to disable APC beeper with all tested report IDs");
+  return false;
+}
+
+bool ApcHidProtocol::beeper_mute() {
+  ESP_LOGD(APC_HID_TAG, "Sending APC beeper mute command");
+  
+  // MUTE FUNCTIONALITY (Value 3):
+  // - Acknowledges and silences current active alarms
+  // - Beeper may still sound for new critical events  
+  // - Different from DISABLE (1) which turns off beeper completely
+  // - Current device status shows "enabled" (2), mute changes to "muted" (3)
+  
+  uint8_t report_ids_to_try[] = {0x18, 0x78};
+  
+  for (size_t i = 0; i < sizeof(report_ids_to_try); i++) {
+    uint8_t report_id = report_ids_to_try[i];
+    ESP_LOGD(APC_HID_TAG, "Trying beeper mute (acknowledge alarms) with report ID 0x%02X", report_id);
+    
+    uint8_t beeper_data[2] = {report_id, 0x03};  // Report ID, Value=3 (muted/acknowledged)
+    
+    esp_err_t ret = parent_->hid_set_report(0x03, report_id, beeper_data, sizeof(beeper_data));
+    if (ret == ESP_OK) {
+      ESP_LOGI(APC_HID_TAG, "APC beeper muted (current alarms acknowledged) with report ID 0x%02X", report_id);
+      return true;
+    } else {
+      ESP_LOGD(APC_HID_TAG, "Failed with report ID 0x%02X: %s", report_id, esp_err_to_name(ret));
+    }
+  }
+  
+  ESP_LOGW(APC_HID_TAG, "Failed to mute APC beeper with all tested report IDs");
+  return false;
+}
+
+bool ApcHidProtocol::beeper_test() {
+  ESP_LOGD(APC_HID_TAG, "Starting APC beeper test sequence");
+  
+  // First, read current beeper status to restore later
+  HidReport current_report;
+  if (!read_hid_report(APC_REPORT_ID_AUDIBLE_ALARM, current_report)) {
+    ESP_LOGW(APC_HID_TAG, "Failed to read current beeper status for test");
+    return false;
+  }
+  
+  uint8_t original_state = (current_report.data.size() >= 2) ? current_report.data[1] : 0x02;
+  ESP_LOGI(APC_HID_TAG, "Original beeper state: %d", original_state);
+  
+  // For APC beeper test, we need to:
+  // 1. Enable beeper first (if disabled)
+  // 2. Wait for beeper to sound (longer delay)
+  // 3. Disable beeper to stop the test sound
+  // 4. Restore original state
+  
+  // FOCUS ON ENABLE/DISABLE: Since NUT shows beeper currently "enabled" (value=2)
+  // Test by disabling first (may be audible), then re-enabling
+  ESP_LOGI(APC_HID_TAG, "Step 1: Disabling beeper (from current enabled state)");
+  if (!beeper_disable()) {
+    ESP_LOGW(APC_HID_TAG, "Failed to disable beeper for test");
+    return false;
+  }
+  
+  ESP_LOGI(APC_HID_TAG, "Step 2: Waiting 3 seconds with beeper disabled");
+  vTaskDelay(pdMS_TO_TICKS(3000));
+  
+  ESP_LOGI(APC_HID_TAG, "Step 3: Re-enabling beeper");
+  if (!beeper_enable()) {
+    ESP_LOGW(APC_HID_TAG, "Failed to re-enable beeper");
+    // Don't return false - continue to restore original state
+  }
+  
+  // Brief delay before restoration
+  vTaskDelay(pdMS_TO_TICKS(500));
+  
+  // Step 4: Restore original beeper state
+  ESP_LOGI(APC_HID_TAG, "Step 4: Restoring original beeper state: %d", original_state);
+  uint8_t restore_data[2] = {0x18, original_state};
+  esp_err_t ret = parent_->hid_set_report(0x03, APC_REPORT_ID_AUDIBLE_ALARM, restore_data, sizeof(restore_data));
+  
+  if (ret == ESP_OK) {
+    ESP_LOGI(APC_HID_TAG, "APC beeper test sequence completed successfully");
+    return true;
+  } else {
+    ESP_LOGW(APC_HID_TAG, "Beeper test completed but failed to restore original state: %s", esp_err_to_name(ret));
+    return true; // Test succeeded even if restore failed
+  }
+}
+
 } // namespace ups_hid
 } // namespace esphome

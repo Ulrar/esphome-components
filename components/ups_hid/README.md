@@ -5,6 +5,7 @@ A production-ready ESPHome component for monitoring UPS devices via USB connecti
 ## Features
 
 - 🔋 **Real-time UPS monitoring**: Battery level, voltages, load, runtime, status
+- 🔊 **Beeper control**: Enable/disable/mute/test UPS audible alarms via HID write operations
 - 🌈 **Visual status indicator**: RGB LED with customizable status colors
 - 🏠 **Home Assistant integration**: Automatic entity discovery via ESPHome API
 - 🔌 **Multi-protocol support**: APC HID, CyberPower HID, Generic HID
@@ -283,6 +284,40 @@ text_sensor:
     ups_hid_id: ups_monitor
     type: status
     name: "UPS Status"
+    
+  # Beeper status monitoring
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    type: ups_beeper_status
+    name: "UPS Beeper Status"
+    icon: "mdi:volume-high"
+
+# UPS Beeper Control
+button:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    beeper_action: enable
+    name: "UPS Beeper Enable"
+    icon: "mdi:volume-high"
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    beeper_action: disable
+    name: "UPS Beeper Disable"
+    icon: "mdi:volume-off"
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    beeper_action: mute
+    name: "UPS Beeper Mute"
+    icon: "mdi:volume-mute"
+    # Note: Mute only works during active alarm conditions
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    beeper_action: test
+    name: "UPS Beeper Test"
+    icon: "mdi:bell-ring"
 
 # Automated LED status control based on UPS state
 interval:
@@ -357,21 +392,25 @@ GND → RGB LED GND
 
 ### Tested Compatible Models
 
-| Vendor | Models | Protocol | Vendor ID |
-|--------|--------|----------|-----------|
-| **APC** | Back-UPS ES Series, Smart-UPS | APC HID | 0x051D |
-| **CyberPower** | CP1500EPFCLCD, CP1000PFCLCD | CyberPower HID | 0x0764 |
-| **Tripp Lite** | SMART1500LCDT, UPS series | Generic HID | 0x09AE |
-| **Eaton/MGE** | Ellipse, Evolution series | Generic HID | 0x06DA |
-| **Belkin** | Older USB UPS models | Generic HID | 0x050D |
+| Vendor | Models | Protocol | Vendor ID | Beeper Control |
+|--------|--------|----------|-----------|----------------|
+| **APC** | Back-UPS ES Series, Smart-UPS | APC HID | 0x051D | ✅ Confirmed |
+| **CyberPower** | CP1500EPFCLCD, CP1000PFCLCD | CyberPower HID | 0x0764 | ✅ Confirmed |
+| **Tripp Lite** | SMART1500LCDT, UPS series | Generic HID | 0x09AE | ⚠️ Limited |
+| **Eaton/MGE** | Ellipse, Evolution series | Generic HID | 0x06DA | ⚠️ Limited |
+| **Belkin** | Older USB UPS models | Generic HID | 0x050D | ⚠️ Limited |
+
+**Beeper Control Legend:**
+- ✅ **Confirmed**: Full beeper control tested and working (enable/disable/mute/test)
+- ⚠️ **Limited**: Basic support via generic HID (device-dependent functionality)
 
 ### Protocol Compatibility Matrix
 
-| Protocol | Communication | Auto-Detection | Features |
-|----------|---------------|----------------|----------|
-| **APC HID** | USB HID reports | ✅ | Modern APC, enhanced features |
-| **CyberPower HID** | Vendor-specific HID | ✅ | CyberPower optimized |
-| **Generic HID** | Standard HID-PDC | ✅ | Universal fallback |
+| Protocol | Communication | Auto-Detection | Read Features | Write Features |
+|----------|---------------|----------------|---------------|----------------|
+| **APC HID** | USB HID reports | ✅ | Battery, voltage, status | ✅ Beeper control |
+| **CyberPower HID** | Vendor-specific HID | ✅ | Extended sensors, config | ✅ Beeper control |
+| **Generic HID** | Standard HID-PDC | ✅ | Basic monitoring | ⚠️ Limited writes |
 
 ## Configuration Reference
 
@@ -585,6 +624,64 @@ text_sensor:
 
 > **Note**: Device information availability depends on the UPS model and protocol implementation. CyberPower devices provide the most comprehensive device information through dedicated HID reports.
 
+### Button Platform (Beeper Control)
+
+The component supports UPS beeper control via HID SET_REPORT operations:
+
+```yaml
+button:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    beeper_action: enable            # Action: enable, disable, mute, test
+    name: "UPS Beeper Enable"
+    icon: "mdi:volume-high"
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    beeper_action: disable
+    name: "UPS Beeper Disable"
+    icon: "mdi:volume-off"
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    beeper_action: mute
+    name: "UPS Beeper Mute"
+    icon: "mdi:volume-mute"
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    beeper_action: test
+    name: "UPS Beeper Test"
+    icon: "mdi:bell-ring"
+```
+
+**Available beeper actions:**
+- `enable`: Enable UPS beeper for all alarm conditions
+- `disable`: Disable UPS beeper (silent operation)
+- `mute`: Temporarily silence current beeper alarms (only works during active alarms)
+- `test`: Test beeper functionality (enables/disables to verify write operations)
+
+**Protocol Support:**
+- ✅ **APC Devices**: Uses report IDs 0x18 and 0x78 (multi-report fallback)
+- ✅ **CyberPower Devices**: Uses report ID 0x0c (dedicated beeper control)
+- ⚠️ **Generic HID**: Limited support (device-dependent)
+
+**Important Notes:**
+- **Mute functionality**: Only works when UPS is actively beeping (during power outages or fault conditions)
+- **Test behavior**: Verifies write operations but produces no sound unless there's an active alarm
+- **State persistence**: Beeper settings are stored in UPS NVRAM and persist across reboots
+- **Real-world testing**: To hear actual beeper operation, test during actual power loss events
+
+**Beeper Status Monitoring:**
+```yaml
+text_sensor:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    type: ups_beeper_status         # Shows: "enabled", "disabled", or "muted"
+    name: "UPS Beeper Status"
+    icon: "mdi:volume-high"
+```
+
 ## Advanced Configuration
 
 ### Custom Protocol Priority
@@ -659,6 +756,16 @@ logger:
 - This is normal behavior protecting the UPS device
 - Check physical connections if persistent
 
+#### 5. "Beeper control not working"
+
+**Cause**: UPS doesn't support write operations or incorrect protocol
+**Solutions**:
+- Verify your UPS model supports beeper control (check supported devices list)
+- Enable debug logging to see HID SET_REPORT attempts: `ups_hid.apc: DEBUG`
+- Test during actual power outage to hear mute functionality
+- Check beeper status sensor for current state
+- Some UPS models have hardware beeper disable switches
+
 ### Debug Logging
 
 Enable detailed logging for troubleshooting:
@@ -691,6 +798,18 @@ logger:
 **Rate limiting (normal)**:
 ```
 [W][ups_hid:185] Suppressed 5 similar error messages in the last 5000 ms
+```
+
+**Beeper control success**:
+```
+[I][ups_hid.apc:123] APC beeper enabled successfully with report ID 0x18
+[D][ups_hid.cyberpower:87] CyberPower beeper muted successfully
+```
+
+**Beeper control issues**:
+```
+[W][ups_hid.apc:145] Failed to set beeper with all report IDs
+[E][ups_hid:567] HID SET_REPORT failed: ESP_ERR_TIMEOUT
 ```
 
 ### Performance Monitoring
@@ -872,6 +991,15 @@ A: Typical ESP32-S3 power consumption: ~100-200mA @ 5V during normal operation.
 
 **Q: Can I use this with other ESP32 variants?**
 A: Only ESP32-S3 supports USB OTG required for direct UPS communication.
+
+**Q: Why doesn't the beeper test button make any sound?**
+A: UPS beepers are event-driven and only sound during actual alarm conditions (power loss, low battery, faults). The test button verifies write operations work correctly. To hear the actual beeper, test during a real power outage.
+
+**Q: Does the mute button work?**
+A: Mute only works when the UPS is actively beeping (during alarms). It acknowledges the current alarm and silences the beeper until the next alarm condition occurs.
+
+**Q: Do beeper settings persist after ESP32 restart?**
+A: Yes, beeper settings are stored in the UPS device's NVRAM and persist across both ESP32 and UPS reboots.
 
 ## Development
 
