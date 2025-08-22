@@ -12,6 +12,7 @@ pip install --upgrade esphome
 # Claude Code - MCP server
 sudo -u esphome bash -c "curl -fsSL https://claude.ai/install.sh | bash -s latest"
 sudo -u esphome bash -c "/home/esphome/.local/bin/claude mcp add code npx \"@steipete/claude-code-mcp\" \"/workspace\""
+sudo pip install -r /workspace/tests/requirements.txt
 
 # Set up USB permissions
 cat > /etc/udev/rules.d/99-esphome-usb.rules << 'UDEV_EOF'

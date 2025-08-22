@@ -1,0 +1,163 @@
+# Basic UPS Testing Configuration (Standalone)
+# Self-contained version that doesn't depend on external files for CI/CD
+# Use: esphome compile configs/testing/basic_test_standalone.yaml
+
+substitutions:
+  name: "ups-basic-test"
+  friendly_name: "UPS Basic Test"
+  simulation_mode: "false"
+  log_level: "DEBUG"
+
+esphome:
+  name: "${name}"
+  friendly_name: "${friendly_name}"
+  comment: "Basic UPS HID functionality test"
+
+# Core ESP32 configuration
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+# Logging configuration
+logger:
+  level: VERBOSE
+  baud_rate: 115200
+  hardware_uart: UART0
+  logs:
+    ups_hid: DEBUG
+    ups_hid.apc: DEBUG
+    ups_hid.cyberpower: DEBUG
+    ups_hid.generic: DEBUG
+    usb_host: DEBUG
+
+# Network configuration (minimal for testing)
+wifi:
+  ssid: "TestNetwork"
+  password: "TestPassword"
+  ap:
+    ssid: "${friendly_name} Fallback"
+    password: "TestAPPassword"
+
+captive_portal:
+
+# OTA updates
+ota:
+  - platform: esphome
+    password: "TestOTAPassword"
+
+# Web server for diagnostics
+web_server:
+  port: 80
+
+# External components
+external_components:
+  - source:
+      type: local
+      path: ../../components
+
+# Main UPS HID Component
+ups_hid:
+  id: ups_monitor
+  update_interval: 5s
+  protocol_timeout: 10s
+  auto_detect_protocol: true
+  simulation_mode: ${simulation_mode}
+
+# Status LED configuration
+light:
+  - platform: esp32_rmt_led_strip
+    chipset: WS2812
+    pin: GPIO48
+    num_leds: 1
+    rgb_order: GRB
+    name: "UPS Status LED"
+    id: ups_status_led
+    restore_mode: ALWAYS_OFF
+
+# Required platform components (fix compilation errors)
+button:
+
+# Essential binary sensors
+binary_sensor:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Online"
+    id: ups_online
+    type: online
+    device_class: connectivity
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "On Battery Power"
+    id: on_battery
+    type: on_battery
+    device_class: battery
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Low Battery Warning"
+    id: low_battery
+    type: low_battery
+    device_class: battery
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Fault"
+    id: ups_fault
+    type: fault
+    device_class: problem
+
+# Essential text sensors
+text_sensor:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Status"
+    id: ups_status_text
+    type: status
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Detected Protocol"
+    id: ups_protocol
+    type: protocol
+
+# Core UPS metrics
+sensor:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Level"
+    id: battery_level
+    type: battery_level
+    unit_of_measurement: "%"
+    device_class: battery
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Runtime Remaining"
+    id: runtime_remaining
+    type: runtime
+    unit_of_measurement: "min"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+
+# Simple test validation script
+script:
+  - id: test_validation
+    then:
+      - logger.log:
+          format: "TEST RESULTS - Protocol: %s, Battery: %.1f%%, Status: %s"
+          args:
+            - "id(ups_protocol).state.c_str()"
+            - "id(battery_level).state"
+            - "id(ups_status_text).state.c_str()"
+          level: INFO
+          
+# Run validation every 30 seconds during testing          
+interval:
+  - interval: 30s
+    then:
+      - script.execute: test_validation

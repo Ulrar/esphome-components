@@ -1,0 +1,58 @@
+# Basic UPS Testing Configuration
+# Minimal setup for protocol detection and basic functionality testing
+# Use: esphome compile configs/testing/basic_test.yaml
+
+substitutions:
+  name: "ups-basic-test"
+  friendly_name: "UPS Basic Test"
+  simulation_mode: "false"
+  log_level: "DEBUG"
+
+esphome:
+  name: "${name}"
+  friendly_name: "${friendly_name}"
+  comment: "Basic UPS HID functionality test"
+
+# Include secrets from root directory
+<<: !include ../../secrets.yaml
+
+# Use base configuration package
+packages:
+  base_ups: !include ../base_ups.yaml
+  essential: !include ../essential_sensors.yaml
+
+# Override for testing - faster updates, more verbose logging
+ups_hid:
+  id: ups_monitor
+  update_interval: 5s
+  protocol_timeout: 10s
+  auto_detect_protocol: true
+  simulation_mode: ${simulation_mode}
+
+# Enhanced logging for testing
+logger:
+  level: VERBOSE
+  logs:
+    ups_hid: DEBUG
+    ups_hid.apc: DEBUG
+    ups_hid.cyberpower: DEBUG
+    ups_hid.generic: DEBUG
+    usb_host: DEBUG
+
+# Simple test validation script
+script:
+  - id: test_validation
+    then:
+      - logger.log:
+          format: "TEST RESULTS - Protocol: %s, Battery: %.1f%%, Status: %s"
+          args:
+            - "id(ups_protocol).state.c_str()"
+            - "id(battery_level).state"
+            - "id(ups_status_text).state.c_str()"
+          level: INFO
+          
+# Run validation every 30 seconds during testing          
+interval:
+  - interval: 30s
+    then:
+      - script.execute: test_validation

@@ -1,0 +1,105 @@
+# Essential UPS Sensors Package
+# Core monitoring sensors for all UPS devices
+# Use with: packages: !include configs/essential_sensors.yaml
+
+sensor:
+  # Core UPS metrics - available on all protocols
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Level"
+    id: battery_level
+    type: battery_level
+    unit_of_measurement: "%"
+    device_class: battery
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Input Voltage"
+    id: input_voltage
+    type: input_voltage
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Output Voltage"
+    id: output_voltage
+    type: output_voltage
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Load Percentage"
+    id: load_percentage
+    type: load_percent
+    unit_of_measurement: "%"
+    device_class: power_factor
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Runtime Remaining"
+    id: runtime_remaining
+    type: runtime
+    unit_of_measurement: "min"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+
+  # System monitoring
+  - platform: uptime
+    name: "Uptime"
+    id: uptime_sensor
+    update_interval: 60s
+
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    id: wifi_signal_sensor
+    update_interval: 60s
+
+text_sensor:
+  # Device identification
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Manufacturer"
+    id: ups_manufacturer
+    type: manufacturer
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Model"
+    id: ups_model
+    type: model
+
+  - platform: wifi_info
+    ip_address:
+      name: "IP Address"
+      id: ip_address
+
+  - platform: version
+    name: "ESPHome Version"
+    id: esphome_version
+
+binary_sensor:
+  # Additional status sensors
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Charging"
+    id: battery_charging
+    type: charging
+    device_class: battery
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Overload Warning"
+    id: overload_warning
+    type: overload
+    device_class: power

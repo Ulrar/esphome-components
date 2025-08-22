@@ -1,0 +1,144 @@
+# Extended UPS Sensors Package
+# Additional sensors for advanced monitoring (CyberPower optimized)
+# Use with: packages: !include configs/extended_sensors.yaml
+
+sensor:
+  # Advanced battery metrics
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Voltage"
+    id: battery_voltage
+    type: battery_voltage
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 1
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Voltage Nominal"
+    id: battery_voltage_nominal
+    type: battery_voltage_nominal
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 0
+
+  # Input power analysis
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Input Voltage Nominal"
+    id: input_voltage_nominal
+    type: input_voltage_nominal
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Input Transfer Low"
+    id: input_transfer_low
+    type: input_transfer_low
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Input Transfer High"
+    id: input_transfer_high
+    type: input_transfer_high
+    unit_of_measurement: "V"
+    device_class: voltage
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Input Frequency"
+    id: input_frequency
+    type: frequency
+    unit_of_measurement: "Hz"
+    state_class: measurement
+    accuracy_decimals: 1
+
+  # UPS configuration metrics
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Real Power Nominal"
+    id: ups_realpower_nominal
+    type: ups_realpower_nominal
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Delay Shutdown"
+    id: ups_delay_shutdown
+    type: ups_delay_shutdown
+    unit_of_measurement: "s"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Delay Start"
+    id: ups_delay_start
+    type: ups_delay_start
+    unit_of_measurement: "s"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+
+  # Calculated power consumption
+  - platform: template
+    name: "UPS Load Power"
+    id: ups_load_power
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 1
+    lambda: |-
+      if (!std::isnan(id(load_percentage).state)) {
+        float ups_max_power = 700.0; // Default fallback
+        
+        // Use HID nominal power if available
+        if (!std::isnan(id(ups_realpower_nominal).state)) {
+          ups_max_power = id(ups_realpower_nominal).state;
+        }
+        
+        return (ups_max_power * id(load_percentage).state) / 100.0;
+      }
+      return NAN;
+    update_interval: 30s
+
+text_sensor:
+  # Extended device information
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Serial Number"
+    id: ups_serial_number
+    type: serial_number
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Firmware Version"
+    id: ups_firmware_version
+    type: firmware_version
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Beeper Status"
+    id: ups_beeper_status
+    type: ups_beeper_status
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Input Sensitivity"
+    id: input_sensitivity
+    type: input_sensitivity

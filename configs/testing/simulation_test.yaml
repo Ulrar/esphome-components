@@ -1,0 +1,57 @@
+# UPS Simulation Testing Configuration
+# Testing without physical hardware using simulation mode
+# Use: esphome compile configs/testing/simulation_test.yaml
+
+substitutions:
+  name: "ups-simulation-test"
+  friendly_name: "UPS Simulation Test"
+  simulation_mode: "true"  # Enable simulation mode
+  log_level: "INFO"
+
+esphome:
+  name: "${name}"
+  friendly_name: "${friendly_name}"
+  comment: "UPS simulation mode test (no hardware required)"
+
+# Include secrets from root directory
+<<: !include ../../secrets.yaml
+
+# Use base configuration packages
+packages:
+  base_ups: !include ../base_ups.yaml
+  essential: !include ../essential_sensors.yaml
+  extended: !include ../extended_sensors.yaml
+  controls: !include ../ups_controls.yaml
+
+# Override for simulation testing
+ups_hid:
+  id: ups_monitor
+  update_interval: 5s  # Fast updates for demo
+  protocol_timeout: 5s
+  auto_detect_protocol: true
+  simulation_mode: ${simulation_mode}
+
+# Reduced logging for simulation
+logger:
+  level: ${log_level}
+  logs:
+    ups_hid: INFO
+
+# Simulation validation script
+script:
+  - id: simulation_demo
+    then:
+      - logger.log:
+          format: "SIMULATION DATA - Battery: %.1f%%, Load: %.1f%%, Input: %.1fV, Output: %.1fV"
+          args:
+            - "id(battery_level).state"
+            - "id(load_percentage).state"
+            - "id(input_voltage).state"
+            - "id(output_voltage).state"
+          level: INFO
+
+# Demo data updates every 10 seconds
+interval:
+  - interval: 10s
+    then:
+      - script.execute: simulation_demo

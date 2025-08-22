@@ -1,0 +1,169 @@
+# Base UPS Configuration Package
+# Common settings for all UPS HID devices
+# Use with: packages: !include configs/base_ups.yaml
+
+# Substitutions with sensible defaults
+substitutions:
+  # Device identification
+  friendly_name: "${name}"
+  device_description: "UPS Monitor with ESP32-S3"
+  
+  # UPS configuration
+  update_interval: "10s"
+  protocol_timeout: "15s"
+  simulation_mode: "false"
+  
+  # LED status pin (default for ESP32-S3-DevKitC-1)
+  led_pin: "GPIO48"
+  
+  # Logging level
+  log_level: "DEBUG"
+
+# Core ESP32 configuration
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+# Logging configuration
+logger:
+  level: ${log_level}
+  baud_rate: 115200
+  hardware_uart: UART0
+  logs:
+    ups_hid: DEBUG
+
+# Network configuration
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  domain: !secret wifi_dns_domain
+  ap:
+    ssid: "${friendly_name} Fallback"
+    password: !secret ap_password
+
+captive_portal:
+
+# OTA updates
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# Web server for diagnostics
+web_server:
+  port: 80
+
+# External components
+external_components:
+  - source:
+      type: local
+      path: ../components
+
+# Main UPS HID Component
+ups_hid:
+  id: ups_monitor
+  update_interval: ${update_interval}
+  protocol_timeout: ${protocol_timeout}
+  auto_detect_protocol: true
+  simulation_mode: ${simulation_mode}
+
+# Status LED configuration
+light:
+  - platform: esp32_rmt_led_strip
+    chipset: WS2812
+    pin: ${led_pin}
+    num_leds: 1
+    rgb_order: GRB
+    name: "UPS Status LED"
+    id: ups_status_led
+    restore_mode: ALWAYS_OFF
+    effects:
+      - strobe:
+          name: "Critical Alert"
+          colors:
+            - state: true
+              brightness: 100%
+              red: 100%
+              green: 0%
+              blue: 0%
+              duration: 200ms
+            - state: false
+              duration: 200ms
+      - pulse:
+          name: "Battery Warning"
+          transition_length: 1.5s
+          min_brightness: 10%
+          max_brightness: 90%
+      - pulse:
+          name: "Normal Status"
+          transition_length: 3s
+          min_brightness: 20%
+          max_brightness: 60%
+
+# LED control automation
+interval:
+  - interval: 2s
+    then:
+      - lambda: |-
+          if (id(low_battery).state || id(ups_fault).state) {
+            auto call = id(ups_status_led).turn_on();
+            call.set_rgb(1.0, 0.0, 0.0);
+            call.set_effect("Critical Alert");
+            call.perform();
+          } else if (id(on_battery).state) {
+            auto call = id(ups_status_led).turn_on();
+            call.set_rgb(1.0, 0.5, 0.0);
+            call.set_effect("Battery Warning");
+            call.perform();
+          } else if (id(ups_online).state) {
+            auto call = id(ups_status_led).turn_on();
+            call.set_rgb(0.0, 1.0, 0.0);
+            call.set_effect("Normal Status");
+            call.perform();
+          } else {
+            id(ups_status_led).turn_off().perform();
+          }
+
+# Essential binary sensors (required for LED automation)
+binary_sensor:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Online"
+    id: ups_online
+    type: online
+    device_class: connectivity
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "On Battery Power"
+    id: on_battery
+    type: on_battery
+    device_class: battery
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Low Battery Warning"
+    id: low_battery
+    type: low_battery
+    device_class: battery
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Fault"
+    id: ups_fault
+    type: fault
+    device_class: problem
+
+# Essential text sensors
+text_sensor:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Status"
+    id: ups_status_text
+    type: status
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Detected Protocol"
+    id: ups_protocol
+    type: protocol

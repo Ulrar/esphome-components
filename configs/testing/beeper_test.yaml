@@ -1,0 +1,57 @@
+# UPS Beeper Control Testing Configuration
+# Focused testing for beeper functionality
+# Use: esphome compile configs/testing/beeper_test.yaml
+
+substitutions:
+  name: "ups-beeper-test"
+  friendly_name: "UPS Beeper Test"
+  simulation_mode: "false"
+  log_level: "DEBUG"
+
+esphome:
+  name: "${name}"
+  friendly_name: "${friendly_name}"
+  comment: "UPS beeper control functionality test"
+
+# Include secrets from root directory
+<<: !include ../../secrets.yaml
+
+# Use base configuration and controls package
+packages:
+  base_ups: !include ../base_ups.yaml
+  essential: !include ../essential_sensors.yaml
+  controls: !include ../ups_controls.yaml
+
+# Override for testing - faster response
+ups_hid:
+  id: ups_monitor
+  update_interval: 5s
+  protocol_timeout: 10s
+  auto_detect_protocol: true
+  simulation_mode: ${simulation_mode}
+
+# Beeper-focused logging
+logger:
+  level: DEBUG
+  logs:
+    ups_hid: DEBUG
+    ups_hid.apc: DEBUG
+    ups_hid.cyberpower: DEBUG
+    button: DEBUG
+
+# Beeper status monitoring
+script:
+  - id: beeper_status_check
+    then:
+      - logger.log:
+          format: "BEEPER STATUS: %s (Protocol: %s)"
+          args:
+            - "id(ups_beeper_status).state.c_str()"
+            - "id(ups_protocol).state.c_str()"
+          level: INFO
+          
+# Monitor beeper status changes          
+interval:
+  - interval: 15s
+    then:
+      - script.execute: beeper_status_check

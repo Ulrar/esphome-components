@@ -1,0 +1,91 @@
+# Example: CyberPower CP1500EPFCLCD Configuration
+# Complete production configuration for CyberPower UPS
+# Copy and customize this file for your CyberPower device
+
+substitutions:
+  name: "rack-ups-monitor"
+  friendly_name: "Rack CyberPower UPS"
+  
+  # Device customization
+  timezone: "America/Vienna"    # Replace with your timezone
+  
+  # Testing/production mode
+  simulation_mode: "false"        # Set to "true" for testing without hardware
+
+esphome:
+  name: "${name}"
+  friendly_name: "${friendly_name}"
+  comment: "CyberPower CP1500EPFCLCD Monitor"
+
+# Use modular configuration packages
+packages:
+  # Core functionality
+  base_ups: !include ../base_ups.yaml
+  essential: !include ../essential_sensors.yaml
+  
+  # Extended monitoring (recommended for CyberPower - rich sensor data)
+  extended: !include ../extended_sensors.yaml
+  
+  # Control buttons (recommended - CyberPower has excellent beeper support)
+  controls: !include ../ups_controls.yaml
+  
+  # CyberPower-specific optimizations
+  cyberpower_device: !include ../device_types/cyberpower_cp1500.yaml
+
+# Time component for accurate timestamps
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: "${timezone}"
+
+# Optional: Home Assistant API (uncomment to enable)
+# api:
+#   encryption:
+#     key: "your_32_character_encryption_key_here=="
+
+# CyberPower-specific automation examples
+script:
+  - id: battery_threshold_alert
+    then:
+      - logger.log:
+          format: "BATTERY THRESHOLD ALERT - Current: %.1f%%, Low Threshold: %.1f%%, Runtime Low: %.1f min"
+          args:
+            - "id(battery_level).state"
+            - "id(battery_charge_low).state"
+            - "id(battery_runtime_low).state"
+          level: WARN
+            
+  - id: advanced_power_analysis
+    then:
+      - logger.log:
+          format: "POWER ANALYSIS - Load: %.1f%% (%.0fW/%.0fW), Input: %.1fV (%.0fV nominal), Battery: %.1fV/%.0fV"
+          args:
+            - "id(load_percentage).state"
+            - "id(ups_load_power).state"
+            - "id(ups_realpower_nominal).state"
+            - "id(input_voltage).state"
+            - "id(input_voltage_nominal).state"
+            - "id(battery_voltage).state"
+            - "id(battery_voltage_nominal).state"
+          level: INFO
+
+# Enhanced monitoring with CyberPower's rich data
+interval:
+  - interval: 300s  # Every 5 minutes
+    then:
+      - script.execute: advanced_power_analysis
+
+# Smart threshold monitoring
+binary_sensor:
+  - platform: template
+    name: "Battery Below Custom Threshold"
+    id: battery_custom_threshold
+    lambda: |-
+      // Trigger alert when battery drops below configured low threshold
+      if (!std::isnan(id(battery_level).state) && !std::isnan(id(battery_charge_low).state)) {
+        return id(battery_level).state <= id(battery_charge_low).state;
+      }
+      return false;
+    on_press:
+      then:
+        - script.execute: battery_threshold_alert

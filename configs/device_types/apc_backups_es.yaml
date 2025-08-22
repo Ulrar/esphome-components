@@ -1,0 +1,67 @@
+# APC Back-UPS ES Series Configuration
+# Optimized for APC Back-UPS ES 700 (VID: 0x051D, PID: 0x0002)
+# Use with: packages: !include configs/device_types/apc_backups_es.yaml
+
+substitutions:
+  # Device-specific overrides
+  device_description: "APC Back-UPS ES 700 Monitor"
+  log_level: "DEBUG"
+  
+  # APC-specific settings
+  update_interval: "15s"  # APC devices can be slower to respond
+  protocol_timeout: "20s"
+
+# Override UPS component with APC-specific settings
+ups_hid:
+  id: ups_monitor
+  update_interval: ${update_interval}
+  protocol_timeout: ${protocol_timeout}
+  auto_detect_protocol: true
+  simulation_mode: ${simulation_mode}
+  # Uncomment if auto-detection fails:
+  # usb_vendor_id: 0x051D
+  # usb_product_id: 0x0002
+
+# Enhanced logging for APC protocol debugging
+logger:
+  level: ${log_level}
+  logs:
+    ups_hid: DEBUG
+    ups_hid.apc: DEBUG
+    ups_hid.apc_hid: DEBUG
+
+# APC-specific power calculations
+sensor:
+  - platform: template
+    name: "UPS Load Power (APC)"
+    id: ups_load_power_apc
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 1
+    lambda: |-
+      if (!std::isnan(id(load_percentage).state)) {
+        // APC Back-UPS ES 700: 405W nominal power
+        float apc_max_power = 405.0;
+        return (apc_max_power * id(load_percentage).state) / 100.0;
+      }
+      return NAN;
+    update_interval: 30s
+
+# APC-specific monitoring scripts
+script:
+  - id: apc_status_check
+    then:
+      - logger.log:
+          format: "APC Status: Battery=%.1f%%, Load=%.1fw, Status=%s"
+          args:
+            - "id(battery_level).state"
+            - "id(ups_load_power_apc).state"
+            - "id(ups_status_text).state.c_str()"
+          level: INFO
+
+# APC device monitoring
+interval:
+  - interval: 60s
+    then:
+      - script.execute: apc_status_check

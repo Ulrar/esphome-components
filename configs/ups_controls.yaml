@@ -1,0 +1,70 @@
+# UPS Control Buttons Package
+# Beeper control and UPS testing functionality
+# Use with: packages: !include configs/ups_controls.yaml
+
+button:
+  # Beeper control buttons
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    beeper_action: enable
+    name: "UPS Beeper Enable"
+    icon: "mdi:volume-high"
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    beeper_action: disable
+    name: "UPS Beeper Disable"
+    icon: "mdi:volume-off"
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    beeper_action: mute
+    name: "UPS Beeper Mute"
+    icon: "mdi:volume-mute"
+    # Note: Only effective during active alarms
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    beeper_action: test
+    name: "UPS Beeper Test"
+    icon: "mdi:bell-ring"
+
+  # UPS testing buttons
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    test_action: battery_quick
+    name: "UPS Quick Battery Test"
+    icon: "mdi:battery-check"
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    test_action: battery_deep
+    name: "UPS Deep Battery Test"
+    icon: "mdi:battery-plus"
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    test_action: battery_stop
+    name: "UPS Stop Battery Test"
+    icon: "mdi:battery-remove"
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    test_action: ups_test
+    name: "UPS Panel Test"
+    icon: "mdi:test-tube"
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    test_action: ups_stop
+    name: "UPS Stop Panel Test"
+    icon: "mdi:stop"
+
+# Test result monitoring
+text_sensor:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Test Result"
+    id: ups_test_result
+    type: ups_test_result
+    icon: "mdi:test-tube"

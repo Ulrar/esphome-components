@@ -1,0 +1,66 @@
+# Example: APC Back-UPS ES 700 Configuration
+# Complete production configuration for APC UPS
+# Copy and customize this file for your APC device
+
+substitutions:
+  name: "apc-ups-monitor"
+  friendly_name: "Office APC UPS"
+  
+  # Device customization
+  timezone: "America/Vienna"    # Replace with your timezone
+  
+  # Testing/production mode
+  simulation_mode: "false"        # Set to "true" for testing without hardware
+
+esphome:
+  name: "${name}"
+  friendly_name: "${friendly_name}"
+  comment: "APC Back-UPS ES 700 Monitor"
+
+# Use modular configuration packages
+packages:
+  # Core functionality
+  base_ups: !include ../base_ups.yaml
+  essential: !include ../essential_sensors.yaml
+  
+  # Extended monitoring (optional - comment out if not needed)
+  extended: !include ../extended_sensors.yaml
+  
+  # Control buttons (optional - comment out if not needed)  
+  controls: !include ../ups_controls.yaml
+  
+  # APC-specific optimizations
+  apc_device: !include ../device_types/apc_backups_es.yaml
+
+# Time component for accurate timestamps
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: "${timezone}"
+
+# Optional: Home Assistant API (uncomment to enable)
+# api:
+#   encryption:
+#     key: "your_32_character_encryption_key_here=="
+
+# Optional: Notification automation examples
+script:
+  - id: power_outage_alert
+    then:
+      - logger.log:
+          format: "POWER OUTAGE DETECTED - Battery at %.1f%%, Runtime: %.1f minutes"
+          args:
+            - "id(battery_level).state" 
+            - "id(runtime_remaining).state"
+          level: WARN
+      # Add your notification logic here (e.g., Home Assistant service call)
+      
+  - id: power_restored_alert  
+    then:
+      - logger.log:
+          format: "POWER RESTORED - UPS back online"
+          level: INFO
+      # Add your notification logic here
+
+# Custom automations would be handled in Home Assistant
+# The base sensors from base_ups.yaml and essential_sensors.yaml provide all the data needed

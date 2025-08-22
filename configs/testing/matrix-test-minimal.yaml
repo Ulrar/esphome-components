@@ -1,0 +1,33 @@
+# Auto-generated test config for ESPHome matrix testing
+substitutions:
+  device_name: "ups-matrix-test"
+  friendly_name: "UPS Matrix Test"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+    version: 5.3.0
+
+logger:
+  level: INFO
+
+external_components:
+  - source: components/
+    components: [ ups_hid ]
+
+ups_hid:
+  id: ups_monitor
+  update_interval: 30s
+  simulation_mode: true
+  auto_detect_protocol: true
+
+sensor:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    type: battery_level
+    name: "Battery Level"

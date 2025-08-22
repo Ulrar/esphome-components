@@ -1,0 +1,61 @@
+# Minimal UPS Simulation Configuration
+# Simplest possible config for testing core functionality
+# Use: esphome compile configs/testing/minimal_simulation.yaml
+
+substitutions:
+  name: "ups-minimal-sim"
+  friendly_name: "UPS Minimal Simulation"
+
+esphome:
+  name: "${name}"
+  friendly_name: "${friendly_name}"
+  comment: "Minimal UPS simulation test"
+
+# Core ESP32 configuration
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+# Minimal logging
+logger:
+  level: INFO
+  baud_rate: 115200
+
+# Minimal network
+wifi:
+  ssid: "TestNetwork"
+  password: "TestPassword"
+
+# External components
+external_components:
+  - source:
+      type: local
+      path: ../../components
+
+# UPS component only
+ups_hid:
+  id: ups_monitor
+  update_interval: 10s
+  protocol_timeout: 5s
+  auto_detect_protocol: true
+  simulation_mode: true
+
+# Required platform components (fix compilation errors)
+button:
+binary_sensor:
+
+# Single sensor test
+sensor:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Level"
+    type: battery_level
+    unit_of_measurement: "%"
+
+# Single text sensor test  
+text_sensor:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Status"
+    type: status

@@ -1,0 +1,133 @@
+# CyberPower CP1500 Series Configuration
+# Optimized for CyberPower CP1500EPFCLCD (VID: 0x0764, PID: 0x0501)
+# Use with: packages: !include configs/device_types/cyberpower_cp1500.yaml
+
+substitutions:
+  # Device-specific overrides
+  device_description: "CyberPower CP1500EPFCLCD Monitor"
+  log_level: "DEBUG"
+  
+  # CyberPower-specific settings
+  update_interval: "10s"  # CyberPower devices respond quickly
+  protocol_timeout: "15s"
+
+# Override UPS component with CyberPower-specific settings
+ups_hid:
+  id: ups_monitor
+  update_interval: ${update_interval}
+  protocol_timeout: ${protocol_timeout}
+  auto_detect_protocol: true
+  simulation_mode: ${simulation_mode}
+  # Uncomment if auto-detection fails:
+  # usb_vendor_id: 0x0764
+  # usb_product_id: 0x0501
+
+# Enhanced logging for CyberPower protocol debugging
+logger:
+  level: ${log_level}
+  logs:
+    ups_hid: DEBUG
+    ups_hid.cyberpower: DEBUG
+
+# CyberPower-specific threshold sensors
+sensor:
+  # Battery threshold monitoring (available on CyberPower)
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Charge Low Threshold"
+    id: battery_charge_low
+    type: battery_charge_low
+    unit_of_measurement: "%"
+    device_class: battery
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Runtime Low Threshold"
+    id: battery_runtime_low
+    type: battery_runtime_low
+    unit_of_measurement: "min"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+
+  # CyberPower-specific timer values
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Timer Reboot"
+    id: ups_timer_reboot
+    type: ups_timer_reboot
+    unit_of_measurement: "s"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Timer Shutdown"
+    id: ups_timer_shutdown
+    type: ups_timer_shutdown
+    unit_of_measurement: "s"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Timer Start"
+    id: ups_timer_start
+    type: ups_timer_start
+    unit_of_measurement: "s"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+
+# CyberPower-specific enhanced device info
+text_sensor:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Status"
+    id: battery_status
+    type: battery_status
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Type"
+    id: battery_type
+    type: battery_type
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Manufacture Date"
+    id: battery_mfr_date
+    type: battery_mfr_date
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Manufacture Date"
+    id: ups_mfr_date
+    type: ups_mfr_date
+
+# CyberPower-specific monitoring scripts
+script:
+  - id: cyberpower_detailed_status
+    then:
+      - logger.log:
+          format: "CyberPower Status: Battery=%.1f%% (%.1fV/%.0fV), Load=%.1f%% (%.0fW/%.0fW), Input=%.1fV, Runtime=%.1fmin"
+          args:
+            - "id(battery_level).state"
+            - "id(battery_voltage).state"
+            - "id(battery_voltage_nominal).state"
+            - "id(load_percentage).state"
+            - "id(ups_load_power).state"
+            - "id(ups_realpower_nominal).state"
+            - "id(input_voltage).state"
+            - "id(runtime_remaining).state"
+          level: INFO
+
+# Enhanced monitoring for CyberPower features
+interval:
+  - interval: 120s
+    then:
+      - script.execute: cyberpower_detailed_status
