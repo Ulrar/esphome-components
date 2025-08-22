@@ -57,7 +57,7 @@ web_server:
 external_components:
   - source:
       type: local
-      path: ../components
+      path: ../../components
 
 # Main UPS HID Component
 ups_hid:

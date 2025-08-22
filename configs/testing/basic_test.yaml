@@ -13,9 +13,6 @@ esphome:
   friendly_name: "${friendly_name}"
   comment: "Basic UPS HID functionality test"
 
-# Include secrets from root directory
-<<: !include ../../secrets.yaml
-
 # Use base configuration package
 packages:
   base_ups: !include ../base_ups.yaml

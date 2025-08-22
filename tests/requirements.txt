@@ -1,0 +1,10 @@
+# ESPHome Configuration Testing Requirements
+
+# Core testing framework
+pytest>=7.4.0
+pytest-html>=3.2.0
+pytest-timeout>=2.1.0
+pytest-xdist>=3.3.0  # Parallel execution
+
+# Additional utilities
+pyyaml>=6.0

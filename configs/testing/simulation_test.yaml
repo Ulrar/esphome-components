@@ -13,8 +13,6 @@ esphome:
   friendly_name: "${friendly_name}"
   comment: "UPS simulation mode test (no hardware required)"
 
-# Include secrets from root directory
-<<: !include ../../secrets.yaml
 
 # Use base configuration packages
 packages:

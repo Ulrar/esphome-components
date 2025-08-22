@@ -13,8 +13,6 @@ esphome:
   friendly_name: "${friendly_name}"
   comment: "UPS beeper control functionality test"
 
-# Include secrets from root directory
-<<: !include ../../secrets.yaml
 
 # Use base configuration and controls package
 packages:
