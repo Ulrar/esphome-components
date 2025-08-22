@@ -1,6 +1,6 @@
 # ESPHome Components Collection
 
-A collection of production-ready ESPHome components for various hardware integrations and monitoring solutions.
+A collection of ESPHome components for various hardware integrations and monitoring solutions.
 
 ## Available Components
 
