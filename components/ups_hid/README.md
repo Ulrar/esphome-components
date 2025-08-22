@@ -1,6 +1,6 @@
 # UPS HID Component for ESPHome
 
-A production-ready ESPHome component for monitoring UPS devices via USB connection on ESP32-S3. Direct USB HID communication with support for APC, CyberPower, and generic HID UPS devices.
+A ESPHome component for monitoring UPS devices via USB connection on ESP32-S3. Direct USB HID communication with support for APC, CyberPower, and generic HID UPS devices.
 
 ## Features
 
@@ -12,8 +12,6 @@ A production-ready ESPHome component for monitoring UPS devices via USB connecti
 - 🔌 **Multi-protocol support**: APC HID, CyberPower HID, Generic HID
 - 🎯 **Auto-detection**: Intelligent protocol detection based on USB vendor IDs
 - 🔧 **Robust USB handling**: ESP-IDF v5.4 compatible with 3-tier reconnection recovery
-- 🛡️ **Safety-critical design**: Stale data prevention, never displays incorrect readings
-- 🏭 **Production-ready**: Thread-safe, comprehensive error handling, hardware validated
 - 🧪 **Simulation mode**: Test integration without physical UPS device
 
 ## Quick Start
@@ -783,24 +781,6 @@ automation:
         message: "UPS test completed: {{ states('text_sensor.ups_test_result') }}"
 ```
 
-**USB Connection & Disconnection Handling:**
-
-Production-grade USB management with ESP-IDF v5.4 compatibility:
-
-- **Clean Disconnect Detection**: Immediate recognition via `USB_HOST_CLIENT_EVENT_DEV_GONE`
-- **3-Tier Recovery Strategy**: Handles USB Host Library state corruption gracefully
-  - **Tier 1**: Standard device cleanup with `usb_host_device_free_all()`
-  - **Tier 2**: Complete USB client re-registration when cleanup fails with `ESP_ERR_INVALID_STATE`
-  - **Tier 3**: Immediate sensor data clearing to prevent stale readings
-- **Automatic Reconnection**: When UPS is physically reconnected, detection occurs within 15 seconds
-- **Graceful Degradation**: System remains stable during USB state corruption scenarios
-- **Stale Data Prevention**: All sensors immediately show "unavailable" after disconnect
-- **Safety-Critical Design**: Never displays potentially dangerous outdated readings
-
-**Expected Behavior:**
-- **During disconnect**: All sensors clear within 1 second, LED shows offline state
-- **During reconnection**: UPS detected automatically, full protocol re-initialization
-- **State corruption**: USB client re-registration recovers without ESP32 restart
 
 ```yaml
 # Enable detailed USB debugging if needed

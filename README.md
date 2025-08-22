@@ -173,7 +173,7 @@ Copyright bullshit <coding@ow-software.pl>
 
 ### Current Status
 
-- ✅ **UPS HID Component**: **Production ready** - ESP-IDF v5.4 compatible  
+- ✅ **UPS HID Component**: ESP-IDF v5.4 compatible  
   - ✅ **Hardware validated** - 100% success in stale data prevention testing
   - ✅ **Robust USB management** - Clean disconnect detection and graceful state corruption recovery  
   - ✅ **Safety-critical** - All sensors immediately show "unavailable" after disconnect (never stale data)
