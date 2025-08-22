@@ -11,8 +11,9 @@ A production-ready ESPHome component for monitoring UPS devices via USB connecti
 - 🏠 **Home Assistant integration**: Automatic entity discovery via ESPHome API
 - 🔌 **Multi-protocol support**: APC HID, CyberPower HID, Generic HID
 - 🎯 **Auto-detection**: Intelligent protocol detection based on USB vendor IDs
-- 🔧 **USB recovery**: Enhanced ESP-IDF v5.3 connection handling with automatic recovery
-- 🛡️ **Production-ready**: Thread-safe, error rate limiting, comprehensive logging
+- 🔧 **Robust USB handling**: ESP-IDF v5.4 compatible with 3-tier reconnection recovery
+- 🛡️ **Safety-critical design**: Stale data prevention, never displays incorrect readings
+- 🏭 **Production-ready**: Thread-safe, comprehensive error handling, hardware validated
 - 🧪 **Simulation mode**: Test integration without physical UPS device
 
 ## Quick Start
@@ -782,14 +783,24 @@ automation:
         message: "UPS test completed: {{ states('text_sensor.ups_test_result') }}"
 ```
 
-**USB Connection Recovery:**
+**USB Connection & Disconnection Handling:**
 
-Enhanced connection handling for ESP-IDF v5.3 issues:
+Production-grade USB management with ESP-IDF v5.4 compatibility:
 
-- **Automatic Recovery**: Handles `ESP_ERR_INVALID_STATE` USB library errors
-- **Connection Reuse**: Maintains existing connections when possible
-- **State Trust**: Trusts previous device configuration during ESP-IDF bugs
-- **Multi-Strategy**: Dual recovery approach for maximum reliability
+- **Clean Disconnect Detection**: Immediate recognition via `USB_HOST_CLIENT_EVENT_DEV_GONE`
+- **3-Tier Recovery Strategy**: Handles USB Host Library state corruption gracefully
+  - **Tier 1**: Standard device cleanup with `usb_host_device_free_all()`
+  - **Tier 2**: Complete USB client re-registration when cleanup fails with `ESP_ERR_INVALID_STATE`
+  - **Tier 3**: Immediate sensor data clearing to prevent stale readings
+- **Automatic Reconnection**: When UPS is physically reconnected, detection occurs within 15 seconds
+- **Graceful Degradation**: System remains stable during USB state corruption scenarios
+- **Stale Data Prevention**: All sensors immediately show "unavailable" after disconnect
+- **Safety-Critical Design**: Never displays potentially dangerous outdated readings
+
+**Expected Behavior:**
+- **During disconnect**: All sensors clear within 1 second, LED shows offline state
+- **During reconnection**: UPS detected automatically, full protocol re-initialization
+- **State corruption**: USB client re-registration recovers without ESP32 restart
 
 ```yaml
 # Enable detailed USB debugging if needed
@@ -875,7 +886,22 @@ logger:
 - This is normal behavior protecting the UPS device
 - Check physical connections if persistent
 
-#### 5. "Beeper control not working"
+#### 5. "ESP_ERR_INVALID_STATE" during USB operations - known issue that requires esp32-idf v5.5+
+
+**Cause**: Normal behavior when UPS physically disconnected but USB library has stale references
+**What you'll see**:
+```
+E (22037) USB HOST: usbh_devs_open error: ESP_ERR_INVALID_STATE
+W: USB device 1 in invalid state - forcing cleanup and retry
+I: Attempting complete USB client re-registration
+I: USB client registered successfully
+```
+**Solutions**:
+- **This is normal behavior** - no action required
+- System automatically recovers using 3-tier strategy
+- All sensors will show "unavailable" until UPS physically reconnected
+
+#### 6. "Beeper control not working"
 
 **Cause**: UPS doesn't support write operations or incorrect protocol
 **Solutions**:
@@ -906,6 +932,23 @@ logger:
 [D][ups_hid:240] Detected known UPS vendor: APC (0x051D)
 [I][ups_hid:371] Successfully detected APC HID protocol (took 156ms)
 [D][ups_hid.apc:89] Battery: 85.0%, Runtime: 45.2 min
+```
+
+**USB disconnection sequence** (normal behavior):
+```
+[I][ups_hid:2166][usb_client] UPS device disconnected
+[I][ups_hid:2195][usb_client] Device cleanup complete
+[D][ups_hid:650] Force-publishing NAN for cleared sensor 'battery_level'
+[D][text_sensor:069] 'UPS Manufacturer': Sending state 'Unknown'
+[I][ups_hid:159] Cleared stale UPS data and forced sensor updates
+```
+
+**USB state corruption recovery** (normal behavior):
+```
+[D][esp-idf:000] E: USB HOST: usbh_devs_open error: ESP_ERR_INVALID_STATE
+[W][ups_hid:1140] USB device 1 in invalid state - forcing cleanup and retry
+[W][ups_hid:1175] Attempting complete USB client re-registration
+[I][ups_hid:1189] USB client re-registration successful
 ```
 
 **Connection issues**:

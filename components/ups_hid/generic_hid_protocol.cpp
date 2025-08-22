@@ -1,5 +1,8 @@
 #include "ups_hid.h"
 #include "esphome/core/log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/portmacro.h"
 #include <set>
 #include <map>
 #include <algorithm>

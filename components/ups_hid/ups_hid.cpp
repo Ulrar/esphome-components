@@ -125,7 +125,38 @@ namespace esphome
           if (detect_ups_protocol()) {
             connected_ = true;
             ESP_LOGI(TAG, "Connected to UPS using %s protocol", get_protocol_name().c_str());
+            // Clear cached data to ensure fresh readings
+            {
+              std::lock_guard<std::mutex> cache_lock(ups_data_cache_.mutex);
+              ups_data_cache_.data_valid = false;
+              ups_data_cache_.last_update_time = 0;
+            }
+          } else {
+            ESP_LOGW(TAG, "USB device enumerated but protocol detection failed");
           }
+        } else {
+          ESP_LOGW(TAG, "USB device enumeration failed: %s", esp_err_to_name(ret));
+          // Ensure we're properly marked as disconnected and clear stale data
+          device_connected_ = false;
+          
+          // Clear any stale cached data when enumeration fails
+          {
+            std::lock_guard<std::mutex> cache_lock(ups_data_cache_.mutex);
+            ups_data_cache_.data.reset();
+            ups_data_cache_.data_valid = false;
+            ups_data_cache_.last_update_time = 0;
+          }
+          
+          // Also clear main data to prevent stale readings
+          {
+            std::lock_guard<std::mutex> data_lock(data_mutex_);
+            ups_data_.reset();
+          }
+          
+          // Force sensors to update with cleared data (NaN values) immediately
+          update_sensors();
+          
+          ESP_LOGI(TAG, "Cleared stale UPS data and forced sensor updates after enumeration failure");
         }
 #endif
         return;
@@ -173,7 +204,16 @@ namespace esphome
           if (consecutive_failures_ >= 3 && consecutive_failures_ <= max_consecutive_failures_) {
             ESP_LOGE(TAG, "Multiple consecutive failures, attempting protocol re-detection");
             if (!detect_ups_protocol()) {
-              ESP_LOGE(TAG, "Protocol re-detection failed");
+              ESP_LOGE(TAG, "Protocol re-detection failed - device likely disconnected");
+              // Mark as disconnected to trigger reconnection attempts
+              connected_ = false;
+              device_connected_ = false;
+              // Clear stale cached data
+              {
+                std::lock_guard<std::mutex> cache_lock(ups_data_cache_.mutex);
+                ups_data_cache_.data_valid = false;
+                ups_data_cache_.last_update_time = 0;
+              }
             }
           }
           else if (consecutive_failures_ > max_consecutive_failures_) {
@@ -257,7 +297,7 @@ namespace esphome
       }
 
       // Wait a moment for USB devices to be detected
-      vTaskDelay(1000 / portTICK_PERIOD_MS);
+      vTaskDelay(pdMS_TO_TICKS(1000));
       
       // Try initial device enumeration
       ret = usb_device_enumerate();
@@ -430,7 +470,7 @@ namespace esphome
       for (const auto &attempt : protocol_attempts)
       {
         // Yield to prevent task watchdog timeout during long protocol detection
-        vTaskDelay(1 / portTICK_PERIOD_MS);
+        vTaskDelay(pdMS_TO_TICKS(1));
         
         ESP_LOGD(TAG, "Trying %s protocol...", attempt.first.c_str());
 
@@ -461,7 +501,7 @@ namespace esphome
                    attempt.first.c_str(), detection_time);
 
           // Small delay between attempts to prevent overwhelming the device
-          vTaskDelay(100 / portTICK_PERIOD_MS);
+          vTaskDelay(pdMS_TO_TICKS(100));
         }
       }
 
@@ -603,8 +643,14 @@ namespace esphome
           value = static_cast<float>(local_data.ups_timer_start);
         }
 
-        // Only publish if value is valid and within reasonable bounds
-        if (!std::isnan(value))
+        // Publish sensor state - handle both valid data and cleared/unavailable data  
+        if (std::isnan(value))
+        {
+          // Data is cleared/unavailable - force sensor to publish NAN to clear stale readings
+          ESP_LOGD(TAG, "Force-publishing NAN for cleared sensor '%s'", type.c_str());
+          sensor->publish_state(std::numeric_limits<float>::quiet_NaN());
+        }
+        else
         {
           // Add bounds checking for safety
           if (type == "battery_level" && (value < 0.0f || value > 100.0f))
@@ -660,57 +706,57 @@ namespace esphome
         const std::string &type = pair.first;
         auto *sensor = pair.second;
 
-        if (type == "model" && !local_data.model.empty())
+        if (type == "model")
         {
-          sensor->publish_state(local_data.model);
+          sensor->publish_state(local_data.model.empty() ? "Unknown" : local_data.model);
         }
-        else if (type == "manufacturer" && !local_data.manufacturer.empty())
+        else if (type == "manufacturer")
         {
-          sensor->publish_state(local_data.manufacturer);
+          sensor->publish_state(local_data.manufacturer.empty() ? "Unknown" : local_data.manufacturer);
         }
         else if (type == "protocol")
         {
           sensor->publish_state(get_protocol_name());
         }
-        else if (type == "serial_number" && !local_data.serial_number.empty())
+        else if (type == "serial_number")
         {
-          sensor->publish_state(local_data.serial_number);
+          sensor->publish_state(local_data.serial_number.empty() ? "Unknown" : local_data.serial_number);
         }
-        else if (type == "firmware_version" && !local_data.firmware_version.empty())
+        else if (type == "firmware_version")
         {
-          sensor->publish_state(local_data.firmware_version);
+          sensor->publish_state(local_data.firmware_version.empty() ? "Unknown" : local_data.firmware_version);
         }
-        else if (type == "ups_beeper_status" && !local_data.ups_beeper_status.empty())
+        else if (type == "ups_beeper_status")
         {
-          sensor->publish_state(local_data.ups_beeper_status);
+          sensor->publish_state(local_data.ups_beeper_status.empty() ? "Unknown" : local_data.ups_beeper_status);
         }
-        else if (type == "input_sensitivity" && !local_data.input_sensitivity.empty())
+        else if (type == "input_sensitivity")
         {
-          sensor->publish_state(local_data.input_sensitivity);
+          sensor->publish_state(local_data.input_sensitivity.empty() ? "Unknown" : local_data.input_sensitivity);
         }
-        else if (type == "battery_status" && !local_data.battery_status.empty())
+        else if (type == "battery_status")
         {
-          sensor->publish_state(local_data.battery_status);
+          sensor->publish_state(local_data.battery_status.empty() ? "Unknown" : local_data.battery_status);
         }
-        else if (type == "battery_type" && !local_data.battery_type.empty())
+        else if (type == "battery_type")
         {
-          sensor->publish_state(local_data.battery_type);
+          sensor->publish_state(local_data.battery_type.empty() ? "Unknown" : local_data.battery_type);
         }
-        else if (type == "battery_mfr_date" && !local_data.battery_mfr_date.empty())
+        else if (type == "battery_mfr_date")
         {
-          sensor->publish_state(local_data.battery_mfr_date);
+          sensor->publish_state(local_data.battery_mfr_date.empty() ? "Unknown" : local_data.battery_mfr_date);
         }
-        else if (type == "ups_mfr_date" && !local_data.ups_mfr_date.empty())
+        else if (type == "ups_mfr_date")
         {
-          sensor->publish_state(local_data.ups_mfr_date);
+          sensor->publish_state(local_data.ups_mfr_date.empty() ? "Unknown" : local_data.ups_mfr_date);
         }
-        else if (type == "ups_firmware_aux" && !local_data.ups_firmware_aux.empty())
+        else if (type == "ups_firmware_aux")
         {
-          sensor->publish_state(local_data.ups_firmware_aux);
+          sensor->publish_state(local_data.ups_firmware_aux.empty() ? "Unknown" : local_data.ups_firmware_aux);
         }
-        else if (type == "ups_test_result" && !local_data.ups_test_result.empty())
+        else if (type == "ups_test_result")
         {
-          sensor->publish_state(local_data.ups_test_result);
+          sensor->publish_state(local_data.ups_test_result.empty() ? "Unknown" : local_data.ups_test_result);
         }
         else if (type == "status")
         {
@@ -852,7 +898,7 @@ namespace esphome
       }
 
       // Take USB mutex for thread safety
-      if (xSemaphoreTake(usb_mutex_, 1000 / portTICK_PERIOD_MS) != pdTRUE)
+      if (xSemaphoreTake(usb_mutex_, pdMS_TO_TICKS(1000)) != pdTRUE)
       {
         if (should_log_error(usb_error_limiter_))
         {
@@ -895,7 +941,7 @@ namespace esphome
       data.clear();
 
       // Take USB mutex for thread safety
-      if (xSemaphoreTake(usb_mutex_, timeout_ms / portTICK_PERIOD_MS) != pdTRUE)
+      if (xSemaphoreTake(usb_mutex_, pdMS_TO_TICKS(timeout_ms)) != pdTRUE)
       {
         if (should_log_error(usb_error_limiter_))
         {
@@ -955,7 +1001,7 @@ namespace esphome
       }
 
       // Wait for notification from USB Host Library task that it's ready
-      uint32_t notification_value = ulTaskNotifyTake(pdFALSE, 5000 / portTICK_PERIOD_MS);
+      uint32_t notification_value = ulTaskNotifyTake(pdFALSE, pdMS_TO_TICKS(5000));
       if (notification_value == 0) {
         ESP_LOGE(TAG, "USB Host Library task startup timeout");
         return ESP_ERR_TIMEOUT;
@@ -1091,8 +1137,63 @@ namespace esphome
         if (ret != ESP_OK)
         {
           if (ret == ESP_ERR_INVALID_STATE) {
-            ESP_LOGW(TAG, "USB device %d in invalid state, skipping", dev_addr_list[i]);
-            continue;
+            ESP_LOGW(TAG, "USB device %d in invalid state - forcing cleanup and retry", dev_addr_list[i]);
+            
+            // Force cleanup of all devices to clear stale state
+            ESP_LOGI(TAG, "Calling usb_host_device_free_all() to clear stale device references");
+            esp_err_t cleanup_ret = usb_host_device_free_all();
+            if (cleanup_ret == ESP_OK) {
+              ESP_LOGI(TAG, "Device cleanup successful, retrying device open");
+              
+              // Progressive delay to let USB stack stabilize
+              // First attempt: 200ms, second: 500ms, third: 1000ms
+              static uint32_t retry_count = 0;
+              uint32_t delay_ms = 200 + (retry_count * 300);  // 200, 500, 800, 1100...
+              delay_ms = std::min(delay_ms, static_cast<uint32_t>(2000)); // Cap at 2 seconds
+              
+              ESP_LOGI(TAG, "Waiting %ums for USB stack stabilization (retry #%u)", delay_ms, retry_count + 1);
+              vTaskDelay(pdMS_TO_TICKS(delay_ms));
+              
+              // Retry opening the device after cleanup
+              ret = usb_host_device_open(usb_device_.client_hdl, dev_addr_list[i], &dev_hdl);
+              if (ret != ESP_OK) {
+                retry_count++;
+                ESP_LOGW(TAG, "Device open retry #%u failed: %s", retry_count, esp_err_to_name(ret));
+                if (retry_count >= 3) {
+                  ESP_LOGE(TAG, "Maximum USB cleanup retries reached, device may need power cycle");
+                  retry_count = 0; // Reset for next device
+                }
+                continue;
+              } else {
+                ESP_LOGI(TAG, "Device open retry succeeded after cleanup (attempt #%u)", retry_count + 1);
+                retry_count = 0; // Reset success counter
+              }
+            } else {
+              ESP_LOGE(TAG, "Device cleanup failed: %s - USB Host Library in corrupted state", esp_err_to_name(cleanup_ret));
+              
+              if (cleanup_ret == ESP_ERR_INVALID_STATE) {
+                ESP_LOGW(TAG, "Attempting complete USB client re-registration to recover from corrupted state");
+                
+                // Force complete USB client reset
+                if (usb_device_.client_hdl) {
+                  ESP_LOGI(TAG, "Deregistering corrupted USB client");
+                  esp_err_t dereg_ret = usb_host_client_deregister(usb_device_.client_hdl);
+                  ESP_LOGD(TAG, "USB client deregistration result: %s", esp_err_to_name(dereg_ret));
+                  usb_device_.client_hdl = nullptr;
+                }
+                
+                // Re-register USB client to get fresh state
+                ESP_LOGI(TAG, "Re-registering USB client for fresh start");
+                esp_err_t rereg_ret = usb_client_register();
+                if (rereg_ret == ESP_OK) {
+                  ESP_LOGI(TAG, "USB client re-registration successful - will retry device enumeration");
+                  // Don't continue here - let the next enumeration cycle try again
+                } else {
+                  ESP_LOGE(TAG, "USB client re-registration failed: %s", esp_err_to_name(rereg_ret));
+                }
+              }
+              continue;
+            }
           } else {
             ESP_LOGW(TAG, "Failed to open USB device %d: %s", dev_addr_list[i], esp_err_to_name(ret));
             continue;
@@ -1408,7 +1509,7 @@ namespace esphome
         if (ret == ESP_OK)
         {
           // Wait for transfer completion
-          if (xSemaphoreTake(out_ctx.done_sem, timeout_ms / portTICK_PERIOD_MS) == pdTRUE) {
+          if (xSemaphoreTake(out_ctx.done_sem, pdMS_TO_TICKS(timeout_ms)) == pdTRUE) {
             ret = out_ctx.result;
             ESP_LOGV(TAG, "OUT transfer completed with result: %s", esp_err_to_name(ret));
           } else {
@@ -1478,7 +1579,7 @@ namespace esphome
         if (ret == ESP_OK)
         {
           // Wait for transfer completion
-          if (xSemaphoreTake(in_ctx.done_sem, timeout_ms / portTICK_PERIOD_MS) == pdTRUE) {
+          if (xSemaphoreTake(in_ctx.done_sem, pdMS_TO_TICKS(timeout_ms)) == pdTRUE) {
             ret = in_ctx.result;
             
             if (ret == ESP_OK && in_ctx.actual_bytes > 0) {
@@ -1582,7 +1683,7 @@ namespace esphome
       
       ret = usb_host_transfer_submit_control(usb_device_.client_hdl, transfer);
       if (ret == ESP_OK) {
-        if (xSemaphoreTake(done_sem, 500 / portTICK_PERIOD_MS) == pdTRUE) {
+        if (xSemaphoreTake(done_sem, pdMS_TO_TICKS(500)) == pdTRUE) {
           ret = ctx.result;
           if (ret == ESP_OK && ctx.actual_bytes > sizeof(usb_setup_packet_t)) {
             size_t data_received = ctx.actual_bytes - sizeof(usb_setup_packet_t);
@@ -1670,7 +1771,7 @@ namespace esphome
       ret = usb_host_transfer_submit_control(usb_device_.client_hdl, transfer);
       if (ret == ESP_OK) {
         // Wait for completion
-        if (xSemaphoreTake(ctx.done_sem, 5000 / portTICK_PERIOD_MS) == pdTRUE) {
+        if (xSemaphoreTake(ctx.done_sem, pdMS_TO_TICKS(5000)) == pdTRUE) {
           ret = ctx.result;
           ESP_LOGV(TAG, "HID SET_REPORT success");
         } else {
@@ -1747,7 +1848,7 @@ namespace esphome
       ret = usb_host_transfer_submit_control(usb_device_.client_hdl, transfer);
       if (ret == ESP_OK) {
         // Wait for completion with timeout
-        if (xSemaphoreTake(ctx.done_sem, 1000 / portTICK_PERIOD_MS) == pdTRUE) {
+        if (xSemaphoreTake(ctx.done_sem, pdMS_TO_TICKS(1000)) == pdTRUE) {
           ret = ctx.result;
           if (ret == ESP_OK && ctx.actual_bytes > sizeof(usb_setup_packet_t)) {
             // Parse the USB string descriptor
@@ -1907,7 +2008,7 @@ namespace esphome
           continue;
         } else if (ret != ESP_OK) {
           ESP_LOGW(TAG, "USB client event handling failed: %s", esp_err_to_name(ret));
-          vTaskDelay(100 / portTICK_PERIOD_MS); // Brief delay on error
+          vTaskDelay(pdMS_TO_TICKS(100)); // Brief delay on error
           continue;
         }
         
@@ -1915,7 +2016,7 @@ namespace esphome
         component->process_cached_data();
         
         // Small delay to prevent busy-waiting
-        vTaskDelay(10 / portTICK_PERIOD_MS);
+        vTaskDelay(pdMS_TO_TICKS(10));
       }
       
       ESP_LOGI(TAG, "USB client task stopping");

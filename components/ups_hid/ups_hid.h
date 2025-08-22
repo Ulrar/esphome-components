@@ -173,8 +173,6 @@ namespace esphome
         usb_host_initialized_ = false;
         device_connected_ = false;
         usb_tasks_running_ = false;
-        ups_data_cache_.last_update_time = 0;
-        ups_data_cache_.data_valid = false;
 #endif
       }
       
@@ -337,8 +335,8 @@ namespace esphome
       struct UpsDataCache {
         UpsData data;
         std::mutex mutex;
-        uint32_t last_update_time;
-        bool data_valid;
+        uint32_t last_update_time{0};
+        bool data_valid{false};
       } ups_data_cache_;
 
       // ESP32-specific USB handling
