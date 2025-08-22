@@ -7,19 +7,7 @@
 #include "apc_hid_protocol.h"
 #include "cyberpower_protocol.h"
 
-// ==============================================================================
-// ESP-IDF v5.3 KNOWN ISSUES:
-// 
-// The ESP-IDF v5.3 USB Host Library has fundamental bugs that cannot be fully
-// worked around:
-// 
-// 1. ESP_ERR_INVALID_STATE from usb_host_device_open after disconnect/reconnect
-// 2. Endpoint allocation corruption preventing interface claims
-// 3. USB Host Library state corruption during device enumeration
-//
-// These issues are fixed in ESP-IDF v5.4+. With v5.3, a power cycle may be
-// required after USB disconnect/reconnect cycles.
-// ==============================================================================
+// USB Host implementation for ESP-IDF v5.4+
 
 #include <functional>
 #include <cmath>
@@ -30,6 +18,7 @@
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "freertos/portmacro.h"
 #include "freertos/queue.h"
 #include "usb/usb_host.h"
@@ -120,34 +109,26 @@ namespace esphome
 
       if (!connected_)
       {
-        ESP_LOGD(TAG, "UPS not connected, attempting to reconnect...");
-
-        // Try USB re-enumeration first
-#ifdef USE_ESP32
-        esp_err_t ret = usb_device_enumerate();
-        if (ret == ESP_OK)
-        {
-          ESP_LOGI(TAG, "USB device enumeration successful, attempting protocol detection");
-          
-          if (detect_ups_protocol())
-          {
-            connected_ = true;
-            ESP_LOGI(TAG, "Reconnected to UPS");
-          }
-          else
-          {
-            ESP_LOGW(TAG, "Protocol detection failed after successful USB enumeration");
-            return;
-          }
-        }
-        else
-        {
-          ESP_LOGW(TAG, "USB device enumeration failed: %s", esp_err_to_name(ret));
+        // Throttle reconnection attempts
+        static uint32_t last_attempt = 0;
+        uint32_t now = millis();
+        if (now - last_attempt < 5000) {
           return;
         }
-#else
-        return;  // Non-ESP32 platforms can't reconnect
+        last_attempt = now;
+
+#ifdef USE_ESP32
+        // Try to enumerate USB devices
+        esp_err_t ret = usb_device_enumerate();
+        if (ret == ESP_OK) {
+          // Device found, try protocol detection
+          if (detect_ups_protocol()) {
+            connected_ = true;
+            ESP_LOGI(TAG, "Connected to UPS using %s protocol", get_protocol_name().c_str());
+          }
+        }
 #endif
+        return;
       }
 
       // Use cached data from asynchronous USB operations instead of blocking reads
@@ -276,7 +257,7 @@ namespace esphome
       }
 
       // Wait a moment for USB devices to be detected
-      vTaskDelay(pdMS_TO_TICKS(1000));
+      vTaskDelay(1000 / portTICK_PERIOD_MS);
       
       // Try initial device enumeration
       ret = usb_device_enumerate();
@@ -449,7 +430,7 @@ namespace esphome
       for (const auto &attempt : protocol_attempts)
       {
         // Yield to prevent task watchdog timeout during long protocol detection
-        vTaskDelay(pdMS_TO_TICKS(1));
+        vTaskDelay(1 / portTICK_PERIOD_MS);
         
         ESP_LOGD(TAG, "Trying %s protocol...", attempt.first.c_str());
 
@@ -480,7 +461,7 @@ namespace esphome
                    attempt.first.c_str(), detection_time);
 
           // Small delay between attempts to prevent overwhelming the device
-          vTaskDelay(pdMS_TO_TICKS(100));
+          vTaskDelay(100 / portTICK_PERIOD_MS);
         }
       }
 
@@ -871,7 +852,7 @@ namespace esphome
       }
 
       // Take USB mutex for thread safety
-      if (xSemaphoreTake(usb_mutex_, pdMS_TO_TICKS(1000)) != pdTRUE)
+      if (xSemaphoreTake(usb_mutex_, 1000 / portTICK_PERIOD_MS) != pdTRUE)
       {
         if (should_log_error(usb_error_limiter_))
         {
@@ -914,7 +895,7 @@ namespace esphome
       data.clear();
 
       // Take USB mutex for thread safety
-      if (xSemaphoreTake(usb_mutex_, pdMS_TO_TICKS(timeout_ms)) != pdTRUE)
+      if (xSemaphoreTake(usb_mutex_, timeout_ms / portTICK_PERIOD_MS) != pdTRUE)
       {
         if (should_log_error(usb_error_limiter_))
         {
@@ -974,7 +955,7 @@ namespace esphome
       }
 
       // Wait for notification from USB Host Library task that it's ready
-      uint32_t notification_value = ulTaskNotifyTake(pdFALSE, pdMS_TO_TICKS(5000));
+      uint32_t notification_value = ulTaskNotifyTake(pdFALSE, 5000 / portTICK_PERIOD_MS);
       if (notification_value == 0) {
         ESP_LOGE(TAG, "USB Host Library task startup timeout");
         return ESP_ERR_TIMEOUT;
@@ -1105,38 +1086,12 @@ namespace esphome
 
       for (int i = 0; i < num_dev; i++)
       {
-        usb_device_handle_t dev_hdl;
+        usb_device_handle_t dev_hdl = nullptr;
         ret = usb_host_device_open(usb_device_.client_hdl, dev_addr_list[i], &dev_hdl);
         if (ret != ESP_OK)
         {
           if (ret == ESP_ERR_INVALID_STATE) {
-            ESP_LOGW(TAG, "USB Host Library in invalid state for device %d", dev_addr_list[i]);
-            ESP_LOGI(TAG, "This is a known ESP-IDF v5.3 issue - attempting recovery");
-            
-            // RECOVERY STRATEGY 1: Try to reuse existing connection if available
-            if (usb_device_.dev_hdl != nullptr && usb_device_.dev_addr == dev_addr_list[i]) {
-              ESP_LOGI(TAG, "Reusing existing connection for device address %d", dev_addr_list[i]);
-              // Check if we can still communicate with the device
-              if (test_device_communication()) {
-                device_connected_ = true;
-                ESP_LOGI(TAG, "Successfully recovered USB connection");
-                return ESP_OK;
-              } else {
-                ESP_LOGW(TAG, "Existing connection no longer functional");
-              }
-            }
-            
-            // RECOVERY STRATEGY 2: If we had a working UPS before and there's only one device,
-            // assume it's the same UPS and trust the previous configuration
-            if (num_dev == 1 && usb_device_.vid != 0 && usb_device_.pid != 0) {
-              ESP_LOGI(TAG, "Single device with ESP_ERR_INVALID_STATE - trusting previous UPS config");
-              ESP_LOGI(TAG, "Previous UPS was: VID=0x%04X, PID=0x%04X", usb_device_.vid, usb_device_.pid);
-              // Mark as connected but don't update device handle (keep existing one)
-              device_connected_ = true;
-              return ESP_OK;
-            }
-            
-            // If both recovery strategies failed, continue to try next device
+            ESP_LOGW(TAG, "USB device %d in invalid state, skipping", dev_addr_list[i]);
             continue;
           } else {
             ESP_LOGW(TAG, "Failed to open USB device %d: %s", dev_addr_list[i], esp_err_to_name(ret));
@@ -1185,7 +1140,9 @@ namespace esphome
         }
 
         // Close device handle if we opened it but didn't use it
-        usb_host_device_close(usb_device_.client_hdl, dev_hdl);
+        if (dev_hdl && dev_hdl != usb_device_.dev_hdl) {
+          usb_host_device_close(usb_device_.client_hdl, dev_hdl);
+        }
       }
 
       return ESP_ERR_NOT_FOUND;
@@ -1451,7 +1408,7 @@ namespace esphome
         if (ret == ESP_OK)
         {
           // Wait for transfer completion
-          if (xSemaphoreTake(out_ctx.done_sem, pdMS_TO_TICKS(timeout_ms)) == pdTRUE) {
+          if (xSemaphoreTake(out_ctx.done_sem, timeout_ms / portTICK_PERIOD_MS) == pdTRUE) {
             ret = out_ctx.result;
             ESP_LOGV(TAG, "OUT transfer completed with result: %s", esp_err_to_name(ret));
           } else {
@@ -1521,7 +1478,7 @@ namespace esphome
         if (ret == ESP_OK)
         {
           // Wait for transfer completion
-          if (xSemaphoreTake(in_ctx.done_sem, pdMS_TO_TICKS(timeout_ms)) == pdTRUE) {
+          if (xSemaphoreTake(in_ctx.done_sem, timeout_ms / portTICK_PERIOD_MS) == pdTRUE) {
             ret = in_ctx.result;
             
             if (ret == ESP_OK && in_ctx.actual_bytes > 0) {
@@ -1625,7 +1582,7 @@ namespace esphome
       
       ret = usb_host_transfer_submit_control(usb_device_.client_hdl, transfer);
       if (ret == ESP_OK) {
-        if (xSemaphoreTake(done_sem, pdMS_TO_TICKS(500)) == pdTRUE) {
+        if (xSemaphoreTake(done_sem, 500 / portTICK_PERIOD_MS) == pdTRUE) {
           ret = ctx.result;
           if (ret == ESP_OK && ctx.actual_bytes > sizeof(usb_setup_packet_t)) {
             size_t data_received = ctx.actual_bytes - sizeof(usb_setup_packet_t);
@@ -1713,7 +1670,7 @@ namespace esphome
       ret = usb_host_transfer_submit_control(usb_device_.client_hdl, transfer);
       if (ret == ESP_OK) {
         // Wait for completion
-        if (xSemaphoreTake(ctx.done_sem, pdMS_TO_TICKS(5000)) == pdTRUE) {
+        if (xSemaphoreTake(ctx.done_sem, 5000 / portTICK_PERIOD_MS) == pdTRUE) {
           ret = ctx.result;
           ESP_LOGV(TAG, "HID SET_REPORT success");
         } else {
@@ -1790,7 +1747,7 @@ namespace esphome
       ret = usb_host_transfer_submit_control(usb_device_.client_hdl, transfer);
       if (ret == ESP_OK) {
         // Wait for completion with timeout
-        if (xSemaphoreTake(ctx.done_sem, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        if (xSemaphoreTake(ctx.done_sem, 1000 / portTICK_PERIOD_MS) == pdTRUE) {
           ret = ctx.result;
           if (ret == ESP_OK && ctx.actual_bytes > sizeof(usb_setup_packet_t)) {
             // Parse the USB string descriptor
@@ -1901,7 +1858,10 @@ namespace esphome
       xTaskNotifyGive(parent_task);
 
       // Main USB Host event loop
-      while (true) {
+      bool has_clients = true;
+      bool has_devices = false;
+      
+      while (has_clients) {
         uint32_t event_flags;
         ret = usb_host_lib_handle_events(portMAX_DELAY, &event_flags);
         
@@ -1910,16 +1870,26 @@ namespace esphome
           continue;
         }
 
-        // Handle USB Host events
+        // Handle USB Host events (following ESP-IDF v5.4 patterns)
         if (event_flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS) {
-          usb_host_device_free_all();
-          ESP_LOGI(TAG, "USB Event: NO_CLIENTS - freed all devices");
+          ESP_LOGI(TAG, "No more USB clients");
+          if (usb_host_device_free_all() == ESP_OK) {
+            ESP_LOGI(TAG, "All devices freed");
+            has_clients = false;
+          } else {
+            ESP_LOGI(TAG, "Waiting for devices to be freed");
+            has_devices = true;
+          }
         }
         
-        if (event_flags & USB_HOST_LIB_EVENT_FLAGS_ALL_FREE) {
-          ESP_LOGI(TAG, "USB Event: ALL_FREE - all devices removed");
+        if (has_devices && (event_flags & USB_HOST_LIB_EVENT_FLAGS_ALL_FREE)) {
+          ESP_LOGI(TAG, "All devices freed");
+          has_clients = false;
         }
       }
+      
+      ESP_LOGI(TAG, "USB Host Library task ending");
+      vTaskDelete(nullptr);
     }
 
     // USB client task for asynchronous operations
@@ -1937,7 +1907,7 @@ namespace esphome
           continue;
         } else if (ret != ESP_OK) {
           ESP_LOGW(TAG, "USB client event handling failed: %s", esp_err_to_name(ret));
-          vTaskDelay(pdMS_TO_TICKS(100)); // Brief delay on error
+          vTaskDelay(100 / portTICK_PERIOD_MS); // Brief delay on error
           continue;
         }
         
@@ -1945,7 +1915,7 @@ namespace esphome
         component->process_cached_data();
         
         // Small delay to prevent busy-waiting
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(10 / portTICK_PERIOD_MS);
       }
       
       ESP_LOGI(TAG, "USB client task stopping");
@@ -2081,30 +2051,39 @@ namespace esphome
       switch (event_msg->event) {
         case USB_HOST_CLIENT_EVENT_NEW_DEV:
           ESP_LOGI(TAG, "USB_HOST_CLIENT_EVENT_NEW_DEV: device address %d", event_msg->new_dev.address);
-          // Trigger device enumeration
-          component->usb_device_enumerate();
+          // Mark that we need to re-enumerate devices
+          component->device_connected_ = false;
+          component->connected_ = false;
+          // Clear protocol to force re-detection
+          component->active_protocol_.reset();
+          ESP_LOGI(TAG, "New USB device detected, will enumerate on next update cycle");
           break;
 
         case USB_HOST_CLIENT_EVENT_DEV_GONE:
           ESP_LOGI(TAG, "USB_HOST_CLIENT_EVENT_DEV_GONE: device handle %p", event_msg->dev_gone.dev_hdl);
           if (component->usb_device_.dev_hdl == event_msg->dev_gone.dev_hdl) {
-            ESP_LOGI(TAG, "Cleaning up disconnected UPS device");
+            ESP_LOGI(TAG, "UPS device disconnected");
+            
+            // Mark device as disconnected
             component->device_connected_ = false;
             component->connected_ = false;
             
-            // Clear USB device state completely
-            memset(&component->usb_device_, 0, sizeof(component->usb_device_));
+            // Clear device handle (interface will be auto-released by USB host)
+            component->usb_device_.dev_hdl = nullptr;
+            component->usb_device_.dev_addr = 0;
+            component->usb_device_.vid = 0;
+            component->usb_device_.pid = 0;
             
-            // Clear active protocol to force re-detection on reconnect
+            // Clear active protocol
             component->active_protocol_.reset();
             
-            // Reset UPS data to avoid showing stale values
+            // Reset UPS data
             {
               std::lock_guard<std::mutex> data_lock(component->data_mutex_);
-              component->ups_data_.reset(); // Reset to default/invalid values
+              component->ups_data_.reset();
             }
             
-            // Also clear the cached data
+            // Clear cached data
             {
               std::lock_guard<std::mutex> cache_lock(component->ups_data_cache_.mutex);
               component->ups_data_cache_.data.reset();
@@ -2112,7 +2091,7 @@ namespace esphome
               component->ups_data_cache_.last_update_time = 0;
             }
             
-            ESP_LOGI(TAG, "USB device state and UPS data cleared, ready for reconnection");
+            ESP_LOGI(TAG, "Device cleanup complete");
           }
           break;
 
