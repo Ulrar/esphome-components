@@ -16,7 +16,7 @@ ups_hid:
   id: ups_monitor
   update_interval: ${update_interval}
   protocol_timeout: ${protocol_timeout}
-  auto_detect_protocol: true
+  protocol: apc
   simulation_mode: ${simulation_mode}
   # Uncomment if auto-detection fails:
   # usb_vendor_id: 0x051D

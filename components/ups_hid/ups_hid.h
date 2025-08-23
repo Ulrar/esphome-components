@@ -27,11 +27,15 @@
 #include <map>
 
 // USB HID Class defines
-#ifndef USB_CLASS_HID
-#define USB_CLASS_HID 0x03
-#endif
+// USB HID Class constant is now defined in hid_constants.h
 
 #endif
+
+// Include the clean refactored architecture
+#include "ups_composite_data.h"
+#include "usb_transport_interface.h"
+#include "protocol_factory.h"
+#include "hid_constants.h"
 
 namespace esphome
 {
@@ -39,151 +43,16 @@ namespace esphome
   {
 
     static const char *const TAG = "ups_hid";
-
-    // UPS status flags
-    enum UpsStatus
-    {
-      UPS_STATUS_UNKNOWN = 0,
-      UPS_STATUS_ONLINE = 1 << 0,
-      UPS_STATUS_ON_BATTERY = 1 << 1,
-      UPS_STATUS_LOW_BATTERY = 1 << 2,
-      UPS_STATUS_REPLACE_BATTERY = 1 << 3,
-      UPS_STATUS_CHARGING = 1 << 4,
-      UPS_STATUS_FAULT = 1 << 5,
-      UPS_STATUS_OVERLOAD = 1 << 6,
-      UPS_STATUS_CALIBRATING = 1 << 7,
-      UPS_STATUS_OFF = 1 << 8
-    };
-
-    // UPS protocols
-    enum UpsProtocol
-    {
-      PROTOCOL_UNKNOWN = 0,
-      PROTOCOL_APC_HID,
-      PROTOCOL_CYBERPOWER_HID,
-      PROTOCOL_GENERIC_HID
-    };
-
-    // UPS data structure with proper initialization
-    struct UpsData
-    {
-      float battery_level{NAN};
-      float input_voltage{NAN};
-      float output_voltage{NAN};
-      float load_percent{NAN};
-      float runtime_minutes{NAN};
-      float frequency{NAN};
-      uint32_t status_flags{UPS_STATUS_UNKNOWN};
-      std::string model{};
-      std::string manufacturer{};
-      std::string serial_number{};
-      std::string firmware_version{};
-      UpsProtocol detected_protocol{PROTOCOL_UNKNOWN};
-      
-      // Additional sensor fields
-      float battery_voltage{NAN};
-      float battery_voltage_nominal{NAN};
-      float input_voltage_nominal{NAN};
-      float input_transfer_low{NAN};
-      float input_transfer_high{NAN};
-      float ups_realpower_nominal{NAN};
-      int16_t ups_delay_shutdown{-1};
-      int16_t ups_delay_start{-1};
-      std::string ups_beeper_status{};
-      std::string input_sensitivity{};
-      
-      // Additional missing fields from NUT analysis
-      float battery_charge_low{NAN};        // Battery low threshold (%)
-      float battery_charge_warning{NAN};    // Battery warning threshold (%)
-      float battery_runtime_low{NAN};       // Runtime low threshold (minutes)
-      std::string battery_status{};         // Battery status text
-      std::string battery_type{};           // Battery chemistry
-      std::string battery_mfr_date{};       // Battery manufacture date
-      std::string ups_mfr_date{};           // UPS manufacture date
-      std::string ups_firmware_aux{};       // Auxiliary firmware info
-      std::string ups_test_result{};        // Test result
-      int16_t ups_timer_reboot{-1};         // Reboot timer
-      int16_t ups_timer_shutdown{-1};       // Shutdown timer
-      int16_t ups_timer_start{-1};          // Start timer
-      
-      // Reset all data to default values
-      void reset() {
-        battery_level = NAN;
-        input_voltage = NAN;
-        output_voltage = NAN;
-        load_percent = NAN;
-        runtime_minutes = NAN;
-        frequency = NAN;
-        status_flags = UPS_STATUS_UNKNOWN;
-        model.clear();
-        manufacturer.clear();
-        serial_number.clear();
-        firmware_version.clear();
-        detected_protocol = PROTOCOL_UNKNOWN;
-        
-        // Reset additional sensor fields
-        battery_voltage = NAN;
-        battery_voltage_nominal = NAN;
-        input_voltage_nominal = NAN;
-        input_transfer_low = NAN;
-        input_transfer_high = NAN;
-        ups_realpower_nominal = NAN;
-        ups_delay_shutdown = -1;
-        ups_delay_start = -1;
-        ups_beeper_status.clear();
-        input_sensitivity.clear();
-        
-        // Reset additional missing fields
-        battery_charge_low = NAN;
-        battery_charge_warning = NAN;
-        battery_runtime_low = NAN;
-        battery_status.clear();
-        battery_type.clear();
-        battery_mfr_date.clear();
-        ups_mfr_date.clear();
-        ups_firmware_aux.clear();
-        ups_test_result.clear();
-        ups_timer_reboot = -1;
-        ups_timer_shutdown = -1;
-        ups_timer_start = -1;
-      }
-      
-      // Check if core data is valid
-      bool is_valid() const {
-        return !std::isnan(battery_level) || !std::isnan(input_voltage) || 
-               !std::isnan(output_voltage) || status_flags != UPS_STATUS_UNKNOWN;
-      }
-    };
-
+    
     // Forward declarations
     class UpsProtocolBase;
-    class ApcHidProtocol;
-    class CyberPowerProtocol;
-    class GenericHidProtocol;
+    class IUsbTransport;
 
     class UpsHidComponent : public PollingComponent
     {
     public:
-      UpsHidComponent() {
-#ifdef USE_ESP32
-        memset(&usb_device_, 0, sizeof(usb_device_));
-        usb_mutex_ = nullptr;
-        usb_lib_task_handle_ = nullptr;
-        usb_client_task_handle_ = nullptr;
-        usb_host_initialized_ = false;
-        device_connected_ = false;
-        usb_tasks_running_ = false;
-#endif
-      }
-      
-      ~UpsHidComponent() {
-#ifdef USE_ESP32
-        // Log any remaining suppressed errors before cleanup
-        log_suppressed_errors(usb_error_limiter_);
-        log_suppressed_errors(protocol_error_limiter_);
-        usb_deinit();
-#endif
-      }
+      UpsHidComponent() = default;
+      ~UpsHidComponent() = default;
 
       void setup() override;
       void update() override;
@@ -203,35 +72,17 @@ namespace esphome
         protocol_timeout_ms_ = std::max(static_cast<uint32_t>(5000), 
                                        std::min(timeout_ms, static_cast<uint32_t>(300000)));
       }
-      void set_auto_detect_protocol(bool auto_detect) { auto_detect_protocol_ = auto_detect; }
+      void set_protocol_selection(const std::string &protocol) { protocol_selection_ = protocol; }
+      void set_fallback_nominal_voltage(float voltage) { fallback_nominal_voltage_ = voltage; }
 
       // Data getters for sensors (thread-safe)
       UpsData get_ups_data() const { 
         std::lock_guard<std::mutex> lock(data_mutex_);
         return ups_data_; 
       }
-      bool is_connected() const { return connected_; }
       std::string get_protocol_name() const;
-      
-      // USB device info getters
-      uint16_t get_usb_vendor_id() const { return usb_vendor_id_; }
-      uint16_t get_usb_product_id() const { return usb_product_id_; }
-      bool is_input_only_device() const { 
-#ifdef USE_ESP32
-        return usb_device_.is_input_only; 
-#else
-        return false;
-#endif
-      }
-      
-      // Connection status for protocols
-      bool is_device_connected() const { 
-#ifdef USE_ESP32
-        return device_connected_; 
-#else
-        return false;
-#endif
-      }
+      uint32_t get_protocol_timeout() const { return protocol_timeout_ms_; }
+      float get_fallback_nominal_voltage() const { return fallback_nominal_voltage_; }
       
       // Test control methods
       bool start_battery_test_quick();
@@ -239,6 +90,12 @@ namespace esphome
       bool stop_battery_test();
       bool start_ups_test();
       bool stop_ups_test();
+      
+      // Beeper control methods
+      bool beeper_enable();
+      bool beeper_disable();
+      bool beeper_mute();
+      bool beeper_test();
 
       // Sensor registration methods
       void register_sensor(sensor::Sensor *sens, const std::string &type);
@@ -253,7 +110,8 @@ namespace esphome
       uint16_t usb_vendor_id_{0};  // 0 means auto-detect
       uint16_t usb_product_id_{0}; // 0 means auto-detect
       uint32_t protocol_timeout_ms_{10000};
-      bool auto_detect_protocol_{true};
+      std::string protocol_selection_{"auto"};
+      float fallback_nominal_voltage_{230.0f};  // European standard (230V) for international compatibility
 
       bool connected_{false};
       uint32_t last_successful_read_{0};
@@ -273,104 +131,48 @@ namespace esphome
       ErrorRateLimit usb_error_limiter_;
       ErrorRateLimit protocol_error_limiter_;
 
+      // Clean architecture members
+      std::unique_ptr<IUsbTransport> transport_;
       std::unique_ptr<UpsProtocolBase> active_protocol_;
       std::unordered_map<std::string, sensor::Sensor *> sensors_;
       std::unordered_map<std::string, binary_sensor::BinarySensor *> binary_sensors_;
       std::unordered_map<std::string, text_sensor::TextSensor *> text_sensors_;
 
       // Core methods
-      bool initialize_usb();
-      bool detect_ups_protocol();
+      bool initialize_transport();
+      bool detect_protocol();
       bool read_ups_data();
       void update_sensors();
-      void simulate_ups_data();
-      bool test_device_communication();
       
       // Error rate limiting helpers
       bool should_log_error(ErrorRateLimit& limiter);
       void log_suppressed_errors(ErrorRateLimit& limiter);
 
     public:
-      // USB communication methods (accessible by protocol classes)
-      bool usb_write(const std::vector<uint8_t> &data);
-      bool usb_read(std::vector<uint8_t> &data, uint32_t timeout_ms = 1000);
+      // Transport abstraction methods (accessible by protocol classes)
+      esp_err_t hid_get_report(uint8_t report_type, uint8_t report_id, 
+                             uint8_t* data, size_t* data_len, 
+                             uint32_t timeout_ms = 1000);
+      esp_err_t hid_set_report(uint8_t report_type, uint8_t report_id,
+                             const uint8_t* data, size_t data_len,
+                             uint32_t timeout_ms = 1000);
+      esp_err_t get_string_descriptor(uint8_t string_index, std::string& result);
       
-#ifdef USE_ESP32
-      // HID class requests (UPS-specific communication)
-      esp_err_t hid_get_report(uint8_t report_type, uint8_t report_id, uint8_t* data, size_t* data_len);
-      esp_err_t hid_set_report(uint8_t report_type, uint8_t report_id, const uint8_t* data, size_t data_len);
+      // Transport information
+      bool is_connected() const;
+      uint16_t get_vendor_id() const; 
+      uint16_t get_product_id() const;
       
-      // USB string descriptor reading
-      esp_err_t usb_get_string_descriptor(uint8_t string_index, std::string& result, uint16_t language_id = 0x0409);
-#endif
+      // Legacy compatibility for protocols
+      bool is_device_connected() const { return is_connected(); }
+      esp_err_t usb_get_string_descriptor(uint8_t string_index, std::string& result) {
+        return get_string_descriptor(string_index, result);
+      }
       
 
-    protected:
-#ifdef USE_ESP32
-      // USB Host structures
-      struct UsbDevice {
-        usb_host_client_handle_t client_hdl;
-        usb_device_handle_t dev_hdl;
-        uint8_t dev_addr;
-        uint16_t vid;
-        uint16_t pid;
-        bool is_hid_device;
-        bool is_input_only;        // True if device has no OUT endpoint (input-only HID device)
-        uint8_t interface_num;
-        uint8_t ep_in;
-        uint8_t ep_out;
-        uint16_t max_packet_size;
-      };
-
-      // USB Host member variables
-      UsbDevice usb_device_;
-      SemaphoreHandle_t usb_mutex_;
-      TaskHandle_t usb_lib_task_handle_;
-      TaskHandle_t usb_client_task_handle_;
-      bool usb_host_initialized_;
-      bool device_connected_;
-      volatile bool usb_tasks_running_;
-      
-      // Asynchronous data cache for non-blocking access
-      struct UpsDataCache {
-        UpsData data;
-        std::mutex mutex;
-        uint32_t last_update_time{0};
-        bool data_valid{false};
-      } ups_data_cache_;
-
-      // ESP32-specific USB handling
-      esp_err_t usb_init();
-      void usb_deinit();
-      esp_err_t usb_host_lib_init();
-      esp_err_t usb_client_register();
-      esp_err_t usb_device_enumerate();
-      bool usb_is_ups_device(const usb_device_desc_t *desc);
-      esp_err_t usb_claim_interface();
-      esp_err_t usb_get_endpoints();
-      
-      // USB communication
-      esp_err_t usb_transfer_sync(const std::vector<uint8_t> &data_out, std::vector<uint8_t> &data_in, uint32_t timeout_ms);
-      
-      // Transfer completion tracking
-      struct TransferContext {
-        SemaphoreHandle_t done_sem;
-        esp_err_t result;
-        size_t actual_bytes;
-        uint8_t* buffer;
-        size_t buffer_size;
-      };
-      
-      // USB Host event handling
-      static void usb_host_lib_task(void *arg);
-      static void usb_client_task(void *arg);
-      static void usb_client_event_callback(const usb_host_client_event_msg_t *event_msg, void *arg);
-      static void usb_transfer_callback(usb_transfer_t *transfer);
-      
-      // Asynchronous USB operations
-      esp_err_t hid_get_report_async(uint8_t report_type, uint8_t report_id);
-      void process_cached_data();
-#endif
+    private:
+      // Internal helper methods
+      void cleanup();
     };
 
     // Base class for UPS protocols
@@ -383,7 +185,7 @@ namespace esphome
       virtual bool detect() = 0;
       virtual bool initialize() = 0;
       virtual bool read_data(UpsData &data) = 0;
-      virtual UpsProtocol get_protocol_type() const = 0;
+      virtual DeviceInfo::DetectedProtocol get_protocol_type() const = 0;
       virtual std::string get_protocol_name() const = 0;
       
       // Beeper control methods
@@ -406,48 +208,6 @@ namespace esphome
       std::string bytes_to_string(const std::vector<uint8_t> &data);
     };
 
-
-    // Generic HID Protocol implementation
-    class GenericHidProtocol : public UpsProtocolBase
-    {
-    public:
-      explicit GenericHidProtocol(UpsHidComponent *parent) : UpsProtocolBase(parent) {}
-
-      bool detect() override;
-      bool initialize() override;
-      bool read_data(UpsData &data) override;
-      UpsProtocol get_protocol_type() const override { return PROTOCOL_GENERIC_HID; }
-      std::string get_protocol_name() const override { return "Generic HID"; }
-      
-      // Test method overrides
-      bool start_battery_test_quick() override;
-      bool start_battery_test_deep() override;
-      bool stop_battery_test() override;
-      bool start_ups_test() override;
-      bool stop_ups_test() override;
-      
-    private:
-      // Report discovery and caching
-      std::set<uint8_t> available_input_reports_;
-      std::set<uint8_t> available_feature_reports_;
-      std::map<uint8_t, size_t> report_sizes_;
-      
-      // Core methods
-      void enumerate_reports();
-      bool read_report(uint8_t report_id, uint8_t* buffer, size_t& buffer_len);
-      
-      // Standard report parsers (based on NUT analysis)
-      void parse_power_summary(uint8_t* data, size_t len, UpsData& ups_data);
-      void parse_battery_status(uint8_t* data, size_t len, UpsData& ups_data);
-      void parse_present_status(uint8_t* data, size_t len, UpsData& ups_data);
-      void parse_general_status(uint8_t* data, size_t len, UpsData& ups_data);
-      void parse_voltage(uint8_t* data, size_t len, UpsData& ups_data, bool is_input);
-      void parse_load(uint8_t* data, size_t len, UpsData& ups_data);
-      void parse_input_sensitivity(uint8_t* data, size_t len, UpsData& ups_data, const char* style);
-      
-      // Heuristic parsing for unknown reports
-      bool parse_unknown_report(uint8_t* data, size_t len, UpsData& ups_data);
-    };
 
   } // namespace ups_hid
 } // namespace esphome

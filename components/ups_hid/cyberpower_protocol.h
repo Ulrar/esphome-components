@@ -24,7 +24,7 @@ class CyberPowerProtocol : public UpsProtocolBase {
   bool detect() override;
   bool initialize() override;
   bool read_data(UpsData &data) override;
-  UpsProtocol get_protocol_type() const override { return PROTOCOL_CYBERPOWER_HID; }
+  DeviceInfo::DetectedProtocol get_protocol_type() const override { return DeviceInfo::PROTOCOL_CYBERPOWER_HID; }
   std::string get_protocol_name() const override { return "CyberPower HID"; }
   
   // Beeper control methods
@@ -60,6 +60,7 @@ class CyberPowerProtocol : public UpsProtocolBase {
   static const uint8_t INPUT_SENSITIVITY_REPORT_ID = 0x1a; // Input sensitivity
   static const uint8_t FIRMWARE_VERSION_REPORT_ID = 0x1b;  // Firmware version
   static const uint8_t SERIAL_NUMBER_REPORT_ID = 0x02;     // Serial number
+  static const uint8_t TEST_RESULT_REPORT_ID = 0x14;       // UPS test result (same as test command)
 
   // HID Report structure
   struct HidReport {
@@ -95,6 +96,7 @@ class CyberPowerProtocol : public UpsProtocolBase {
   void parse_input_sensitivity_report(const HidReport &report, UpsData &data);
   void parse_firmware_version_report(const HidReport &report, UpsData &data);
   void parse_serial_number_report(const HidReport &report, UpsData &data);
+  void parse_test_result_report(const HidReport &report, UpsData &data);
   
   // Missing dynamic values from NUT analysis
   void read_missing_dynamic_values(UpsData &data);
@@ -106,6 +108,10 @@ class CyberPowerProtocol : public UpsProtocolBase {
 
   // CyberPower-specific scaling logic
   void check_battery_voltage_scaling(float battery_voltage, float nominal_voltage);
+  
+  // Frequency reading methods
+  void read_frequency_data(UpsData &data);
+  float parse_frequency_from_report(const HidReport &report);
 };
 
 }  // namespace ups_hid

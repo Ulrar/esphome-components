@@ -23,7 +23,7 @@ ups_hid:
   id: ups_monitor
   update_interval: 5s
   protocol_timeout: 10s
-  auto_detect_protocol: true
+  protocol: auto
   simulation_mode: ${simulation_mode}
 
 # Enhanced logging for testing

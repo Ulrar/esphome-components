@@ -94,6 +94,11 @@ SENSOR_TYPES = {
         "device_class": DEVICE_CLASS_DURATION,
         "accuracy_decimals": 0,
     },
+    "ups_delay_reboot": {
+        "unit": UNIT_SECOND,
+        "device_class": DEVICE_CLASS_DURATION,
+        "accuracy_decimals": 0,
+    },
     # Additional missing sensor types from NUT analysis
     "battery_charge_low": {
         "unit": UNIT_PERCENT,

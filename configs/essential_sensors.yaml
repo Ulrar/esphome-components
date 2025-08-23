@@ -79,6 +79,7 @@ text_sensor:
     id: ups_model
     type: model
 
+
   - platform: wifi_info
     ip_address:
       name: "IP Address"

@@ -1,0 +1,52 @@
+# Protocol Selection Demo Configuration
+# Demonstrates the new manual protocol selection feature
+
+substitutions:
+  name: "ups-protocol-demo"
+  friendly_name: "Protocol Demo"
+  simulation_mode: "true"
+
+esphome:
+  name: "${name}"
+  friendly_name: "${friendly_name}"
+  comment: "Demonstration of manual protocol selection"
+
+# Use base configuration package
+packages:
+  base_ups: !include ../base_ups.yaml
+  essential: !include ../essential_sensors.yaml
+
+# Protocol Selection Examples
+ups_hid:
+  id: ups_monitor
+  update_interval: 10s
+  protocol_timeout: 15s
+  simulation_mode: ${simulation_mode}
+  
+  # Protocol Options (uncomment one to test):
+  protocol: auto              # Default: Auto-detect based on USB vendor ID
+  # protocol: apc             # Force APC HID Protocol
+  # protocol: cyberpower      # Force CyberPower HID Protocol  
+  # protocol: generic         # Force Generic HID Protocol
+
+# Enhanced logging to see protocol selection
+logger:
+  level: DEBUG
+  logs:
+    ups_hid: DEBUG
+
+# Demo script to show active protocol
+script:
+  - id: protocol_demo
+    then:
+      - logger.log:
+          format: "PROTOCOL DEMO - Active Protocol: %s"
+          args:
+            - "id(ups_protocol).state.c_str()"
+          level: INFO
+
+# Run demo every 60 seconds
+interval:
+  - interval: 60s
+    then:
+      - script.execute: protocol_demo

@@ -1,4 +1,6 @@
+#include "generic_hid_protocol.h"
 #include "ups_hid.h"
+#include "hid_constants.h"
 #include "esphome/core/log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -34,21 +36,19 @@ static const uint8_t EXTENDED_REPORT_IDS[] = {
 };
 
 // Report type constants for HID
-static const uint8_t HID_REPORT_TYPE_INPUT = 0x01;
-static const uint8_t HID_REPORT_TYPE_OUTPUT = 0x02;
-static const uint8_t HID_REPORT_TYPE_FEATURE = 0x03;
+// HID report types are now defined in hid_constants.h
 
 bool GenericHidProtocol::detect() {
   ESP_LOGD(GEN_TAG, "Detecting Generic HID Protocol...");
   
   // Check device connection status first
-  if (!parent_->is_device_connected()) {
+  if (!parent_->is_connected()) {
     ESP_LOGD(GEN_TAG, "Device not connected, skipping protocol detection");
     return false;
   }
   
   // Check if this is a known vendor that should use a specific protocol
-  uint16_t vid = parent_->get_usb_vendor_id();
+  uint16_t vid = parent_->get_vendor_id();
   if (vid == 0x051D || vid == 0x0764) { // APC or CyberPower
     ESP_LOGD(GEN_TAG, "Known vendor 0x%04X should use specific protocol", vid);
     return false;
@@ -60,14 +60,14 @@ bool GenericHidProtocol::detect() {
   
   for (uint8_t report_id : COMMON_REPORT_IDS) {
     // Check connection status before each attempt
-    if (!parent_->is_device_connected()) {
+    if (!parent_->is_connected()) {
       ESP_LOGD(GEN_TAG, "Device disconnected during protocol detection");
       return false;
     }
     
     // Try Input Report first (real-time data)
     buffer_len = sizeof(buffer);
-    esp_err_t ret = parent_->hid_get_report(HID_REPORT_TYPE_INPUT, report_id, buffer, &buffer_len);
+    esp_err_t ret = parent_->hid_get_report(HID_REPORT_TYPE_INPUT, report_id, buffer, &buffer_len, parent_->get_protocol_timeout());
     if (ret == ESP_OK && buffer_len > 0) {
       available_input_reports_.insert(report_id);
       ESP_LOGI(GEN_TAG, "Found Input report 0x%02X (%zu bytes)", report_id, buffer_len);
@@ -76,14 +76,14 @@ bool GenericHidProtocol::detect() {
     }
     
     // Check connection again before trying Feature report
-    if (!parent_->is_device_connected()) {
+    if (!parent_->is_connected()) {
       ESP_LOGD(GEN_TAG, "Device disconnected during protocol detection");
       return false;
     }
     
     // Try Feature Report (static/configuration data)
     buffer_len = sizeof(buffer);
-    ret = parent_->hid_get_report(HID_REPORT_TYPE_FEATURE, report_id, buffer, &buffer_len);
+    ret = parent_->hid_get_report(HID_REPORT_TYPE_FEATURE, report_id, buffer, &buffer_len, parent_->get_protocol_timeout());
     if (ret == ESP_OK && buffer_len > 0) {
       available_feature_reports_.insert(report_id);
       ESP_LOGI(GEN_TAG, "Found Feature report 0x%02X (%zu bytes)", report_id, buffer_len);
@@ -188,7 +188,10 @@ bool GenericHidProtocol::read_data(UpsData &data) {
     success = true;
   }
   
-  // 8. Try any other discovered reports with heuristic parsing
+  // 8. Try to read frequency data
+  read_frequency_data(data);
+  
+  // 9. Try any other discovered reports with heuristic parsing
   if (!success) {
     for (uint8_t id : available_input_reports_) {
       if (id == 0x01 || id == 0x06 || id == 0x0C || id == 0x16 || 
@@ -207,25 +210,26 @@ bool GenericHidProtocol::read_data(UpsData &data) {
   }
   
   // Set generic manufacturer/model if not already set
-  if (data.manufacturer.empty()) {
-    data.manufacturer = "Generic";
+  if (data.device.manufacturer.empty()) {
+    data.device.manufacturer = "Generic";
   }
-  if (data.model.empty()) {
-    uint16_t vid = parent_->get_usb_vendor_id();
-    uint16_t pid = parent_->get_usb_product_id();
+  if (data.device.model.empty()) {
+    uint16_t vid = parent_->get_vendor_id();
+    uint16_t pid = parent_->get_product_id();
     char model_str[32];
     snprintf(model_str, sizeof(model_str), "HID UPS %04X:%04X", vid, pid);
-    data.model = model_str;
+    data.device.model = model_str;
   }
   
-  // Ensure we have at least basic status
-  if (success && data.status_flags == 0) {
-    // If we got data but no status flags, assume online
-    data.status_flags = UPS_STATUS_ONLINE;
+  // Ensure we have at least basic power status
+  if (success && data.power.status.empty()) {
+    // If we got data but no power status, assume online
+    data.power.status = "Online";
+    data.power.input_voltage = parent_->get_fallback_nominal_voltage(); // Use configured fallback voltage
   }
   
   // Set default test result
-  data.ups_test_result = "No test initiated";
+  data.test.ups_test_result = "No test initiated";
   
   return success;
 }
@@ -240,14 +244,14 @@ void GenericHidProtocol::enumerate_reports() {
   // First try common report IDs
   for (uint8_t id : COMMON_REPORT_IDS) {
     // Check device connection before each report
-    if (!parent_->is_device_connected()) {
+    if (!parent_->is_connected()) {
       ESP_LOGD(GEN_TAG, "Device disconnected during report enumeration");
       return;
     }
     
     // Check Input reports
     buffer_len = sizeof(buffer);
-    esp_err_t ret = parent_->hid_get_report(HID_REPORT_TYPE_INPUT, id, buffer, &buffer_len);
+    esp_err_t ret = parent_->hid_get_report(HID_REPORT_TYPE_INPUT, id, buffer, &buffer_len, parent_->get_protocol_timeout());
     if (ret == ESP_OK && buffer_len > 0) {
       available_input_reports_.insert(id);
       report_sizes_[id] = buffer_len;
@@ -256,14 +260,14 @@ void GenericHidProtocol::enumerate_reports() {
     }
     
     // Check connection again before Feature report
-    if (!parent_->is_device_connected()) {
+    if (!parent_->is_connected()) {
       ESP_LOGD(GEN_TAG, "Device disconnected during report enumeration");
       return;
     }
     
     // Check Feature reports
     buffer_len = sizeof(buffer);
-    ret = parent_->hid_get_report(HID_REPORT_TYPE_FEATURE, id, buffer, &buffer_len);
+    ret = parent_->hid_get_report(HID_REPORT_TYPE_FEATURE, id, buffer, &buffer_len, parent_->get_protocol_timeout());
     if (ret == ESP_OK && buffer_len > 0) {
       available_feature_reports_.insert(id);
       if (report_sizes_.find(id) == report_sizes_.end()) {
@@ -286,7 +290,7 @@ void GenericHidProtocol::enumerate_reports() {
   ESP_LOGD(GEN_TAG, "Performing extended report search...");
   for (uint8_t id : EXTENDED_REPORT_IDS) {
     // Check device connection before each extended report
-    if (!parent_->is_device_connected()) {
+    if (!parent_->is_connected()) {
       ESP_LOGD(GEN_TAG, "Device disconnected during extended report search");
       return;
     }
@@ -297,7 +301,7 @@ void GenericHidProtocol::enumerate_reports() {
     }
     
     buffer_len = sizeof(buffer);
-    esp_err_t ret = parent_->hid_get_report(HID_REPORT_TYPE_INPUT, id, buffer, &buffer_len);
+    esp_err_t ret = parent_->hid_get_report(HID_REPORT_TYPE_INPUT, id, buffer, &buffer_len, parent_->get_protocol_timeout());
     if (ret == ESP_OK && buffer_len > 0) {
       available_input_reports_.insert(id);
       report_sizes_[id] = buffer_len;
@@ -315,7 +319,7 @@ bool GenericHidProtocol::read_report(uint8_t report_id, uint8_t* buffer, size_t&
   // Try Input report first if available (real-time data)
   if (available_input_reports_.count(report_id)) {
     buffer_len = 64;
-    esp_err_t ret = parent_->hid_get_report(HID_REPORT_TYPE_INPUT, report_id, buffer, &buffer_len);
+    esp_err_t ret = parent_->hid_get_report(HID_REPORT_TYPE_INPUT, report_id, buffer, &buffer_len, parent_->get_protocol_timeout());
     if (ret == ESP_OK && buffer_len > 0) {
       ESP_LOGV(GEN_TAG, "Read Input report 0x%02X: %zu bytes", report_id, buffer_len);
       return true;
@@ -325,7 +329,7 @@ bool GenericHidProtocol::read_report(uint8_t report_id, uint8_t* buffer, size_t&
   // Try Feature report (static/configuration data)
   if (available_feature_reports_.count(report_id)) {
     buffer_len = 64;
-    esp_err_t ret = parent_->hid_get_report(HID_REPORT_TYPE_FEATURE, report_id, buffer, &buffer_len);
+    esp_err_t ret = parent_->hid_get_report(HID_REPORT_TYPE_FEATURE, report_id, buffer, &buffer_len, parent_->get_protocol_timeout());
     if (ret == ESP_OK && buffer_len > 0) {
       ESP_LOGV(GEN_TAG, "Read Feature report 0x%02X: %zu bytes", report_id, buffer_len);
       return true;
@@ -343,12 +347,12 @@ void GenericHidProtocol::parse_power_summary(uint8_t* data, size_t len, UpsData&
     // Battery percentage typically at byte 1
     uint8_t battery = data[1];
     if (battery <= 100) {
-      ups_data.battery_level = static_cast<float>(battery);
+      ups_data.battery.level = static_cast<float>(battery);
       ESP_LOGD(GEN_TAG, "Power summary: Battery %d%%", battery);
     } else if (battery <= 200 && battery > 100) {
       // Some devices use 0-200 scale
-      ups_data.battery_level = static_cast<float>(battery) / 2.0f;
-      ESP_LOGD(GEN_TAG, "Power summary: Battery %.1f%% (scaled from %d)", ups_data.battery_level, battery);
+      ups_data.battery.level = static_cast<float>(battery) / 2.0f;
+      ESP_LOGD(GEN_TAG, "Power summary: Battery %.1f%% (scaled from %d)", ups_data.battery.level, battery);
     }
   }
   
@@ -356,7 +360,7 @@ void GenericHidProtocol::parse_power_summary(uint8_t* data, size_t len, UpsData&
     // Runtime in minutes (16-bit little-endian at bytes 2-3)
     uint16_t runtime = data[2] | (data[3] << 8);
     if (runtime > 0 && runtime < 10000) {
-      ups_data.runtime_minutes = static_cast<float>(runtime);
+      ups_data.battery.runtime_minutes = static_cast<float>(runtime);
       ESP_LOGD(GEN_TAG, "Power summary: Runtime %d minutes", runtime);
     }
   }
@@ -369,20 +373,39 @@ void GenericHidProtocol::parse_battery_status(uint8_t* data, size_t len, UpsData
     
     // Common battery status bits (varies by vendor)
     if (status != 0xFF && status != 0x00) { // Valid status
-      if (status & 0x01) ups_data.status_flags |= UPS_STATUS_ONLINE;
-      if (status & 0x02) ups_data.status_flags |= UPS_STATUS_ON_BATTERY;
-      if (status & 0x04) ups_data.status_flags |= UPS_STATUS_LOW_BATTERY;
-      if (status & 0x08) ups_data.status_flags |= UPS_STATUS_CHARGING;
-      if (status & 0x10) ups_data.status_flags |= UPS_STATUS_REPLACE_BATTERY;
-      ESP_LOGD(GEN_TAG, "Battery status: 0x%02X -> flags 0x%08X", status, ups_data.status_flags);
+      // Update power status
+      if (status & 0x01) {
+        ups_data.power.status = "Online";
+        ups_data.power.input_voltage = parent_->get_fallback_nominal_voltage(); // Use configured fallback voltage
+      }
+      if (status & 0x02) {
+        ups_data.power.status = "On Battery";
+        ups_data.power.input_voltage = NAN;
+      }
+      
+      // Update battery status
+      if (status & 0x08) {
+        ups_data.battery.status = "Charging";
+      }
+      
+      if (status & 0x04) {
+        ups_data.battery.charge_low = 10.0f; // Low battery
+      }
+      
+      if (status & 0x10) {
+        ups_data.battery.status += " - Replace Battery";
+      }
+      
+      ESP_LOGD(GEN_TAG, "Battery status: 0x%02X -> Power: \"%s\", Battery: \"%s\"", 
+               status, ups_data.power.status.c_str(), ups_data.battery.status.c_str());
     }
   }
   
   // Some devices include battery level here too
-  if (len >= 3 && std::isnan(ups_data.battery_level)) {
+  if (len >= 3 && std::isnan(ups_data.battery.level)) {
     uint8_t battery = data[2];
     if (battery <= 100) {
-      ups_data.battery_level = static_cast<float>(battery);
+      ups_data.battery.level = static_cast<float>(battery);
       ESP_LOGD(GEN_TAG, "Battery status: Battery %d%%", battery);
     }
   }
@@ -393,18 +416,40 @@ void GenericHidProtocol::parse_present_status(uint8_t* data, size_t len, UpsData
   // Based on HID Power Device spec, these are common bit positions
   if (len >= 2) {
     uint8_t status = data[1];
-    ups_data.status_flags = 0;
     
-    // Standard HID Power Device status bits
-    if (status & 0x01) ups_data.status_flags |= UPS_STATUS_CHARGING;
-    if (status & 0x02) ups_data.status_flags |= UPS_STATUS_ON_BATTERY; 
-    if (status & 0x04) ups_data.status_flags |= UPS_STATUS_ONLINE;
-    if (status & 0x08) ups_data.status_flags |= UPS_STATUS_LOW_BATTERY;
-    if (status & 0x10) ups_data.status_flags |= UPS_STATUS_REPLACE_BATTERY;
-    if (status & 0x20) ups_data.status_flags |= UPS_STATUS_OVERLOAD;
-    if (status & 0x40) ups_data.status_flags |= UPS_STATUS_FAULT;
+    // Standard HID Power Device status bits - map to data structures
+    if (status & 0x01) {
+      ups_data.battery.status = "Charging";
+    }
     
-    ESP_LOGD(GEN_TAG, "Present status: 0x%02X -> flags 0x%08X", status, ups_data.status_flags);
+    if (status & 0x02) {
+      ups_data.power.status = "On Battery";
+      ups_data.power.input_voltage = NAN;
+    }
+    
+    if (status & 0x04) {
+      ups_data.power.status = "Online";
+      ups_data.power.input_voltage = parent_->get_fallback_nominal_voltage(); // Use configured fallback voltage
+    }
+    
+    if (status & 0x08) {
+      ups_data.battery.charge_low = 10.0f; // Low battery
+    }
+    
+    if (status & 0x10) {
+      ups_data.battery.status += " - Replace Battery";
+    }
+    
+    if (status & 0x20) {
+      ups_data.power.status += " - Overload";
+    }
+    
+    if (status & 0x40) {
+      ups_data.battery.status += " - Fault";
+    }
+    
+    ESP_LOGD(GEN_TAG, "Present status: 0x%02X -> Power: \"%s\", Battery: \"%s\"", 
+             status, ups_data.power.status.c_str(), ups_data.battery.status.c_str());
   }
 }
 
@@ -416,13 +461,15 @@ void GenericHidProtocol::parse_general_status(uint8_t* data, size_t len, UpsData
     
     // Different vendors use different bit patterns, try common ones
     if (byte1 & 0x01) {
-      ups_data.status_flags |= UPS_STATUS_ONLINE;
+      ups_data.power.status = "Online";
+      ups_data.power.input_voltage = parent_->get_fallback_nominal_voltage(); // Use configured fallback voltage
     }
     if (byte1 & 0x10) {
-      ups_data.status_flags |= UPS_STATUS_ON_BATTERY;
+      ups_data.power.status = "On Battery";
+      ups_data.power.input_voltage = NAN;
     }
     
-    ESP_LOGV(GEN_TAG, "General status byte: 0x%02X", byte1);
+    ESP_LOGV(GEN_TAG, "General status byte: 0x%02X -> Power: \"%s\"", byte1, ups_data.power.status.c_str());
   }
 }
 
@@ -440,10 +487,10 @@ void GenericHidProtocol::parse_voltage(uint8_t* data, size_t len, UpsData& ups_d
     // Sanity check
     if (voltage >= 80.0f && voltage <= 300.0f) {
       if (is_input) {
-        ups_data.input_voltage = voltage;
+        ups_data.power.input_voltage = voltage;
         ESP_LOGD(GEN_TAG, "Input voltage: %.1fV", voltage);
       } else {
-        ups_data.output_voltage = voltage;
+        ups_data.power.output_voltage = voltage;
         ESP_LOGD(GEN_TAG, "Output voltage: %.1fV", voltage);
       }
     }
@@ -454,12 +501,12 @@ void GenericHidProtocol::parse_load(uint8_t* data, size_t len, UpsData& ups_data
   if (len >= 2) {
     uint8_t load = data[1];
     if (load <= 100) {
-      ups_data.load_percent = static_cast<float>(load);
+      ups_data.power.load_percent = static_cast<float>(load);
       ESP_LOGD(GEN_TAG, "Load: %d%%", load);
     } else if (load <= 200) {
       // Some devices use 0-200 scale
-      ups_data.load_percent = static_cast<float>(load) / 2.0f;
-      ESP_LOGD(GEN_TAG, "Load: %.1f%% (scaled from %d)", ups_data.load_percent, load);
+      ups_data.power.load_percent = static_cast<float>(load) / 2.0f;
+      ESP_LOGD(GEN_TAG, "Load: %.1f%% (scaled from %d)", ups_data.power.load_percent, load);
     }
   }
 }
@@ -471,12 +518,12 @@ bool GenericHidProtocol::parse_unknown_report(uint8_t* data, size_t len, UpsData
   // Look for percentage values (0-100)
   for (size_t i = 1; i < len && i < 4; i++) {
     if (data[i] <= 100 && data[i] > 0) {
-      if (std::isnan(ups_data.battery_level)) {
-        ups_data.battery_level = static_cast<float>(data[i]);
+      if (std::isnan(ups_data.battery.level)) {
+        ups_data.battery.level = static_cast<float>(data[i]);
         ESP_LOGV(GEN_TAG, "Heuristic: Found possible battery level %d%% at byte %zu", data[i], i);
         found_data = true;
-      } else if (std::isnan(ups_data.load_percent)) {
-        ups_data.load_percent = static_cast<float>(data[i]);
+      } else if (std::isnan(ups_data.power.load_percent)) {
+        ups_data.power.load_percent = static_cast<float>(data[i]);
         ESP_LOGV(GEN_TAG, "Heuristic: Found possible load %d%% at byte %zu", data[i], i);
         found_data = true;
       }
@@ -492,8 +539,8 @@ bool GenericHidProtocol::parse_unknown_report(uint8_t* data, size_t len, UpsData
     if (voltage > 1000) voltage /= 10.0f;
     
     if (voltage >= 80.0f && voltage <= 300.0f) {
-      if (std::isnan(ups_data.input_voltage)) {
-        ups_data.input_voltage = voltage;
+      if (std::isnan(ups_data.power.input_voltage)) {
+        ups_data.power.input_voltage = voltage;
         ESP_LOGV(GEN_TAG, "Heuristic: Found possible voltage %.1fV at bytes %zu-%zu", 
                  voltage, i, i+1);
         found_data = true;
@@ -517,19 +564,19 @@ void GenericHidProtocol::parse_input_sensitivity(uint8_t* data, size_t len, UpsD
   // Handle both APC-style (0x35) and CyberPower-style (0x1a) with intelligent fallbacks
   switch (sensitivity_raw) {
     case 0:
-      ups_data.input_sensitivity = "high";
+      ups_data.config.input_sensitivity = "high";
       ESP_LOGI(GEN_TAG, "Generic input sensitivity (%s): high (raw: %d)", style, sensitivity_raw);
       break;
     case 1:
-      ups_data.input_sensitivity = "normal";
+      ups_data.config.input_sensitivity = "normal";
       ESP_LOGI(GEN_TAG, "Generic input sensitivity (%s): normal (raw: %d)", style, sensitivity_raw);
       break;
     case 2:
-      ups_data.input_sensitivity = "low";
+      ups_data.config.input_sensitivity = "low";
       ESP_LOGI(GEN_TAG, "Generic input sensitivity (%s): low (raw: %d)", style, sensitivity_raw);
       break;
     case 3:
-      ups_data.input_sensitivity = "auto";
+      ups_data.config.input_sensitivity = "auto";
       ESP_LOGI(GEN_TAG, "Generic input sensitivity (%s): auto (raw: %d)", style, sensitivity_raw);
       break;
     default:
@@ -544,19 +591,19 @@ void GenericHidProtocol::parse_input_sensitivity(uint8_t* data, size_t len, UpsD
           uint8_t alt_value = data[i];
           if (alt_value <= 3) {
             switch (alt_value) {
-              case 0: ups_data.input_sensitivity = "high"; break;
-              case 1: ups_data.input_sensitivity = "normal"; break;
-              case 2: ups_data.input_sensitivity = "low"; break;
-              case 3: ups_data.input_sensitivity = "auto"; break;
+              case 0: ups_data.config.input_sensitivity = "high"; break;
+              case 1: ups_data.config.input_sensitivity = "normal"; break;
+              case 2: ups_data.config.input_sensitivity = "low"; break;
+              case 3: ups_data.config.input_sensitivity = "auto"; break;
             }
             ESP_LOGI(GEN_TAG, "Generic input sensitivity (%s, alt byte[%zu]): %s (raw: %d)", 
-                     style, i, ups_data.input_sensitivity.c_str(), alt_value);
+                     style, i, ups_data.config.input_sensitivity.c_str(), alt_value);
             return;
           }
         }
         
         // Fallback to reasonable default
-        ups_data.input_sensitivity = "normal";
+        ups_data.config.input_sensitivity = "normal";
         ESP_LOGW(GEN_TAG, "Using default 'normal' sensitivity (%s) due to unexpected value: %d", 
                  style, sensitivity_raw);
       } else {
@@ -564,16 +611,16 @@ void GenericHidProtocol::parse_input_sensitivity(uint8_t* data, size_t len, UpsD
         if (sensitivity_raw <= 10) {
           // Map to nearest known value
           if (sensitivity_raw <= 3) {
-            ups_data.input_sensitivity = "high";
+            ups_data.config.input_sensitivity = "high";
           } else if (sensitivity_raw <= 6) {
-            ups_data.input_sensitivity = "normal";
+            ups_data.config.input_sensitivity = "normal";
           } else {
-            ups_data.input_sensitivity = "low";
+            ups_data.config.input_sensitivity = "low";
           }
           ESP_LOGI(GEN_TAG, "Generic input sensitivity (%s, mapped): %s (raw: %d)", 
-                   style, ups_data.input_sensitivity.c_str(), sensitivity_raw);
+                   style, ups_data.config.input_sensitivity.c_str(), sensitivity_raw);
         } else {
-          ups_data.input_sensitivity = "unknown";
+          ups_data.config.input_sensitivity = "unknown";
           ESP_LOGW(GEN_TAG, "Unknown generic sensitivity value (%s): %d", style, sensitivity_raw);
         }
       }
@@ -594,7 +641,7 @@ bool GenericHidProtocol::start_battery_test_quick() {
     uint8_t test_data[2] = {report_id, 1}; // Command value 1 = Quick test
     
     ESP_LOGD(GEN_TAG, "Trying quick battery test with report ID 0x%02X", report_id);
-    esp_err_t ret = parent_->hid_set_report(0x03, report_id, test_data, sizeof(test_data));
+    esp_err_t ret = parent_->hid_set_report(0x03, report_id, test_data, sizeof(test_data), parent_->get_protocol_timeout());
     
     if (ret == ESP_OK) {
       ESP_LOGI(GEN_TAG, "Generic quick battery test command sent with report ID 0x%02X", report_id);
@@ -619,7 +666,7 @@ bool GenericHidProtocol::start_battery_test_deep() {
     uint8_t test_data[2] = {report_id, 2}; // Command value 2 = Deep test
     
     ESP_LOGD(GEN_TAG, "Trying deep battery test with report ID 0x%02X", report_id);
-    esp_err_t ret = parent_->hid_set_report(0x03, report_id, test_data, sizeof(test_data));
+    esp_err_t ret = parent_->hid_set_report(0x03, report_id, test_data, sizeof(test_data), parent_->get_protocol_timeout());
     
     if (ret == ESP_OK) {
       ESP_LOGI(GEN_TAG, "Generic deep battery test command sent with report ID 0x%02X", report_id);
@@ -644,7 +691,7 @@ bool GenericHidProtocol::stop_battery_test() {
     uint8_t test_data[2] = {report_id, 3}; // Command value 3 = Abort test
     
     ESP_LOGD(GEN_TAG, "Trying battery test stop with report ID 0x%02X", report_id);
-    esp_err_t ret = parent_->hid_set_report(0x03, report_id, test_data, sizeof(test_data));
+    esp_err_t ret = parent_->hid_set_report(0x03, report_id, test_data, sizeof(test_data), parent_->get_protocol_timeout());
     
     if (ret == ESP_OK) {
       ESP_LOGI(GEN_TAG, "Generic battery test stop command sent with report ID 0x%02X", report_id);
@@ -669,7 +716,7 @@ bool GenericHidProtocol::start_ups_test() {
     uint8_t test_data[2] = {report_id, 1}; // Command value 1 = Start test
     
     ESP_LOGD(GEN_TAG, "Trying UPS test with report ID 0x%02X", report_id);
-    esp_err_t ret = parent_->hid_set_report(0x03, report_id, test_data, sizeof(test_data));
+    esp_err_t ret = parent_->hid_set_report(0x03, report_id, test_data, sizeof(test_data), parent_->get_protocol_timeout());
     
     if (ret == ESP_OK) {
       ESP_LOGI(GEN_TAG, "Generic UPS test command sent with report ID 0x%02X", report_id);
@@ -694,7 +741,7 @@ bool GenericHidProtocol::stop_ups_test() {
     uint8_t test_data[2] = {report_id, 0}; // Command value 0 = Stop test
     
     ESP_LOGD(GEN_TAG, "Trying UPS test stop with report ID 0x%02X", report_id);
-    esp_err_t ret = parent_->hid_set_report(0x03, report_id, test_data, sizeof(test_data));
+    esp_err_t ret = parent_->hid_set_report(0x03, report_id, test_data, sizeof(test_data), parent_->get_protocol_timeout());
     
     if (ret == ESP_OK) {
       ESP_LOGI(GEN_TAG, "Generic UPS test stop command sent with report ID 0x%02X", report_id);
@@ -708,5 +755,124 @@ bool GenericHidProtocol::stop_ups_test() {
   return false;
 }
 
+void GenericHidProtocol::read_frequency_data(UpsData &data) {
+  // Initialize frequency to NaN
+  data.power.frequency = NAN;
+  
+  // Try to read frequency from common HID report IDs used across different vendors
+  // Generic protocol attempts broader range of report IDs
+  
+  const std::vector<uint8_t> frequency_report_ids = {
+    HID_USAGE_POW_FREQUENCY,     // 0x32 - Standard HID frequency usage
+    HID_USAGE_POW_VOLTAGE,       // 0x30 - Input measurements (may include frequency)  
+    HID_USAGE_POW_CURRENT,       // 0x31 - Output measurements (may include frequency)
+    HID_USAGE_POW_OUTPUT,        // 0x1C - Output collection
+    HID_USAGE_POW_INPUT,         // 0x1A - Input collection
+    0x11, // Common alternative frequency report
+    0x0F, // Input voltage report (might contain frequency)
+    0x12, // Output voltage report (might contain frequency)
+  };
+  
+  uint8_t buffer[64];
+  size_t buffer_len;
+  
+  for (uint8_t report_id : frequency_report_ids) {
+    if (read_report(report_id, buffer, buffer_len)) {
+      float frequency_value = parse_frequency_from_report(buffer, buffer_len);
+      if (!std::isnan(frequency_value)) {
+        data.power.frequency = frequency_value;
+        ESP_LOGD(GEN_TAG, "Found frequency %.1f Hz in report 0x%02X", frequency_value, report_id);
+        return;
+      }
+    }
+  }
+  
+  ESP_LOGV(GEN_TAG, "Frequency data not available from any HID report");
+}
+
+float GenericHidProtocol::parse_frequency_from_report(uint8_t* data, size_t len) {
+  if (len < 2) {
+    return NAN;
+  }
+  
+  // Try different byte positions and formats commonly used for frequency across vendors
+  // Generic protocol uses broader heuristics than vendor-specific protocols
+  
+  // Method 1: Single byte at position 1 (simple frequency reports)
+  if (len >= 2) {
+    uint8_t freq_byte = data[1];
+    if (freq_byte >= FREQUENCY_MIN_VALID && freq_byte <= FREQUENCY_MAX_VALID) {
+      ESP_LOGD(GEN_TAG, "Found frequency %d Hz (single byte)", freq_byte);
+      return static_cast<float>(freq_byte);
+    }
+  }
+  
+  // Method 2: Check all byte positions for valid frequency values
+  for (size_t i = 1; i < len; i++) {
+    uint8_t freq_byte = data[i];
+    if ((freq_byte == 50 || freq_byte == 60) && freq_byte <= FREQUENCY_MAX_VALID) {
+      ESP_LOGD(GEN_TAG, "Found standard frequency %d Hz at byte %zu", freq_byte, i);
+      return static_cast<float>(freq_byte);
+    }
+  }
+  
+  // Method 3: 16-bit little-endian values
+  for (size_t i = 1; i <= len - 2; i++) {
+    uint16_t freq_word = data[i] | (data[i + 1] << 8);
+    if (freq_word >= FREQUENCY_MIN_VALID && freq_word <= FREQUENCY_MAX_VALID) {
+      ESP_LOGD(GEN_TAG, "Found frequency %d Hz (16-bit LE) at bytes %zu-%zu", freq_word, i, i + 1);
+      return static_cast<float>(freq_word);
+    }
+  }
+  
+  // Method 4: 16-bit big-endian values
+  for (size_t i = 1; i <= len - 2; i++) {
+    uint16_t freq_word = (data[i] << 8) | data[i + 1];
+    if (freq_word >= FREQUENCY_MIN_VALID && freq_word <= FREQUENCY_MAX_VALID) {
+      ESP_LOGD(GEN_TAG, "Found frequency %d Hz (16-bit BE) at bytes %zu-%zu", freq_word, i, i + 1);
+      return static_cast<float>(freq_word);
+    }
+  }
+  
+  // Method 5: Scaled frequencies (0.1x factor common in some devices)
+  for (size_t i = 1; i <= len - 2; i++) {
+    uint16_t freq_scaled = data[i] | (data[i + 1] << 8);
+    float freq_value = static_cast<float>(freq_scaled) / 10.0f;
+    if (freq_value >= FREQUENCY_MIN_VALID && freq_value <= FREQUENCY_MAX_VALID) {
+      ESP_LOGD(GEN_TAG, "Found scaled frequency %.1f Hz (0.1x) at bytes %zu-%zu", freq_value, i, i + 1);
+      return freq_value;
+    }
+  }
+  
+  // Method 6: Check for hundreds scaling (0.01x factor)
+  for (size_t i = 1; i <= len - 2; i++) {
+    uint16_t freq_scaled = data[i] | (data[i + 1] << 8);
+    float freq_value = static_cast<float>(freq_scaled) / 100.0f;
+    if (freq_value >= FREQUENCY_MIN_VALID && freq_value <= FREQUENCY_MAX_VALID) {
+      ESP_LOGD(GEN_TAG, "Found scaled frequency %.1f Hz (0.01x) at bytes %zu-%zu", freq_value, i, i + 1);
+      return freq_value;
+    }
+  }
+  
+  return NAN;
+}
+
 }  // namespace ups_hid
 }  // namespace esphome
+
+// Protocol Factory Self-Registration
+#include "protocol_factory.h"
+
+namespace esphome {
+namespace ups_hid {
+
+// Creator function for Generic protocol
+std::unique_ptr<UpsProtocolBase> create_generic_protocol(UpsHidComponent* parent) {
+    return std::make_unique<GenericHidProtocol>(parent);
+}
+
+} // namespace ups_hid
+} // namespace esphome
+
+// Register Generic protocol as fallback for all unknown vendors
+REGISTER_UPS_FALLBACK_PROTOCOL(generic_hid_protocol, esphome::ups_hid::create_generic_protocol, "Generic HID Protocol", "Universal HID protocol fallback for unknown UPS vendors with basic monitoring capabilities", 10);

@@ -16,7 +16,7 @@ ups_hid:
   id: ups_monitor
   update_interval: ${update_interval}
   protocol_timeout: ${protocol_timeout}
-  auto_detect_protocol: true
+  protocol: cyberpower
   simulation_mode: ${simulation_mode}
   # Uncomment if auto-detection fails:
   # usb_vendor_id: 0x0764
@@ -29,9 +29,9 @@ logger:
     ups_hid: DEBUG
     ups_hid.cyberpower: DEBUG
 
-# CyberPower-specific threshold sensors
+# CyberPower-specific sensors (complement extended_sensors.yaml)
 sensor:
-  # Battery threshold monitoring (available on CyberPower)
+  # CyberPower-specific battery threshold (not in extended pack)
   - platform: ups_hid
     ups_hid_id: ups_monitor
     name: "Battery Charge Low Threshold"
@@ -42,72 +42,37 @@ sensor:
     state_class: measurement
     accuracy_decimals: 0
 
-  - platform: ups_hid
-    ups_hid_id: ups_monitor
-    name: "Battery Runtime Low Threshold"
-    id: battery_runtime_low
-    type: battery_runtime_low
-    unit_of_measurement: "min"
-    device_class: duration
+  # CyberPower power calculation with actual HID nominal power
+  - platform: template
+    name: "UPS Load Power (CyberPower)"
+    id: ups_load_power_cp
+    unit_of_measurement: "W"
+    device_class: power
     state_class: measurement
-    accuracy_decimals: 0
+    accuracy_decimals: 1
+    lambda: |-
+      if (!std::isnan(id(load_percentage).state)) {
+        float cp_max_power = 900.0; // CP1500 default: 900W
+        
+        // Use HID nominal power if available (from extended sensors)
+        if (!std::isnan(id(ups_realpower_nominal).state)) {
+          cp_max_power = id(ups_realpower_nominal).state;
+        }
+        
+        return (cp_max_power * id(load_percentage).state) / 100.0;
+      }
+      return NAN;
+    update_interval: 30s
 
-  # CyberPower-specific timer values
-  - platform: ups_hid
-    ups_hid_id: ups_monitor
-    name: "UPS Timer Reboot"
-    id: ups_timer_reboot
-    type: ups_timer_reboot
-    unit_of_measurement: "s"
-    device_class: duration
-    state_class: measurement
-    accuracy_decimals: 0
-
-  - platform: ups_hid
-    ups_hid_id: ups_monitor
-    name: "UPS Timer Shutdown"
-    id: ups_timer_shutdown
-    type: ups_timer_shutdown
-    unit_of_measurement: "s"
-    device_class: duration
-    state_class: measurement
-    accuracy_decimals: 0
-
-  - platform: ups_hid
-    ups_hid_id: ups_monitor
-    name: "UPS Timer Start"
-    id: ups_timer_start
-    type: ups_timer_start
-    unit_of_measurement: "s"
-    device_class: duration
-    state_class: measurement
-    accuracy_decimals: 0
-
-# CyberPower-specific enhanced device info
+# CyberPower-specific text sensors (complement extended_sensors.yaml)  
 text_sensor:
-  - platform: ups_hid
-    ups_hid_id: ups_monitor
-    name: "Battery Status"
-    id: battery_status
-    type: battery_status
-
-  - platform: ups_hid
-    ups_hid_id: ups_monitor
-    name: "Battery Type"
-    id: battery_type
-    type: battery_type
-
+  # Separate battery vs UPS manufacture dates (CyberPower provides both)
   - platform: ups_hid
     ups_hid_id: ups_monitor
     name: "Battery Manufacture Date"
     id: battery_mfr_date
     type: battery_mfr_date
-
-  - platform: ups_hid
-    ups_hid_id: ups_monitor
-    name: "UPS Manufacture Date"
-    id: ups_mfr_date
-    type: ups_mfr_date
+    icon: "mdi:calendar-battery"
 
 # CyberPower-specific monitoring scripts
 script:
@@ -120,7 +85,7 @@ script:
             - "id(battery_voltage).state"
             - "id(battery_voltage_nominal).state"
             - "id(load_percentage).state"
-            - "id(ups_load_power).state"
+            - "id(ups_load_power_cp).state"
             - "id(ups_realpower_nominal).state"
             - "id(input_voltage).state"
             - "id(runtime_remaining).state"

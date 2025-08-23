@@ -95,6 +95,61 @@ sensor:
     state_class: measurement
     accuracy_decimals: 0
 
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Delay Reboot"
+    id: ups_delay_reboot
+    type: ups_delay_reboot
+    unit_of_measurement: "s"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+
+  # Enhanced dynamic timer sensors (countdown when active)
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Timer Shutdown"
+    id: ups_timer_shutdown
+    type: ups_timer_shutdown
+    unit_of_measurement: "s"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+    # Negative values indicate no active countdown
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Timer Start"
+    id: ups_timer_start
+    type: ups_timer_start
+    unit_of_measurement: "s"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+    # Negative values indicate no active countdown
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Timer Reboot"
+    id: ups_timer_reboot
+    type: ups_timer_reboot
+    unit_of_measurement: "s"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+    # Negative values indicate no active countdown
+
+  # Enhanced battery threshold monitoring
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Runtime Low Threshold"
+    id: battery_runtime_low
+    type: battery_runtime_low
+    unit_of_measurement: "min"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+
   # Calculated power consumption
   - platform: template
     name: "UPS Load Power"
@@ -142,3 +197,25 @@ text_sensor:
     name: "Input Sensitivity"
     id: input_sensitivity
     type: input_sensitivity
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Manufacture Date"
+    id: ups_manufacture_date
+    type: ups_mfr_date
+    icon: "mdi:calendar-clock"
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Status"
+    id: battery_status
+    type: battery_status
+    icon: "mdi:battery-heart"
+
+  # Additional enhanced text sensors from protocols
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Firmware Auxiliary"
+    id: firmware_aux
+    type: ups_firmware_aux
+    icon: "mdi:chip"

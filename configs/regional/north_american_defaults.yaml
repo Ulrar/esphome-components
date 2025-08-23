@@ -1,0 +1,65 @@
+# North American Voltage Defaults
+# Configuration template for North American electrical standards (NEMA)
+# Use this as a base for US/Canada installations
+
+substitutions:
+  # North American electrical standards
+  nominal_voltage: "120V"     # Standard North American single-phase voltage
+  frequency: "60Hz"           # North American frequency standard
+  
+  # Regional timezone examples (adjust for your location)
+  timezone: "America/New_York"    # Eastern Time
+  # timezone: "America/Chicago"     # Central Time
+  # timezone: "America/Denver"      # Mountain Time
+  # timezone: "America/Los_Angeles" # Pacific Time
+
+# Base UPS configuration with North American defaults
+ups_hid:
+  id: ups_monitor
+  update_interval: 30s
+  protocol_timeout: 15s
+  protocol: auto
+  fallback_nominal_voltage: ${nominal_voltage}
+  simulation_mode: false
+
+# Time configuration with North American timezone
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: ${timezone}
+    servers:
+      - "pool.ntp.org"
+      - "time.nist.gov"
+
+# Logging optimized for North American users
+logger:
+  level: INFO
+  logs:
+    ups_hid: INFO
+
+# WiFi configuration template
+wifi:
+  # Configure your WiFi credentials
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  
+  # North American WiFi channel optimization (1-11 allowed in US/Canada)
+  channel: 6
+  
+  # Enable fast connect for better reconnection
+  fast_connect: true
+  
+  # Access point fallback (if main WiFi fails)
+  ap:
+    ssid: "${friendly_name} AP"
+    password: !secret ap_password
+
+# Optional: Home Assistant API with encryption
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+# Optional: Over-the-air updates    
+ota:
+  - platform: esphome
+    password: !secret ota_password

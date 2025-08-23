@@ -38,7 +38,7 @@ ups_hid:
   id: ups_monitor
   update_interval: 10s
   protocol_timeout: 5s
-  auto_detect_protocol: true
+  protocol: auto
   simulation_mode: true
 
 # Required platform components (fix compilation errors)

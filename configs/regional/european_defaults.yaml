@@ -1,0 +1,66 @@
+# European Voltage Defaults
+# Configuration template for European electrical standards (IEC 60038)
+# Use this as a base for European installations
+
+substitutions:
+  # European electrical standards
+  nominal_voltage: "230V"     # Standard European single-phase voltage (IEC 60038)
+  frequency: "50Hz"           # European frequency standard
+  
+  # Regional timezone examples (adjust for your location)
+  timezone: "Europe/Berlin"   # Germany
+  # timezone: "Europe/London"   # United Kingdom  
+  # timezone: "Europe/Paris"    # France
+  # timezone: "Europe/Rome"     # Italy
+  # timezone: "Europe/Madrid"   # Spain
+
+# Base UPS configuration with European defaults
+ups_hid:
+  id: ups_monitor
+  update_interval: 30s
+  protocol_timeout: 15s
+  protocol: auto
+  fallback_nominal_voltage: ${nominal_voltage}
+  simulation_mode: false
+
+# Time configuration with European timezone
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: ${timezone}
+    servers:
+      - "pool.ntp.org"
+      - "time.nist.gov"
+
+# Logging optimized for European users
+logger:
+  level: INFO
+  logs:
+    ups_hid: INFO
+
+# WiFi configuration template
+wifi:
+  # Configure your WiFi credentials
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  
+  # European WiFi channel optimization (1-13 allowed in EU)
+  channel: 6
+  
+  # Enable fast connect for better reconnection
+  fast_connect: true
+  
+  # Access point fallback (if main WiFi fails)
+  ap:
+    ssid: "${friendly_name} AP"
+    password: !secret ap_password
+
+# Optional: Home Assistant API with encryption
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+# Optional: Over-the-air updates    
+ota:
+  - platform: esphome
+    password: !secret ota_password

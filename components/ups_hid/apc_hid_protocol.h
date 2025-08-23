@@ -13,7 +13,7 @@ public:
   bool detect() override;
   bool initialize() override;
   bool read_data(UpsData &data) override;
-  UpsProtocol get_protocol_type() const override { return PROTOCOL_APC_HID; }
+  DeviceInfo::DetectedProtocol get_protocol_type() const override { return DeviceInfo::PROTOCOL_APC_HID; }
   std::string get_protocol_name() const override { return "APC HID Protocol"; }
   
   // Beeper control methods
@@ -72,10 +72,18 @@ private:
   void parse_battery_runtime_low_report(const HidReport &report, UpsData &data);
   void parse_manufacture_date_report(const HidReport &report, UpsData &data, bool is_battery);
   void parse_ups_delay_shutdown_report(const HidReport &report, UpsData &data);
+  void parse_ups_delay_reboot_report(const HidReport &report, UpsData &data);
   void parse_battery_charge_threshold_report(const HidReport &report, UpsData &data, bool is_low_threshold);
   void parse_battery_chemistry_report(const HidReport &report, UpsData &data);
   void parse_test_result_report(const HidReport &report, UpsData &data);
   std::string convert_apc_date(uint16_t date_value);
+  
+  // Device model detection and configuration
+  void detect_nominal_power_rating(const std::string& model_name, UpsData &data);
+  
+  // Frequency reading methods
+  void read_frequency_data(UpsData &data);
+  float parse_frequency_from_report(const HidReport &report);
 };
 
 } // namespace ups_hid

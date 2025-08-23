@@ -147,7 +147,7 @@ ups_hid:
   usb_vendor_id: 0x051D     # APC vendor ID (auto-detected if omitted)  
   usb_product_id: 0x0002    # Optional: specific product ID
   protocol_timeout: 15s     # USB communication timeout
-  auto_detect_protocol: true # Enable automatic protocol detection
+  protocol: auto             # Protocol selection: auto, apc, cyberpower, generic
   simulation_mode: false    # Set to true for testing without UPS
     
 # Define sensors (each sensor requires separate platform entry)
@@ -427,7 +427,7 @@ ups_hid:
   usb_product_id: 0x0002         # USB Product ID (hex), optional
   
   # Protocol Settings
-  auto_detect_protocol: true     # Enable automatic protocol detection
+  protocol: auto                 # Protocol selection: auto, apc, cyberpower, generic
   protocol_timeout: 15s          # Communication timeout (5s-60s)
   
   # Testing Options
@@ -794,13 +794,45 @@ logger:
 
 ## Advanced Configuration
 
-### Custom Protocol Priority
+### Protocol Selection
+
+You can now manually select which UPS protocol to use instead of relying on auto-detection:
 
 ```yaml
 ups_hid:
-  auto_detect_protocol: false    # Disable auto-detection
-  # Component will use APC HID Protocol by default
+  protocol: auto                 # Default: automatic selection based on USB vendor ID
+  # protocol: apc                # Force APC HID protocol
+  # protocol: cyberpower         # Force CyberPower HID protocol  
+  # protocol: generic            # Force Generic HID protocol
 ```
+
+**Protocol Options:**
+
+- **`auto`** (default): Automatically select protocol based on USB vendor ID
+  - APC devices (0x051D): Uses APC HID Protocol
+  - CyberPower (0x0764): Uses CyberPower HID Protocol
+  - Unknown devices: Falls back to Generic HID Protocol
+
+- **`apc`**: Force APC HID Protocol
+  - Use for APC devices: Back-UPS ES, Smart-UPS series
+  - Comprehensive sensor support with 20+ HID reports
+  - Battery and beeper testing (device-dependent)
+
+- **`cyberpower`**: Force CyberPower HID Protocol
+  - Use for CyberPower CP series devices
+  - Enhanced sensor support with 12+ additional sensors
+  - Runtime scaling and advanced thresholds
+
+- **`generic`**: Force Generic HID Protocol
+  - Universal fallback for unknown UPS brands
+  - Basic 5-sensor support with intelligent detection
+  - Limited beeper/testing functionality
+
+**When to use manual selection:**
+- Testing different protocols on the same device
+- Troubleshooting protocol detection issues
+- Using non-standard USB vendor/product IDs
+- Forcing generic protocol for maximum compatibility
 
 ### Performance Tuning
 
@@ -846,7 +878,7 @@ logger:
 **Solutions**:
 - Check if your UPS model is in the supported devices list
 - Enable debug logging: `logger: level: DEBUG`
-- Try manual protocol selection: `auto_detect_protocol: false`
+- Try manual protocol selection: `protocol: generic` or `protocol: apc`
 - Verify USB vendor/product IDs in logs
 
 #### 3. "Failed to acquire USB mutex" errors

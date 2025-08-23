@@ -32,7 +32,7 @@ void UpsHidButton::press_action() {
 
   // Get the current protocol from the parent component
   UpsData ups_data = parent_->get_ups_data();
-  if (ups_data.detected_protocol == PROTOCOL_UNKNOWN) {
+  if (ups_data.device.detected_protocol == DeviceInfo::PROTOCOL_UNKNOWN) {
     ESP_LOGW(BUTTON_TAG, "UPS protocol not detected, cannot execute button action");
     return;
   }

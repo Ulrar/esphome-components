@@ -14,7 +14,8 @@ CONF_SIMULATION_MODE = "simulation_mode"
 CONF_USB_VENDOR_ID = "usb_vendor_id"
 CONF_USB_PRODUCT_ID = "usb_product_id"
 CONF_PROTOCOL_TIMEOUT = "protocol_timeout"
-CONF_AUTO_DETECT_PROTOCOL = "auto_detect_protocol"
+CONF_PROTOCOL = "protocol"
+CONF_FALLBACK_NOMINAL_VOLTAGE = "fallback_nominal_voltage"
 CONF_UPS_HID_ID = "ups_hid_id"
 
 # Known UPS vendor IDs for validation
@@ -96,6 +97,18 @@ def validate_update_interval(value):
     return value
 
 
+def validate_fallback_nominal_voltage(value):
+    """Validate fallback nominal voltage for international compatibility."""
+    value = cv.voltage(value)
+    
+    if value < 80.0:
+        raise cv.Invalid("Fallback nominal voltage must be at least 80V")
+    if value > 300.0:
+        raise cv.Invalid("Fallback nominal voltage must be at most 300V")
+    
+    return value
+
+
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
@@ -107,8 +120,12 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(
                 CONF_PROTOCOL_TIMEOUT, default="15s"
             ): validate_protocol_timeout,
-            # Auto-detection is now always attempted first, this controls fallback behavior
-            cv.Optional(CONF_AUTO_DETECT_PROTOCOL, default=True): cv.boolean,
+            # Protocol selection: auto (default), apc, cyberpower, generic
+            cv.Optional(CONF_PROTOCOL, default="auto"): cv.one_of(
+                "auto", "apc", "cyberpower", "generic", lower=True
+            ),
+            # Fallback nominal voltage (European 230V default for international compatibility)
+            cv.Optional(CONF_FALLBACK_NOMINAL_VOLTAGE, default="230V"): validate_fallback_nominal_voltage,
         }
     ).extend(cv.polling_component_schema("30s"))
      .extend(cv.COMPONENT_SCHEMA),
@@ -129,4 +146,5 @@ async def to_code(config):
         cg.add(var.set_usb_product_id(config[CONF_USB_PRODUCT_ID]))
     
     cg.add(var.set_protocol_timeout(config[CONF_PROTOCOL_TIMEOUT]))
-    cg.add(var.set_auto_detect_protocol(config[CONF_AUTO_DETECT_PROTOCOL]))
+    cg.add(var.set_protocol_selection(config[CONF_PROTOCOL]))
+    cg.add(var.set_fallback_nominal_voltage(config[CONF_FALLBACK_NOMINAL_VOLTAGE]))
