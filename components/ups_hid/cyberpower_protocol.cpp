@@ -1,6 +1,7 @@
 #include "cyberpower_protocol.h"
 #include "ups_hid.h"
 #include "hid_constants.h"
+#include "ups_constants.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/portmacro.h"
@@ -24,7 +25,7 @@ bool CyberPowerProtocol::detect() {
   }
   
   // Give device time to initialize after connection (same as APC)
-  vTaskDelay(pdMS_TO_TICKS(100));
+  vTaskDelay(pdMS_TO_TICKS(timing::USB_INITIALIZATION_DELAY_MS));
   
   // Test multiple report IDs that are known to work with CyberPower devices
   // Based on NUT debug logs
@@ -54,7 +55,7 @@ bool CyberPowerProtocol::detect() {
     }
     
     // Small delay between attempts
-    vTaskDelay(pdMS_TO_TICKS(50));
+    vTaskDelay(pdMS_TO_TICKS(timing::REPORT_RETRY_DELAY_MS));
   }
   
   ESP_LOGD(CP_TAG, "CyberPower HID protocol not detected");
@@ -252,7 +253,7 @@ bool CyberPowerProtocol::read_hid_report(uint8_t report_id, HidReport &report) {
     return false;
   }
   
-  uint8_t buffer[64]; // Maximum HID report size
+  uint8_t buffer[limits::MAX_HID_REPORT_SIZE]; // Maximum HID report size
   size_t buffer_len = sizeof(buffer);
   esp_err_t ret;
   
@@ -260,7 +261,7 @@ bool CyberPowerProtocol::read_hid_report(uint8_t report_id, HidReport &report) {
   ESP_LOGD(CP_TAG, "Attempting to read report 0x%02X from parent device", report_id);
   
   // CyberPower devices primarily use Feature Reports (0x03) - based on NUT debug logs
-  ret = parent_->hid_get_report(0x03, report_id, buffer, &buffer_len, parent_->get_protocol_timeout());
+  ret = parent_->hid_get_report(HID_REPORT_TYPE_FEATURE, report_id, buffer, &buffer_len, parent_->get_protocol_timeout());
   if (ret == ESP_OK && buffer_len > 0) {
     report.report_id = report_id;
     report.data.assign(buffer, buffer + buffer_len);
@@ -279,7 +280,7 @@ bool CyberPowerProtocol::read_hid_report(uint8_t report_id, HidReport &report) {
   
   // Fallback: try Input Report (0x01) for real-time data
   buffer_len = sizeof(buffer);
-  ret = parent_->hid_get_report(0x01, report_id, buffer, &buffer_len, parent_->get_protocol_timeout());
+  ret = parent_->hid_get_report(HID_REPORT_TYPE_INPUT, report_id, buffer, &buffer_len, parent_->get_protocol_timeout());
   if (ret == ESP_OK && buffer_len > 0) {
     report.report_id = report_id;
     report.data.assign(buffer, buffer + buffer_len);
@@ -307,7 +308,7 @@ void CyberPowerProtocol::parse_battery_runtime_report(const HidReport &report, U
   uint16_t runtime_seconds = report.data[2] | (report.data[3] << 8);
   
   // Clamp battery to 100% like NUT does
-  data.battery.level = static_cast<float>(battery_percentage > 100 ? 100 : battery_percentage);
+  data.battery.level = static_cast<float>(battery_percentage > battery::MAX_LEVEL_PERCENT ? battery::MAX_LEVEL_PERCENT : battery_percentage);
   
   // CRITICAL FIX: Convert runtime from seconds to minutes
   // CyberPower reports runtime in seconds, but ESPHome expects minutes
@@ -335,7 +336,7 @@ void CyberPowerProtocol::parse_battery_voltage_report(const HidReport &report, U
   // Current raw value: 0xF0 (240) should become 24V
   // So scaling factor is 24/240 = 0.1 (divide by 10)
   uint8_t voltage_raw = report.data[1];
-  data.battery.voltage = static_cast<float>(voltage_raw) / 10.0f; // Scale by 0.1
+  data.battery.voltage = static_cast<float>(voltage_raw) / battery::VOLTAGE_SCALE_FACTOR; // Scale by 0.1
   
   ESP_LOGD(CP_TAG, "Battery voltage: %.1fV (raw: 0x%02X = %d)", 
            data.battery.voltage, voltage_raw, voltage_raw);
@@ -361,28 +362,28 @@ void CyberPowerProtocol::parse_present_status_report(const HidReport &report, Up
   // Update power status based on AC presence
   if (ac_present && !discharging) {
     data.power.input_voltage = parent_->get_fallback_nominal_voltage();  // Use configured fallback voltage when AC present
-    data.power.status = "Online";
+    data.power.status = status::ONLINE;
   } else {
     data.power.input_voltage = NAN;     // No AC input
-    data.power.status = "On Battery";
+    data.power.status = status::ON_BATTERY;
   }
   
   // Set battery status based on charging/discharging state
   if (charging) {
-    data.battery.status = "Charging";
+    data.battery.status = battery_status::CHARGING;
   } else if (discharging || !ac_present) {
-    data.battery.status = "Discharging";
+    data.battery.status = battery_status::DISCHARGING;
   } else if (fully_charged) {
-    data.battery.status = "Fully Charged";
+    data.battery.status = battery_status::FULLY_CHARGED;
   } else {
-    data.battery.status = "Normal";
+    data.battery.status = battery_status::NORMAL;
   }
   
   // Set low battery indicators
   if (low_battery || time_limit_expired) {
-    data.battery.charge_low = 10.0f;  // Indicate low battery threshold
+    data.battery.charge_low = battery::LOW_THRESHOLD_PERCENT;  // Indicate low battery threshold
     if (time_limit_expired) {
-      data.battery.status += " - Time Limit Expired";
+      data.battery.status += battery_status::TIME_LIMIT_EXPIRED_SUFFIX;
     }
   }
   
@@ -469,7 +470,7 @@ void CyberPowerProtocol::parse_battery_voltage_nominal_report(const HidReport &r
   // NUT debug shows: Report 0x09, Value: 24 (ConfigVoltage)
   // Some CyberPower models report in decivolts (240 = 24.0V)
   uint8_t voltage_raw = report.data[1];
-  data.battery.voltage_nominal = static_cast<float>(voltage_raw) / 10.0f;
+  data.battery.voltage_nominal = static_cast<float>(voltage_raw) / battery::VOLTAGE_SCALE_FACTOR;
   
   ESP_LOGD(CP_TAG, "Battery voltage nominal: %.0fV (raw: 0x%02X = %d)", 
            data.battery.voltage_nominal, voltage_raw, voltage_raw);
@@ -486,17 +487,17 @@ void CyberPowerProtocol::parse_beeper_status_report(const HidReport &report, Ups
   
   // Map NUT values: 1=disabled, 2=enabled, 3=muted
   switch (beeper_raw) {
-    case 1:
-      data.config.beeper_status = "disabled";
+    case beeper::CONTROL_DISABLE:
+      data.config.beeper_status = beeper::ACTION_DISABLE;
       break;
-    case 2:
+    case beeper::CONTROL_ENABLE:
       data.config.beeper_status = "enabled";
       break;
-    case 3:
-      data.config.beeper_status = "muted";
+    case beeper::CONTROL_MUTE:
+      data.config.beeper_status = beeper::ACTION_MUTE;
       break;
     default:
-      data.config.beeper_status = "unknown";
+      data.config.beeper_status = sensitivity::UNKNOWN;
       break;
   }
   
@@ -548,8 +549,8 @@ void CyberPowerProtocol::parse_delay_shutdown_report(const HidReport &report, Up
   uint16_t delay_raw_unsigned = report.data[1] | (report.data[2] << 8);
   if (delay_raw_unsigned == 0xFFFF) {
     // When disabled, use NUT default for CyberPower (DEFAULT_OFFDELAY_CPS = 60)
-    data.config.delay_shutdown = 60;  
-    ESP_LOGD(CP_TAG, "UPS delay shutdown: 60 seconds (default, raw: 0xFFFF)");
+    data.config.delay_shutdown = defaults::CYBERPOWER_SHUTDOWN_DELAY_SEC;  
+    ESP_LOGD(CP_TAG, "UPS delay shutdown: %d seconds (default, raw: 0xFFFF)", defaults::CYBERPOWER_SHUTDOWN_DELAY_SEC);
   } else {
     int16_t delay_raw = static_cast<int16_t>(delay_raw_unsigned);
     data.config.delay_shutdown = delay_raw;
@@ -568,8 +569,8 @@ void CyberPowerProtocol::parse_delay_start_report(const HidReport &report, UpsDa
   uint16_t delay_raw_unsigned = report.data[1] | (report.data[2] << 8);
   if (delay_raw_unsigned == 0xFFFF) {
     // When disabled, use NUT default for CyberPower (DEFAULT_ONDELAY_CPS = 120)
-    data.config.delay_start = 120;
-    ESP_LOGD(CP_TAG, "UPS delay start: 120 seconds (default, raw: 0xFFFF)");
+    data.config.delay_start = defaults::CYBERPOWER_STARTUP_DELAY_SEC;
+    ESP_LOGD(CP_TAG, "UPS delay start: %d seconds (default, raw: 0xFFFF)", defaults::CYBERPOWER_STARTUP_DELAY_SEC);
   } else {
     int16_t delay_raw = static_cast<int16_t>(delay_raw_unsigned);
     data.config.delay_start = delay_raw;
@@ -603,15 +604,15 @@ void CyberPowerProtocol::parse_input_sensitivity_report(const HidReport &report,
   // DYNAMIC SENSITIVITY MAPPING: Handle known CyberPower values with intelligent fallbacks
   switch (sensitivity_raw) {
     case 0:
-      data.config.input_sensitivity = "high";
+      data.config.input_sensitivity = sensitivity::HIGH;
       ESP_LOGI(CP_TAG, "CyberPower input sensitivity: high (raw: %d)", sensitivity_raw);
       break;
     case 1:
-      data.config.input_sensitivity = "normal";
+      data.config.input_sensitivity = sensitivity::NORMAL;
       ESP_LOGI(CP_TAG, "CyberPower input sensitivity: normal (raw: %d)", sensitivity_raw);
       break;
     case 2:
-      data.config.input_sensitivity = "low";
+      data.config.input_sensitivity = sensitivity::LOW;
       ESP_LOGI(CP_TAG, "CyberPower input sensitivity: low (raw: %d)", sensitivity_raw);
       break;
     default:
@@ -629,9 +630,9 @@ void CyberPowerProtocol::parse_input_sensitivity_report(const HidReport &report,
           if (alt_value <= 2) {
             sensitivity_raw = alt_value;
             switch (sensitivity_raw) {
-              case 0: data.config.input_sensitivity = "high"; break;
-              case 1: data.config.input_sensitivity = "normal"; break;
-              case 2: data.config.input_sensitivity = "low"; break;
+              case 0: data.config.input_sensitivity = sensitivity::HIGH; break;
+              case 1: data.config.input_sensitivity = sensitivity::NORMAL; break;
+              case 2: data.config.input_sensitivity = sensitivity::LOW; break;
             }
             ESP_LOGI(CP_TAG, "CyberPower input sensitivity (alt parsing): %s (raw: %d)", 
                      data.config.input_sensitivity.c_str(), sensitivity_raw);
@@ -640,15 +641,15 @@ void CyberPowerProtocol::parse_input_sensitivity_report(const HidReport &report,
         }
         
         // Fallback for problematic values
-        data.config.input_sensitivity = "normal";
+        data.config.input_sensitivity = sensitivity::NORMAL;
         ESP_LOGW(CP_TAG, "Using default 'normal' sensitivity due to unexpected value: %d", sensitivity_raw);
       } else {
         // Values 3-99 - extend mapping for future CyberPower models
         if (sensitivity_raw == 3) {
-          data.config.input_sensitivity = "auto";
+          data.config.input_sensitivity = sensitivity::AUTO;
           ESP_LOGI(CP_TAG, "CyberPower input sensitivity: auto (raw: %d)", sensitivity_raw);
         } else {
-          data.config.input_sensitivity = "unknown";
+          data.config.input_sensitivity = sensitivity::UNKNOWN;
           ESP_LOGW(CP_TAG, "Unknown CyberPower sensitivity value: %d - please report this for future support", 
                    sensitivity_raw);
         }
@@ -840,7 +841,7 @@ void CyberPowerProtocol::read_missing_dynamic_values(UpsData &data) {
   // NUT shows: ups.timer.shutdown: -60, ups.timer.start: -60
   data.test.timer_shutdown = -data.config.delay_shutdown;  // Negative indicates no active countdown
   data.test.timer_start = -data.config.delay_start;        // Negative indicates no active countdown  
-  data.test.timer_reboot = -10;  // CyberPower doesn't have separate reboot timer, use default
+  data.test.timer_reboot = defaults::REBOOT_TIMER_DEFAULT;  // CyberPower doesn't have separate reboot timer, use default
   
   ESP_LOGD(CP_TAG, "Completed reading CyberPower missing dynamic values");
 }
@@ -916,7 +917,7 @@ void CyberPowerProtocol::parse_battery_chemistry_report(const HidReport &report,
       data.battery.type = "LiPoly";
       break;
     default:
-      data.battery.type = "Unknown";
+      data.battery.type = battery_status::UNKNOWN;
       ESP_LOGW(CP_TAG, "Unknown CyberPower battery chemistry value: %d", chemistry_raw);
       break;
   }
@@ -965,9 +966,9 @@ bool CyberPowerProtocol::beeper_enable() {
   // NUT shows: "UPS.PowerSummary.AudibleAlarmControl, Type: Feature, ReportID: 0x0c"
   ESP_LOGD(CP_TAG, "Trying beeper enable with report ID 0x%02X", BEEPER_STATUS_REPORT_ID);
   
-  uint8_t beeper_data[2] = {BEEPER_STATUS_REPORT_ID, 0x02};  // Report ID, Value=2 (enabled)
+  uint8_t beeper_data[2] = {BEEPER_STATUS_REPORT_ID, beeper::CONTROL_ENABLE};  // Report ID, Value=2 (enabled)
   
-  esp_err_t ret = parent_->hid_set_report(0x03, BEEPER_STATUS_REPORT_ID, beeper_data, sizeof(beeper_data), parent_->get_protocol_timeout());
+  esp_err_t ret = parent_->hid_set_report(HID_REPORT_TYPE_FEATURE, BEEPER_STATUS_REPORT_ID, beeper_data, sizeof(beeper_data), parent_->get_protocol_timeout());
   if (ret == ESP_OK) {
     ESP_LOGI(CP_TAG, "CyberPower beeper enabled successfully with report ID 0x%02X", BEEPER_STATUS_REPORT_ID);
     return true;
@@ -983,9 +984,9 @@ bool CyberPowerProtocol::beeper_disable() {
   // CYBERPOWER DEVICE SPECIFIC: From NUT debug, device uses report ID 0x0c
   ESP_LOGD(CP_TAG, "Trying beeper disable with report ID 0x%02X", BEEPER_STATUS_REPORT_ID);
   
-  uint8_t beeper_data[2] = {BEEPER_STATUS_REPORT_ID, 0x01};  // Report ID, Value=1 (disabled)
+  uint8_t beeper_data[2] = {BEEPER_STATUS_REPORT_ID, beeper::CONTROL_DISABLE};  // Report ID, Value=1 (disabled)
   
-  esp_err_t ret = parent_->hid_set_report(0x03, BEEPER_STATUS_REPORT_ID, beeper_data, sizeof(beeper_data), parent_->get_protocol_timeout());
+  esp_err_t ret = parent_->hid_set_report(HID_REPORT_TYPE_FEATURE, BEEPER_STATUS_REPORT_ID, beeper_data, sizeof(beeper_data), parent_->get_protocol_timeout());
   if (ret == ESP_OK) {
     ESP_LOGI(CP_TAG, "CyberPower beeper disabled successfully with report ID 0x%02X", BEEPER_STATUS_REPORT_ID);
     return true;
@@ -1002,9 +1003,9 @@ bool CyberPowerProtocol::beeper_mute() {
   // - Acknowledges and silences current active alarms  
   // - Beeper may still sound for new critical events
   // - Different from DISABLE (1) which turns off beeper completely
-  uint8_t beeper_data[2] = {0x0c, 0x03};  // Report ID, Value=3 (muted/acknowledged)
+  uint8_t beeper_data[2] = {BEEPER_STATUS_REPORT_ID, beeper::CONTROL_MUTE};  // Report ID, Value=3 (muted/acknowledged)
   
-  esp_err_t ret = parent_->hid_set_report(0x03, BEEPER_STATUS_REPORT_ID, beeper_data, sizeof(beeper_data), parent_->get_protocol_timeout());
+  esp_err_t ret = parent_->hid_set_report(HID_REPORT_TYPE_FEATURE, BEEPER_STATUS_REPORT_ID, beeper_data, sizeof(beeper_data), parent_->get_protocol_timeout());
   if (ret == ESP_OK) {
     ESP_LOGI(CP_TAG, "CyberPower beeper muted (current alarms acknowledged) successfully");
     return true;
@@ -1055,8 +1056,8 @@ bool CyberPowerProtocol::beeper_test() {
   
   // Step 4: Restore original beeper state
   ESP_LOGI(CP_TAG, "Step 4: Restoring original beeper state: %d", original_state);
-  uint8_t restore_data[2] = {0x0c, original_state};
-  esp_err_t ret = parent_->hid_set_report(0x03, BEEPER_STATUS_REPORT_ID, restore_data, sizeof(restore_data), parent_->get_protocol_timeout());
+  uint8_t restore_data[2] = {BEEPER_STATUS_REPORT_ID, original_state};
+  esp_err_t ret = parent_->hid_set_report(HID_REPORT_TYPE_FEATURE, BEEPER_STATUS_REPORT_ID, restore_data, sizeof(restore_data), parent_->get_protocol_timeout());
   
   if (ret == ESP_OK) {
     ESP_LOGI(CP_TAG, "CyberPower beeper test sequence completed successfully");
@@ -1073,9 +1074,9 @@ bool CyberPowerProtocol::start_battery_test_quick() {
   
   // CyberPower uses UPS.Output.Test path, HID report ID 0x14
   // Quick test command value is 1 (from NUT test_write_info)
-  uint8_t test_data[2] = {0x14, 1}; // Report ID 0x14, value 1 = Quick test
+  uint8_t test_data[2] = {TEST_RESULT_REPORT_ID, test::COMMAND_QUICK}; // Report ID 0x14, value 1 = Quick test
   
-  esp_err_t ret = parent_->hid_set_report(0x03, 0x14, test_data, 2, parent_->get_protocol_timeout());
+  esp_err_t ret = parent_->hid_set_report(HID_REPORT_TYPE_FEATURE, TEST_RESULT_REPORT_ID, test_data, 2, parent_->get_protocol_timeout());
   if (ret == ESP_OK) {
     ESP_LOGI(CP_TAG, "Quick battery test command sent successfully");
     return true;
@@ -1089,9 +1090,9 @@ bool CyberPowerProtocol::start_battery_test_deep() {
   ESP_LOGI(CP_TAG, "Initiating deep battery test");
   
   // Deep test command value is 2 (from NUT test_write_info)
-  uint8_t test_data[2] = {0x14, 2}; // Report ID 0x14, value 2 = Deep test
+  uint8_t test_data[2] = {TEST_RESULT_REPORT_ID, test::COMMAND_DEEP}; // Report ID 0x14, value 2 = Deep test
   
-  esp_err_t ret = parent_->hid_set_report(0x03, 0x14, test_data, 2, parent_->get_protocol_timeout());
+  esp_err_t ret = parent_->hid_set_report(HID_REPORT_TYPE_FEATURE, TEST_RESULT_REPORT_ID, test_data, 2, parent_->get_protocol_timeout());
   if (ret == ESP_OK) {
     ESP_LOGI(CP_TAG, "Deep battery test command sent successfully");
     return true;
@@ -1105,9 +1106,9 @@ bool CyberPowerProtocol::stop_battery_test() {
   ESP_LOGI(CP_TAG, "Stopping battery test");
   
   // Abort test command value is 3 (from NUT test_write_info)
-  uint8_t test_data[2] = {0x14, 3}; // Report ID 0x14, value 3 = Abort test
+  uint8_t test_data[2] = {TEST_RESULT_REPORT_ID, test::COMMAND_ABORT}; // Report ID 0x14, value 3 = Abort test
   
-  esp_err_t ret = parent_->hid_set_report(0x03, 0x14, test_data, 2, parent_->get_protocol_timeout());
+  esp_err_t ret = parent_->hid_set_report(HID_REPORT_TYPE_FEATURE, TEST_RESULT_REPORT_ID, test_data, 2, parent_->get_protocol_timeout());
   if (ret == ESP_OK) {
     ESP_LOGI(CP_TAG, "Battery test stop command sent successfully");
     return true;

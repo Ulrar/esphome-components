@@ -1,4 +1,5 @@
 #include "button.h"
+#include "ups_constants.h"
 #include "esphome/core/log.h"
 
 namespace esphome {
@@ -17,7 +18,7 @@ void UpsHidButton::dump_config() {
 
 void UpsHidButton::press_action() {
   if (!parent_) {
-    ESP_LOGE(BUTTON_TAG, "No UPS HID parent component set");
+    ESP_LOGE(BUTTON_TAG, log_messages::NO_PARENT_COMPONENT);
     return;
   }
 
@@ -49,13 +50,13 @@ void UpsHidButton::press_action() {
   if (button_type_ == BUTTON_TYPE_BEEPER) {
     ESP_LOGI(BUTTON_TAG, "Executing beeper action: %s", beeper_action_.c_str());
     
-    if (beeper_action_ == "enable") {
+    if (beeper_action_ == beeper::ACTION_ENABLE) {
       success = active_protocol->beeper_enable();
-    } else if (beeper_action_ == "disable") {
+    } else if (beeper_action_ == beeper::ACTION_DISABLE) {
       success = active_protocol->beeper_disable();
-    } else if (beeper_action_ == "mute") {
+    } else if (beeper_action_ == beeper::ACTION_MUTE) {
       success = active_protocol->beeper_mute();
-    } else if (beeper_action_ == "test") {
+    } else if (beeper_action_ == beeper::ACTION_TEST) {
       success = active_protocol->beeper_test();
     } else {
       ESP_LOGE(BUTTON_TAG, "Unknown beeper action: %s", beeper_action_.c_str());
@@ -71,15 +72,15 @@ void UpsHidButton::press_action() {
   else if (button_type_ == BUTTON_TYPE_TEST) {
     ESP_LOGI(BUTTON_TAG, "Executing test action: %s", test_action_.c_str());
     
-    if (test_action_ == "battery_quick") {
+    if (test_action_ == test::ACTION_BATTERY_QUICK) {
       success = active_protocol->start_battery_test_quick();
-    } else if (test_action_ == "battery_deep") {
+    } else if (test_action_ == test::ACTION_BATTERY_DEEP) {
       success = active_protocol->start_battery_test_deep();
-    } else if (test_action_ == "battery_stop") {
+    } else if (test_action_ == test::ACTION_BATTERY_STOP) {
       success = active_protocol->stop_battery_test();
-    } else if (test_action_ == "ups_test") {
+    } else if (test_action_ == test::ACTION_UPS_TEST) {
       success = active_protocol->start_ups_test();
-    } else if (test_action_ == "ups_stop") {
+    } else if (test_action_ == test::ACTION_UPS_STOP) {
       success = active_protocol->stop_ups_test();
     } else {
       ESP_LOGE(BUTTON_TAG, "Unknown test action: %s", test_action_.c_str());

@@ -1,4 +1,5 @@
 #include "ups_hid.h"
+#include "ups_constants.h"
 #include "ups_vendors.h"
 #include "usb_transport_factory.h"
 #include "simulated_transport.h"
@@ -18,37 +19,37 @@ namespace esphome {
 namespace ups_hid {
 
 void UpsHidComponent::setup() {
-  ESP_LOGCONFIG(TAG, "Setting up UPS HID Component...");
+  ESP_LOGCONFIG(TAG, log_messages::SETTING_UP);
   
   if (!initialize_transport()) {
-    ESP_LOGE(TAG, "Failed to initialize transport");
+    ESP_LOGE(TAG, log_messages::TRANSPORT_INIT_FAILED);
     mark_failed();
     return;
   }
   
   // Protocol detection is deferred to update() method to handle asynchronous USB enumeration
-  ESP_LOGCONFIG(TAG, "UPS HID Component setup complete - waiting for USB device connection");
+  ESP_LOGCONFIG(TAG, log_messages::SETUP_COMPLETE);
 }
 
 void UpsHidComponent::update() {
   if (!transport_ || !transport_->is_connected()) {
     // Device not connected yet - normal during startup or after disconnection
-    ESP_LOGD(TAG, "USB transport not connected - waiting for device");
+    ESP_LOGD(TAG, log_messages::WAITING_FOR_DEVICE);
     return;
   }
   
   // Check if protocol detection is needed
   if (!active_protocol_) {
-    ESP_LOGI(TAG, "USB device connected - attempting protocol detection");
+    ESP_LOGI(TAG, log_messages::ATTEMPTING_DETECTION);
     if (detect_protocol()) {
-      ESP_LOGI(TAG, "UPS protocol detected and configured successfully");
+      ESP_LOGI(TAG, log_messages::PROTOCOL_DETECTED);
       consecutive_failures_ = 0;
     } else {
       consecutive_failures_++;
-      ESP_LOGW(TAG, "Failed to detect UPS protocol (attempt #%u)", consecutive_failures_);
+      ESP_LOGW(TAG, log_messages::DETECTION_FAILED, consecutive_failures_);
       
       if (consecutive_failures_ > max_consecutive_failures_) {
-        ESP_LOGE(TAG, "Too many consecutive protocol detection failures, marking component as failed");
+        ESP_LOGE(TAG, log_messages::TOO_MANY_FAILURES);
         mark_failed();
       }
       return;
@@ -62,10 +63,10 @@ void UpsHidComponent::update() {
     last_successful_read_ = millis();
   } else {
     consecutive_failures_++;
-    ESP_LOGW(TAG, "Failed to read UPS data (failure #%u)", consecutive_failures_);
+    ESP_LOGW(TAG, log_messages::READ_FAILED, consecutive_failures_);
     
     if (consecutive_failures_ > max_consecutive_failures_) {
-      ESP_LOGW(TAG, "Too many consecutive read failures - resetting protocol to retry detection");
+      ESP_LOGW(TAG, log_messages::RESETTING_PROTOCOL);
       active_protocol_.reset();  // Force protocol re-detection on next update
       consecutive_failures_ = 0;
     }
@@ -74,7 +75,7 @@ void UpsHidComponent::update() {
 
 void UpsHidComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "UPS HID Component:");
-  ESP_LOGCONFIG(TAG, "  Simulation Mode: %s", simulation_mode_ ? "YES" : "NO");
+  ESP_LOGCONFIG(TAG, "  Simulation Mode: %s", simulation_mode_ ? status::YES : status::NO);
   
   if (transport_ && transport_->is_connected()) {
     ESP_LOGCONFIG(TAG, "  USB Vendor ID: 0x%04X", transport_->get_vendor_id());
@@ -86,15 +87,15 @@ void UpsHidComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Update Interval: %u ms", get_update_interval());
 
   if (transport_ && transport_->is_connected()) {
-    ESP_LOGCONFIG(TAG, "  Status: Connected");
+    ESP_LOGCONFIG(TAG, "  Status: %s", status::CONNECTED);
     if (active_protocol_) {
       ESP_LOGCONFIG(TAG, "  Active Protocol: %s", 
                    active_protocol_->get_protocol_name().c_str());
     } else {
-      ESP_LOGCONFIG(TAG, "  Protocol Status: Detection pending");
+      ESP_LOGCONFIG(TAG, "  Protocol Status: %s", status::DETECTION_PENDING);
     }
   } else {
-    ESP_LOGCONFIG(TAG, "  Status: Disconnected");
+    ESP_LOGCONFIG(TAG, "  Status: %s", status::DISCONNECTED);
   }
 
   ESP_LOGCONFIG(TAG, "  Registered Sensors: %zu", sensors_.size());
@@ -133,11 +134,11 @@ bool UpsHidComponent::is_connected() const {
 }
 
 uint16_t UpsHidComponent::get_vendor_id() const {
-  return transport_ ? transport_->get_vendor_id() : 0;
+  return transport_ ? transport_->get_vendor_id() : defaults::AUTO_DETECT_VENDOR_ID;
 }
 
 uint16_t UpsHidComponent::get_product_id() const {
-  return transport_ ? transport_->get_product_id() : 0;
+  return transport_ ? transport_->get_product_id() : defaults::AUTO_DETECT_PRODUCT_ID;
 }
 
 // Core implementation methods
@@ -256,43 +257,43 @@ void UpsHidComponent::update_sensors() {
     // Extract appropriate value based on sensor type
     float value = NAN;
     
-    if (type == "battery_level" && ups_data_.battery.is_valid()) {
+    if (type == sensor_type::BATTERY_LEVEL && ups_data_.battery.is_valid()) {
       value = ups_data_.battery.level;
-    } else if (type == "battery_voltage" && !std::isnan(ups_data_.battery.voltage)) {
+    } else if (type == sensor_type::BATTERY_VOLTAGE && !std::isnan(ups_data_.battery.voltage)) {
       value = ups_data_.battery.voltage;
-    } else if (type == "battery_voltage_nominal" && !std::isnan(ups_data_.battery.voltage_nominal)) {
+    } else if (type == sensor_type::BATTERY_VOLTAGE_NOMINAL && !std::isnan(ups_data_.battery.voltage_nominal)) {
       value = ups_data_.battery.voltage_nominal;
-    } else if (type == "runtime" && !std::isnan(ups_data_.battery.runtime_minutes)) {
+    } else if (type == sensor_type::RUNTIME && !std::isnan(ups_data_.battery.runtime_minutes)) {
       value = ups_data_.battery.runtime_minutes;
-    } else if (type == "input_voltage" && !std::isnan(ups_data_.power.input_voltage)) {
+    } else if (type == sensor_type::INPUT_VOLTAGE && !std::isnan(ups_data_.power.input_voltage)) {
       value = ups_data_.power.input_voltage;
-    } else if (type == "input_voltage_nominal" && !std::isnan(ups_data_.power.input_voltage_nominal)) {
+    } else if (type == sensor_type::INPUT_VOLTAGE_NOMINAL && !std::isnan(ups_data_.power.input_voltage_nominal)) {
       value = ups_data_.power.input_voltage_nominal;
-    } else if (type == "output_voltage" && !std::isnan(ups_data_.power.output_voltage)) {
+    } else if (type == sensor_type::OUTPUT_VOLTAGE && !std::isnan(ups_data_.power.output_voltage)) {
       value = ups_data_.power.output_voltage;
-    } else if (type == "load_percent" && !std::isnan(ups_data_.power.load_percent)) {
+    } else if (type == sensor_type::LOAD_PERCENT && !std::isnan(ups_data_.power.load_percent)) {
       value = ups_data_.power.load_percent;
-    } else if (type == "frequency" && !std::isnan(ups_data_.power.frequency)) {
+    } else if (type == sensor_type::FREQUENCY && !std::isnan(ups_data_.power.frequency)) {
       value = ups_data_.power.frequency;
-    } else if (type == "input_transfer_low" && !std::isnan(ups_data_.power.input_transfer_low)) {
+    } else if (type == sensor_type::INPUT_TRANSFER_LOW && !std::isnan(ups_data_.power.input_transfer_low)) {
       value = ups_data_.power.input_transfer_low;
-    } else if (type == "input_transfer_high" && !std::isnan(ups_data_.power.input_transfer_high)) {
+    } else if (type == sensor_type::INPUT_TRANSFER_HIGH && !std::isnan(ups_data_.power.input_transfer_high)) {
       value = ups_data_.power.input_transfer_high;
-    } else if (type == "battery_runtime_low" && !std::isnan(ups_data_.battery.runtime_low_threshold)) {
-      value = ups_data_.battery.runtime_low_threshold;
-    } else if (type == "ups_realpower_nominal" && !std::isnan(ups_data_.power.realpower_nominal)) {
+    } else if (type == sensor_type::BATTERY_RUNTIME_LOW && !std::isnan(ups_data_.battery.runtime_low)) {
+      value = ups_data_.battery.runtime_low;
+    } else if (type == sensor_type::UPS_REALPOWER_NOMINAL && !std::isnan(ups_data_.power.realpower_nominal)) {
       value = ups_data_.power.realpower_nominal;
-    } else if (type == "ups_delay_shutdown" && !std::isnan(ups_data_.config.delay_shutdown)) {
+    } else if (type == sensor_type::UPS_DELAY_SHUTDOWN && !std::isnan(ups_data_.config.delay_shutdown)) {
       value = ups_data_.config.delay_shutdown;
-    } else if (type == "ups_delay_start" && !std::isnan(ups_data_.config.delay_start)) {
+    } else if (type == sensor_type::UPS_DELAY_START && !std::isnan(ups_data_.config.delay_start)) {
       value = ups_data_.config.delay_start;
-    } else if (type == "ups_delay_reboot" && !std::isnan(ups_data_.config.delay_reboot)) {
+    } else if (type == sensor_type::UPS_DELAY_REBOOT && !std::isnan(ups_data_.config.delay_reboot)) {
       value = ups_data_.config.delay_reboot;
-    } else if (type == "ups_timer_reboot" && ups_data_.test.timer_reboot != -1) {
+    } else if (type == sensor_type::UPS_TIMER_REBOOT && ups_data_.test.timer_reboot != -1) {
       value = ups_data_.test.timer_reboot;
-    } else if (type == "ups_timer_shutdown" && ups_data_.test.timer_shutdown != -1) {
+    } else if (type == sensor_type::UPS_TIMER_SHUTDOWN && ups_data_.test.timer_shutdown != -1) {
       value = ups_data_.test.timer_shutdown;
-    } else if (type == "ups_timer_start" && ups_data_.test.timer_start != -1) {
+    } else if (type == sensor_type::UPS_TIMER_START && ups_data_.test.timer_start != -1) {
       value = ups_data_.test.timer_start;
     }
     
@@ -308,11 +309,11 @@ void UpsHidComponent::update_sensors() {
     
     bool state = false;
     
-    if (type == "online" && ups_data_.power.input_voltage_valid()) {
+    if (type == binary_sensor_type::ONLINE && ups_data_.power.input_voltage_valid()) {
       state = true;
-    } else if (type == "on_battery" && ups_data_.power.input_voltage_valid()) {
+    } else if (type == binary_sensor_type::ON_BATTERY && ups_data_.power.input_voltage_valid()) {
       state = false; // Opposite of online
-    } else if (type == "low_battery") {
+    } else if (type == binary_sensor_type::LOW_BATTERY) {
       state = ups_data_.battery.is_low();
     }
     
@@ -326,25 +327,25 @@ void UpsHidComponent::update_sensors() {
     
     std::string value = "";
     
-    if (type == "model" && !ups_data_.device.model.empty()) {
+    if (type == text_sensor_type::MODEL && !ups_data_.device.model.empty()) {
       value = ups_data_.device.model;
-    } else if (type == "manufacturer" && !ups_data_.device.manufacturer.empty()) {
+    } else if (type == text_sensor_type::MANUFACTURER && !ups_data_.device.manufacturer.empty()) {
       value = ups_data_.device.manufacturer;
-    } else if (type == "serial_number" && !ups_data_.device.serial_number.empty()) {
+    } else if (type == text_sensor_type::SERIAL_NUMBER && !ups_data_.device.serial_number.empty()) {
       value = ups_data_.device.serial_number;
-    } else if (type == "firmware_version" && !ups_data_.device.firmware_version.empty()) {
+    } else if (type == text_sensor_type::FIRMWARE_VERSION && !ups_data_.device.firmware_version.empty()) {
       value = ups_data_.device.firmware_version;
-    } else if (type == "battery_status" && !ups_data_.battery.status.empty()) {
+    } else if (type == text_sensor_type::BATTERY_STATUS && !ups_data_.battery.status.empty()) {
       value = ups_data_.battery.status;
-    } else if (type == "ups_test_result" && !ups_data_.test.ups_test_result.empty()) {
+    } else if (type == text_sensor_type::UPS_TEST_RESULT && !ups_data_.test.ups_test_result.empty()) {
       value = ups_data_.test.ups_test_result;
-    } else if (type == "ups_beeper_status" && !ups_data_.config.beeper_status.empty()) {
+    } else if (type == text_sensor_type::UPS_BEEPER_STATUS && !ups_data_.config.beeper_status.empty()) {
       value = ups_data_.config.beeper_status;
-    } else if (type == "input_sensitivity" && !ups_data_.config.input_sensitivity.empty()) {
+    } else if (type == text_sensor_type::INPUT_SENSITIVITY && !ups_data_.config.input_sensitivity.empty()) {
       value = ups_data_.config.input_sensitivity;
-    } else if (type == "status" && !ups_data_.power.status.empty()) {
+    } else if (type == text_sensor_type::STATUS && !ups_data_.power.status.empty()) {
       value = ups_data_.power.status;
-    } else if (type == "protocol") {
+    } else if (type == text_sensor_type::PROTOCOL) {
       value = get_protocol_name();
     }
     
@@ -452,7 +453,7 @@ std::string UpsHidComponent::get_protocol_name() const {
   if (active_protocol_) {
     return active_protocol_->get_protocol_name();
   }
-  return "None";
+  return protocol::NONE;
 }
 
 

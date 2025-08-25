@@ -1,5 +1,6 @@
 #include "apc_hid_protocol.h"
 #include "hid_constants.h"
+#include "ups_constants.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 #include <cstring>
@@ -35,7 +36,7 @@ static const uint8_t APC_REPORT_ID_SENSITIVITY = 0x35;    // Input sensitivity (
 
 // APC-specific date conversion (hex-as-decimal format)
 static std::string convert_apc_date(uint32_t apc_date) {
-  if (apc_date == 0) return "Unknown";
+  if (apc_date == 0) return status::UNKNOWN;
   
   // APC uses hex-as-decimal format, e.g., 0x102202 = 10/22/02
   uint8_t month = (apc_date >> 16) & 0xFF;
@@ -63,7 +64,7 @@ bool ApcHidProtocol::detect() {
   }
   
   // Give device time to initialize after connection
-  vTaskDelay(pdMS_TO_TICKS(100));
+  vTaskDelay(pdMS_TO_TICKS(timing::USB_INITIALIZATION_DELAY_MS));
   
   // Try key report IDs based on NUT analysis - these are the critical ones
   const uint8_t test_report_ids[] = {
@@ -92,7 +93,7 @@ bool ApcHidProtocol::detect() {
     }
     
     // Small delay between attempts
-    vTaskDelay(pdMS_TO_TICKS(50));
+    vTaskDelay(pdMS_TO_TICKS(timing::REPORT_RETRY_DELAY_MS));
   }
   
   ESP_LOGD(APC_HID_TAG, "APC HID Protocol detection failed - no reports responded");
@@ -351,17 +352,17 @@ void ApcHidProtocol::parse_status_report(const HidReport &report, UpsData &data)
   // Update power status based on AC presence and discharging
   if (ac_present && !discharging) {
     data.power.input_voltage = parent_->get_fallback_nominal_voltage();  // Use configured fallback voltage when AC present
-    data.power.status = "Online";
+    data.power.status = status::ONLINE;
   } else {
     data.power.input_voltage = NAN;     // No AC input
-    data.power.status = "On Battery";
+    data.power.status = status::ON_BATTERY;
   }
   
   // Update battery status
   if (charging) {
-    data.battery.status = "Charging";
+    data.battery.status = battery_status::CHARGING;
   } else if (discharging) {
-    data.battery.status = "Discharging";
+    data.battery.status = battery_status::DISCHARGING;
   } else {
     data.battery.status = "Not Charging";
   }
@@ -388,7 +389,7 @@ void ApcHidProtocol::parse_status_report(const HidReport &report, UpsData &data)
   if (report.data.size() >= 4) {
     uint8_t shutdown_byte = report.data[3];
     if (shutdown_byte > 0) {
-      data.battery.charge_low = 10.0f;  // Indicate low battery threshold
+      data.battery.charge_low = battery::LOW_THRESHOLD_PERCENT;  // Indicate low battery threshold
     }
   }
   
@@ -461,7 +462,7 @@ void ApcHidProtocol::parse_voltage_report(const HidReport &report, UpsData &data
   float voltage_scaled;
   if (voltage_raw > 1000) {
     // Assume raw value needs scaling (e.g., 1367 → 136.7V)
-    voltage_scaled = voltage_raw / 10.0f;
+    voltage_scaled = voltage_raw / battery::VOLTAGE_SCALE_FACTOR;
   } else {
     voltage_scaled = static_cast<float>(voltage_raw);
   }
@@ -613,24 +614,24 @@ void ApcHidProtocol::parse_present_status_report(const HidReport &report, UpsDat
   // Update power status based on AC presence and discharging
   if (ac_present && !discharging) {
     data.power.input_voltage = parent_->get_fallback_nominal_voltage();  // Use configured fallback voltage when AC present
-    data.power.status = "Online";
+    data.power.status = status::ONLINE;
   } else {
     data.power.input_voltage = NAN;     // No AC input
-    data.power.status = "On Battery";
+    data.power.status = status::ON_BATTERY;
   }
   
   // Update battery status
   if (charging) {
-    data.battery.status = "Charging";
+    data.battery.status = battery_status::CHARGING;
   } else if (discharging) {
-    data.battery.status = "Discharging";
+    data.battery.status = battery_status::DISCHARGING;
   } else {
     data.battery.status = "Normal";
   }
   
   // Handle battery issues
   if (below_capacity || shutdown_imminent) {
-    data.battery.charge_low = 10.0f;  // Indicate low battery threshold
+    data.battery.charge_low = battery::LOW_THRESHOLD_PERCENT;  // Indicate low battery threshold
     if (shutdown_imminent) {
       data.battery.status += " - Shutdown Imminent";
     }
@@ -1175,7 +1176,7 @@ void ApcHidProtocol::parse_battery_voltage_nominal_report(const HidReport &repor
   // Data format: [ID, volt_low, volt_high] - 16-bit little endian
   // CRITICAL FIX: Raw value 1200 needs to be scaled to 12.0V (divide by 100)
   uint16_t voltage_raw = report.data[1] | (report.data[2] << 8);
-  data.battery.voltage_nominal = static_cast<float>(voltage_raw) / 100.0f;
+  data.battery.voltage_nominal = static_cast<float>(voltage_raw) / battery::MAX_LEVEL_PERCENT;
   
   ESP_LOGI(APC_HID_TAG, "APC Battery voltage nominal: %.1fV (raw: 0x%02X%02X = %d, scaled from %d)", 
            data.battery.voltage_nominal, report.data[2], report.data[1], voltage_raw, voltage_raw);
@@ -1193,20 +1194,20 @@ void ApcHidProtocol::parse_battery_voltage_actual_report(const HidReport &report
   uint16_t voltage_raw = report.data[1] | (report.data[2] << 8);
   
   // Try different scaling factors to match NUT value of ~13.67V
-  float voltage_candidate1 = static_cast<float>(voltage_raw) / 100.0f;  // Same as nominal
-  float voltage_candidate2 = static_cast<float>(voltage_raw) / 10.0f;   // Less scaling
+  float voltage_candidate1 = static_cast<float>(voltage_raw) / battery::MAX_LEVEL_PERCENT;  // Same as nominal
+  float voltage_candidate2 = static_cast<float>(voltage_raw) / battery::VOLTAGE_SCALE_FACTOR;   // Less scaling
   float voltage_candidate3 = static_cast<float>(voltage_raw);           // No scaling
   
   // Choose the one closest to expected battery voltage range (10-15V)
-  if (voltage_candidate1 >= 10.0f && voltage_candidate1 <= 20.0f) {
+  if (voltage_candidate1 >= battery::VOLTAGE_SCALE_FACTOR && voltage_candidate1 <= 20.0f) {
     data.battery.voltage = voltage_candidate1;
     ESP_LOGI(APC_HID_TAG, "APC Battery voltage: %.2fV (raw: 0x%02X%02X = %d, scaled /100)", 
              data.battery.voltage, report.data[2], report.data[1], voltage_raw);
-  } else if (voltage_candidate2 >= 10.0f && voltage_candidate2 <= 20.0f) {
+  } else if (voltage_candidate2 >= battery::VOLTAGE_SCALE_FACTOR && voltage_candidate2 <= 20.0f) {
     data.battery.voltage = voltage_candidate2;
     ESP_LOGI(APC_HID_TAG, "APC Battery voltage: %.2fV (raw: 0x%02X%02X = %d, scaled /10)", 
              data.battery.voltage, report.data[2], report.data[1], voltage_raw);
-  } else if (voltage_candidate3 >= 10.0f && voltage_candidate3 <= 20.0f) {
+  } else if (voltage_candidate3 >= battery::VOLTAGE_SCALE_FACTOR && voltage_candidate3 <= 20.0f) {
     data.battery.voltage = voltage_candidate3;
     ESP_LOGI(APC_HID_TAG, "APC Battery voltage: %.2fV (raw: 0x%02X%02X = %d, no scaling)", 
              data.battery.voltage, report.data[2], report.data[1], voltage_raw);
@@ -1419,7 +1420,7 @@ void ApcHidProtocol::parse_battery_chemistry_report(const HidReport &report, Ups
       data.battery.type = "LiPoly";
       break;
     default:
-      data.battery.type = "Unknown";
+      data.battery.type = battery_status::UNKNOWN;
       ESP_LOGW(APC_HID_TAG, "Unknown APC battery chemistry value: %d", chemistry_raw);
       break;
   }
@@ -1440,7 +1441,7 @@ bool ApcHidProtocol::beeper_enable() {
     uint8_t report_id = report_ids_to_try[i];
     ESP_LOGD(APC_HID_TAG, "Trying beeper enable with report ID 0x%02X", report_id);
     
-    uint8_t beeper_data[2] = {report_id, 0x02};  // Report ID, Value=2 (enabled)
+    uint8_t beeper_data[2] = {report_id, beeper::CONTROL_ENABLE};  // Report ID, Value=2 (enabled)
     
     esp_err_t ret = parent_->hid_set_report(0x03, report_id, beeper_data, sizeof(beeper_data), parent_->get_protocol_timeout());
     if (ret == ESP_OK) {
@@ -1467,7 +1468,7 @@ bool ApcHidProtocol::beeper_disable() {
     uint8_t report_id = report_ids_to_try[i];
     ESP_LOGD(APC_HID_TAG, "Trying beeper disable with report ID 0x%02X", report_id);
     
-    uint8_t beeper_data[2] = {report_id, 0x01};  // Report ID, Value=1 (disabled)
+    uint8_t beeper_data[2] = {report_id, beeper::CONTROL_DISABLE};  // Report ID, Value=1 (disabled)
     
     esp_err_t ret = parent_->hid_set_report(0x03, report_id, beeper_data, sizeof(beeper_data), parent_->get_protocol_timeout());
     if (ret == ESP_OK) {
@@ -1497,7 +1498,7 @@ bool ApcHidProtocol::beeper_mute() {
     uint8_t report_id = report_ids_to_try[i];
     ESP_LOGD(APC_HID_TAG, "Trying beeper mute (acknowledge alarms) with report ID 0x%02X", report_id);
     
-    uint8_t beeper_data[2] = {report_id, 0x03};  // Report ID, Value=3 (muted/acknowledged)
+    uint8_t beeper_data[2] = {report_id, beeper::CONTROL_MUTE};  // Report ID, Value=3 (muted/acknowledged)
     
     esp_err_t ret = parent_->hid_set_report(0x03, report_id, beeper_data, sizeof(beeper_data), parent_->get_protocol_timeout());
     if (ret == ESP_OK) {
@@ -1522,7 +1523,7 @@ bool ApcHidProtocol::beeper_test() {
     return false;
   }
   
-  uint8_t original_state = (current_report.data.size() >= 2) ? current_report.data[1] : 0x02;
+  uint8_t original_state = (current_report.data.size() >= 2) ? current_report.data[1] : beeper::CONTROL_ENABLE;
   ESP_LOGI(APC_HID_TAG, "Original beeper state: %d", original_state);
   
   // For APC beeper test, we need to:
@@ -1585,7 +1586,7 @@ bool ApcHidProtocol::start_battery_test_quick() {
   
   // For supported models: Based on NUT debug logs, APC uses report ID 0x52 for battery test
   // Command value 1 = Quick test (based on NUT test_write_info struct)
-  uint8_t test_data[2] = {0x52, 1};
+  uint8_t test_data[2] = {0x52, test::COMMAND_QUICK};
   
   esp_err_t ret = parent_->hid_set_report(0x03, 0x52, test_data, sizeof(test_data), parent_->get_protocol_timeout());
   if (ret == ESP_OK) {
@@ -1611,7 +1612,7 @@ bool ApcHidProtocol::start_battery_test_deep() {
   
   // For supported models: Based on NUT debug logs, APC uses report ID 0x52 for battery test
   // Command value 2 = Deep test (based on NUT test_write_info struct)
-  uint8_t test_data[2] = {0x52, 2};
+  uint8_t test_data[2] = {0x52, test::COMMAND_DEEP};
   
   esp_err_t ret = parent_->hid_set_report(0x03, 0x52, test_data, sizeof(test_data), parent_->get_protocol_timeout());
   if (ret == ESP_OK) {
@@ -1637,7 +1638,7 @@ bool ApcHidProtocol::stop_battery_test() {
   
   // For supported models: Based on NUT debug logs, APC uses report ID 0x52 for battery test
   // Command value 3 = Abort test (based on NUT test_write_info struct)
-  uint8_t test_data[2] = {0x52, 3};
+  uint8_t test_data[2] = {0x52, test::COMMAND_ABORT};
   
   esp_err_t ret = parent_->hid_set_report(0x03, 0x52, test_data, sizeof(test_data), parent_->get_protocol_timeout());
   if (ret == ESP_OK) {
@@ -1847,7 +1848,7 @@ float ApcHidProtocol::parse_frequency_from_report(const HidReport &report) {
   // Method 4: Scaled frequency (multiply by 0.1 for devices reporting in 0.1 Hz units)
   if (report.data.size() >= 3) {
     uint16_t freq_scaled = report.data[1] | (report.data[2] << 8);
-    float freq_value = static_cast<float>(freq_scaled) / 10.0f;
+    float freq_value = static_cast<float>(freq_scaled) / battery::VOLTAGE_SCALE_FACTOR;
     ESP_LOGV(APC_HID_TAG, "Method 4 - Testing scaled frequency: raw=%d, scaled=%.1f - Range check: %s", 
              freq_scaled, freq_value,
              (freq_value >= FREQUENCY_MIN_VALID && freq_value <= FREQUENCY_MAX_VALID) ? "PASS" : "FAIL");
@@ -1860,7 +1861,7 @@ float ApcHidProtocol::parse_frequency_from_report(const HidReport &report) {
   // Method 5: APC-specific frequency encoding - scale by 0.01 (some APC models use centihz)
   if (report.data.size() >= 3) {
     uint16_t freq_scaled = report.data[1] | (report.data[2] << 8);
-    float freq_value = static_cast<float>(freq_scaled) / 100.0f;
+    float freq_value = static_cast<float>(freq_scaled) / battery::MAX_LEVEL_PERCENT;
     ESP_LOGV(APC_HID_TAG, "Method 5 - Testing APC centihz frequency: raw=%d, scaled=%.2f - Range check: %s", 
              freq_scaled, freq_value,
              (freq_value >= FREQUENCY_MIN_VALID && freq_value <= FREQUENCY_MAX_VALID) ? "PASS" : "FAIL");
@@ -1873,7 +1874,7 @@ float ApcHidProtocol::parse_frequency_from_report(const HidReport &report) {
   // Method 6: Try big-endian centihz scaling (some APC devices)
   if (report.data.size() >= 3) {
     uint16_t freq_scaled = (report.data[1] << 8) | report.data[2];
-    float freq_value = static_cast<float>(freq_scaled) / 100.0f;
+    float freq_value = static_cast<float>(freq_scaled) / battery::MAX_LEVEL_PERCENT;
     ESP_LOGV(APC_HID_TAG, "Method 6 - Testing APC big-endian centihz: raw=%d, scaled=%.2f - Range check: %s", 
              freq_scaled, freq_value,
              (freq_value >= FREQUENCY_MIN_VALID && freq_value <= FREQUENCY_MAX_VALID) ? "PASS" : "FAIL");

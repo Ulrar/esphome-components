@@ -1,6 +1,7 @@
 #include "generic_hid_protocol.h"
 #include "ups_hid.h"
 #include "hid_constants.h"
+#include "ups_constants.h"
 #include "esphome/core/log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -55,7 +56,7 @@ bool GenericHidProtocol::detect() {
   }
   
   // Try common report IDs to detect HID Power Device
-  uint8_t buffer[8];
+  uint8_t buffer[limits::MIN_HID_REPORT_SIZE];
   size_t buffer_len;
   
   for (uint8_t report_id : COMMON_REPORT_IDS) {
@@ -92,7 +93,7 @@ bool GenericHidProtocol::detect() {
     }
     
     // Small delay to avoid overwhelming the device
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(timing::EXTENDED_DISCOVERY_DELAY_MS));
   }
   
   ESP_LOGD(GEN_TAG, "No standard HID Power Device reports found");
@@ -135,7 +136,7 @@ bool GenericHidProtocol::read_data(UpsData &data) {
   ESP_LOGV(GEN_TAG, "Reading Generic HID UPS data...");
   
   bool success = false;
-  uint8_t buffer[64];
+  uint8_t buffer[limits::MAX_HID_REPORT_SIZE];
   size_t buffer_len;
   
   // Try to read known report types in priority order
@@ -211,7 +212,7 @@ bool GenericHidProtocol::read_data(UpsData &data) {
   
   // Set generic manufacturer/model if not already set
   if (data.device.manufacturer.empty()) {
-    data.device.manufacturer = "Generic";
+    data.device.manufacturer = protocol::GENERIC;
   }
   if (data.device.model.empty()) {
     uint16_t vid = parent_->get_vendor_id();
@@ -224,7 +225,7 @@ bool GenericHidProtocol::read_data(UpsData &data) {
   // Ensure we have at least basic power status
   if (success && data.power.status.empty()) {
     // If we got data but no power status, assume online
-    data.power.status = "Online";
+    data.power.status = status::ONLINE;
     data.power.input_voltage = parent_->get_fallback_nominal_voltage(); // Use configured fallback voltage
   }
   
@@ -237,7 +238,7 @@ bool GenericHidProtocol::read_data(UpsData &data) {
 void GenericHidProtocol::enumerate_reports() {
   ESP_LOGD(GEN_TAG, "Enumerating HID reports...");
   
-  uint8_t buffer[64];
+  uint8_t buffer[limits::MAX_HID_REPORT_SIZE];
   size_t buffer_len;
   int discovered_count = 0;
   
@@ -277,11 +278,11 @@ void GenericHidProtocol::enumerate_reports() {
       ESP_LOGV(GEN_TAG, "Found Feature report 0x%02X (%zu bytes)", id, buffer_len);
     }
     
-    vTaskDelay(pdMS_TO_TICKS(5));
+    vTaskDelay(pdMS_TO_TICKS(timing::REPORT_DISCOVERY_DELAY_MS));
   }
   
   // If we found enough reports, skip extended search
-  if (discovered_count >= 3) {
+  if (discovered_count >= limits::MAX_DISCOVERY_ATTEMPTS) {
     ESP_LOGD(GEN_TAG, "Found %d reports, skipping extended search", discovered_count);
     return;
   }
@@ -296,7 +297,7 @@ void GenericHidProtocol::enumerate_reports() {
     }
     
     // Limit total discovery time
-    if (discovered_count >= 10) {
+    if (discovered_count >= limits::MAX_EXTENDED_DISCOVERY_ATTEMPTS) {
       break;
     }
     
@@ -309,7 +310,7 @@ void GenericHidProtocol::enumerate_reports() {
       ESP_LOGV(GEN_TAG, "Found Input report 0x%02X (%zu bytes)", id, buffer_len);
     }
     
-    vTaskDelay(pdMS_TO_TICKS(5));
+    vTaskDelay(pdMS_TO_TICKS(timing::REPORT_DISCOVERY_DELAY_MS));
   }
   
   ESP_LOGD(GEN_TAG, "Enumeration complete: found %d reports", discovered_count);
@@ -318,7 +319,7 @@ void GenericHidProtocol::enumerate_reports() {
 bool GenericHidProtocol::read_report(uint8_t report_id, uint8_t* buffer, size_t& buffer_len) {
   // Try Input report first if available (real-time data)
   if (available_input_reports_.count(report_id)) {
-    buffer_len = 64;
+    buffer_len = limits::MAX_HID_REPORT_SIZE;
     esp_err_t ret = parent_->hid_get_report(HID_REPORT_TYPE_INPUT, report_id, buffer, &buffer_len, parent_->get_protocol_timeout());
     if (ret == ESP_OK && buffer_len > 0) {
       ESP_LOGV(GEN_TAG, "Read Input report 0x%02X: %zu bytes", report_id, buffer_len);
@@ -328,7 +329,7 @@ bool GenericHidProtocol::read_report(uint8_t report_id, uint8_t* buffer, size_t&
   
   // Try Feature report (static/configuration data)
   if (available_feature_reports_.count(report_id)) {
-    buffer_len = 64;
+    buffer_len = limits::MAX_HID_REPORT_SIZE;
     esp_err_t ret = parent_->hid_get_report(HID_REPORT_TYPE_FEATURE, report_id, buffer, &buffer_len, parent_->get_protocol_timeout());
     if (ret == ESP_OK && buffer_len > 0) {
       ESP_LOGV(GEN_TAG, "Read Feature report 0x%02X: %zu bytes", report_id, buffer_len);
@@ -349,9 +350,9 @@ void GenericHidProtocol::parse_power_summary(uint8_t* data, size_t len, UpsData&
     if (battery <= 100) {
       ups_data.battery.level = static_cast<float>(battery);
       ESP_LOGD(GEN_TAG, "Power summary: Battery %d%%", battery);
-    } else if (battery <= 200 && battery > 100) {
+    } else if (battery <= battery::ALTERNATIVE_PERCENTAGE_SCALE && battery > 100) {
       // Some devices use 0-200 scale
-      ups_data.battery.level = static_cast<float>(battery) / 2.0f;
+      ups_data.battery.level = static_cast<float>(battery) / (battery::ALTERNATIVE_PERCENTAGE_SCALE / battery::MAX_LEVEL_PERCENT);
       ESP_LOGD(GEN_TAG, "Power summary: Battery %.1f%% (scaled from %d)", ups_data.battery.level, battery);
     }
   }
@@ -375,21 +376,21 @@ void GenericHidProtocol::parse_battery_status(uint8_t* data, size_t len, UpsData
     if (status != 0xFF && status != 0x00) { // Valid status
       // Update power status
       if (status & 0x01) {
-        ups_data.power.status = "Online";
+        ups_data.power.status = status::ONLINE;
         ups_data.power.input_voltage = parent_->get_fallback_nominal_voltage(); // Use configured fallback voltage
       }
       if (status & 0x02) {
-        ups_data.power.status = "On Battery";
+        ups_data.power.status = status::ON_BATTERY;
         ups_data.power.input_voltage = NAN;
       }
       
       // Update battery status
       if (status & 0x08) {
-        ups_data.battery.status = "Charging";
+        ups_data.battery.status = battery_status::CHARGING;
       }
       
       if (status & 0x04) {
-        ups_data.battery.charge_low = 10.0f; // Low battery
+        ups_data.battery.charge_low = battery::LOW_THRESHOLD_PERCENT; // Low battery
       }
       
       if (status & 0x10) {
@@ -419,21 +420,21 @@ void GenericHidProtocol::parse_present_status(uint8_t* data, size_t len, UpsData
     
     // Standard HID Power Device status bits - map to data structures
     if (status & 0x01) {
-      ups_data.battery.status = "Charging";
+      ups_data.battery.status = battery_status::CHARGING;
     }
     
     if (status & 0x02) {
-      ups_data.power.status = "On Battery";
+      ups_data.power.status = status::ON_BATTERY;
       ups_data.power.input_voltage = NAN;
     }
     
     if (status & 0x04) {
-      ups_data.power.status = "Online";
+      ups_data.power.status = status::ONLINE;
       ups_data.power.input_voltage = parent_->get_fallback_nominal_voltage(); // Use configured fallback voltage
     }
     
     if (status & 0x08) {
-      ups_data.battery.charge_low = 10.0f; // Low battery
+      ups_data.battery.charge_low = battery::LOW_THRESHOLD_PERCENT; // Low battery
     }
     
     if (status & 0x10) {
@@ -461,11 +462,11 @@ void GenericHidProtocol::parse_general_status(uint8_t* data, size_t len, UpsData
     
     // Different vendors use different bit patterns, try common ones
     if (byte1 & 0x01) {
-      ups_data.power.status = "Online";
+      ups_data.power.status = status::ONLINE;
       ups_data.power.input_voltage = parent_->get_fallback_nominal_voltage(); // Use configured fallback voltage
     }
     if (byte1 & 0x10) {
-      ups_data.power.status = "On Battery";
+      ups_data.power.status = status::ON_BATTERY;
       ups_data.power.input_voltage = NAN;
     }
     
@@ -485,7 +486,7 @@ void GenericHidProtocol::parse_voltage(uint8_t* data, size_t len, UpsData& ups_d
     }
     
     // Sanity check
-    if (voltage >= 80.0f && voltage <= 300.0f) {
+    if (voltage >= voltage::MIN_VALID_VOLTAGE && voltage <= voltage::MAX_VALID_VOLTAGE) {
       if (is_input) {
         ups_data.power.input_voltage = voltage;
         ESP_LOGD(GEN_TAG, "Input voltage: %.1fV", voltage);
@@ -503,9 +504,9 @@ void GenericHidProtocol::parse_load(uint8_t* data, size_t len, UpsData& ups_data
     if (load <= 100) {
       ups_data.power.load_percent = static_cast<float>(load);
       ESP_LOGD(GEN_TAG, "Load: %d%%", load);
-    } else if (load <= 200) {
+    } else if (load <= battery::ALTERNATIVE_PERCENTAGE_SCALE) {
       // Some devices use 0-200 scale
-      ups_data.power.load_percent = static_cast<float>(load) / 2.0f;
+      ups_data.power.load_percent = static_cast<float>(load) / (battery::ALTERNATIVE_PERCENTAGE_SCALE / battery::MAX_LEVEL_PERCENT);
       ESP_LOGD(GEN_TAG, "Load: %.1f%% (scaled from %d)", ups_data.power.load_percent, load);
     }
   }
@@ -538,7 +539,7 @@ bool GenericHidProtocol::parse_unknown_report(uint8_t* data, size_t len, UpsData
     // Try direct and scaled
     if (voltage > 1000) voltage /= 10.0f;
     
-    if (voltage >= 80.0f && voltage <= 300.0f) {
+    if (voltage >= voltage::MIN_VALID_VOLTAGE && voltage <= voltage::MAX_VALID_VOLTAGE) {
       if (std::isnan(ups_data.power.input_voltage)) {
         ups_data.power.input_voltage = voltage;
         ESP_LOGV(GEN_TAG, "Heuristic: Found possible voltage %.1fV at bytes %zu-%zu", 
@@ -564,20 +565,20 @@ void GenericHidProtocol::parse_input_sensitivity(uint8_t* data, size_t len, UpsD
   // Handle both APC-style (0x35) and CyberPower-style (0x1a) with intelligent fallbacks
   switch (sensitivity_raw) {
     case 0:
-      ups_data.config.input_sensitivity = "high";
-      ESP_LOGI(GEN_TAG, "Generic input sensitivity (%s): high (raw: %d)", style, sensitivity_raw);
+      ups_data.config.input_sensitivity = sensitivity::HIGH;
+      ESP_LOGI(GEN_TAG, "Generic input sensitivity (%s): %s (raw: %d)", style, sensitivity::HIGH, sensitivity_raw);
       break;
     case 1:
-      ups_data.config.input_sensitivity = "normal";
-      ESP_LOGI(GEN_TAG, "Generic input sensitivity (%s): normal (raw: %d)", style, sensitivity_raw);
+      ups_data.config.input_sensitivity = sensitivity::NORMAL;
+      ESP_LOGI(GEN_TAG, "Generic input sensitivity (%s): %s (raw: %d)", style, sensitivity::NORMAL, sensitivity_raw);
       break;
     case 2:
-      ups_data.config.input_sensitivity = "low";
-      ESP_LOGI(GEN_TAG, "Generic input sensitivity (%s): low (raw: %d)", style, sensitivity_raw);
+      ups_data.config.input_sensitivity = sensitivity::LOW;
+      ESP_LOGI(GEN_TAG, "Generic input sensitivity (%s): %s (raw: %d)", style, sensitivity::LOW, sensitivity_raw);
       break;
     case 3:
-      ups_data.config.input_sensitivity = "auto";
-      ESP_LOGI(GEN_TAG, "Generic input sensitivity (%s): auto (raw: %d)", style, sensitivity_raw);
+      ups_data.config.input_sensitivity = sensitivity::AUTO;
+      ESP_LOGI(GEN_TAG, "Generic input sensitivity (%s): %s (raw: %d)", style, sensitivity::AUTO, sensitivity_raw);
       break;
     default:
       // GENERIC DYNAMIC HANDLING: For unknown values, be more permissive
@@ -591,10 +592,10 @@ void GenericHidProtocol::parse_input_sensitivity(uint8_t* data, size_t len, UpsD
           uint8_t alt_value = data[i];
           if (alt_value <= 3) {
             switch (alt_value) {
-              case 0: ups_data.config.input_sensitivity = "high"; break;
-              case 1: ups_data.config.input_sensitivity = "normal"; break;
-              case 2: ups_data.config.input_sensitivity = "low"; break;
-              case 3: ups_data.config.input_sensitivity = "auto"; break;
+              case 0: ups_data.config.input_sensitivity = sensitivity::HIGH; break;
+              case 1: ups_data.config.input_sensitivity = sensitivity::NORMAL; break;
+              case 2: ups_data.config.input_sensitivity = sensitivity::LOW; break;
+              case 3: ups_data.config.input_sensitivity = sensitivity::AUTO; break;
             }
             ESP_LOGI(GEN_TAG, "Generic input sensitivity (%s, alt byte[%zu]): %s (raw: %d)", 
                      style, i, ups_data.config.input_sensitivity.c_str(), alt_value);
@@ -603,7 +604,7 @@ void GenericHidProtocol::parse_input_sensitivity(uint8_t* data, size_t len, UpsD
         }
         
         // Fallback to reasonable default
-        ups_data.config.input_sensitivity = "normal";
+        ups_data.config.input_sensitivity = sensitivity::NORMAL;
         ESP_LOGW(GEN_TAG, "Using default 'normal' sensitivity (%s) due to unexpected value: %d", 
                  style, sensitivity_raw);
       } else {
@@ -611,16 +612,16 @@ void GenericHidProtocol::parse_input_sensitivity(uint8_t* data, size_t len, UpsD
         if (sensitivity_raw <= 10) {
           // Map to nearest known value
           if (sensitivity_raw <= 3) {
-            ups_data.config.input_sensitivity = "high";
+            ups_data.config.input_sensitivity = sensitivity::HIGH;
           } else if (sensitivity_raw <= 6) {
-            ups_data.config.input_sensitivity = "normal";
+            ups_data.config.input_sensitivity = sensitivity::NORMAL;
           } else {
-            ups_data.config.input_sensitivity = "low";
+            ups_data.config.input_sensitivity = sensitivity::LOW;
           }
           ESP_LOGI(GEN_TAG, "Generic input sensitivity (%s, mapped): %s (raw: %d)", 
                    style, ups_data.config.input_sensitivity.c_str(), sensitivity_raw);
         } else {
-          ups_data.config.input_sensitivity = "unknown";
+          ups_data.config.input_sensitivity = sensitivity::UNKNOWN;
           ESP_LOGW(GEN_TAG, "Unknown generic sensitivity value (%s): %d", style, sensitivity_raw);
         }
       }
@@ -638,7 +639,7 @@ bool GenericHidProtocol::start_battery_test_quick() {
   
   for (size_t i = 0; i < sizeof(test_report_ids); i++) {
     uint8_t report_id = test_report_ids[i];
-    uint8_t test_data[2] = {report_id, 1}; // Command value 1 = Quick test
+    uint8_t test_data[2] = {report_id, test::COMMAND_QUICK}; // Command value 1 = Quick test
     
     ESP_LOGD(GEN_TAG, "Trying quick battery test with report ID 0x%02X", report_id);
     esp_err_t ret = parent_->hid_set_report(0x03, report_id, test_data, sizeof(test_data), parent_->get_protocol_timeout());
@@ -663,7 +664,7 @@ bool GenericHidProtocol::start_battery_test_deep() {
   
   for (size_t i = 0; i < sizeof(test_report_ids); i++) {
     uint8_t report_id = test_report_ids[i];
-    uint8_t test_data[2] = {report_id, 2}; // Command value 2 = Deep test
+    uint8_t test_data[2] = {report_id, test::COMMAND_DEEP}; // Command value 2 = Deep test
     
     ESP_LOGD(GEN_TAG, "Trying deep battery test with report ID 0x%02X", report_id);
     esp_err_t ret = parent_->hid_set_report(0x03, report_id, test_data, sizeof(test_data), parent_->get_protocol_timeout());
@@ -688,7 +689,7 @@ bool GenericHidProtocol::stop_battery_test() {
   
   for (size_t i = 0; i < sizeof(test_report_ids); i++) {
     uint8_t report_id = test_report_ids[i];
-    uint8_t test_data[2] = {report_id, 3}; // Command value 3 = Abort test
+    uint8_t test_data[2] = {report_id, test::COMMAND_ABORT}; // Command value 3 = Abort test
     
     ESP_LOGD(GEN_TAG, "Trying battery test stop with report ID 0x%02X", report_id);
     esp_err_t ret = parent_->hid_set_report(0x03, report_id, test_data, sizeof(test_data), parent_->get_protocol_timeout());
@@ -773,7 +774,7 @@ void GenericHidProtocol::read_frequency_data(UpsData &data) {
     0x12, // Output voltage report (might contain frequency)
   };
   
-  uint8_t buffer[64];
+  uint8_t buffer[limits::MAX_HID_REPORT_SIZE];
   size_t buffer_len;
   
   for (uint8_t report_id : frequency_report_ids) {
@@ -801,7 +802,7 @@ float GenericHidProtocol::parse_frequency_from_report(uint8_t* data, size_t len)
   // Method 1: Single byte at position 1 (simple frequency reports)
   if (len >= 2) {
     uint8_t freq_byte = data[1];
-    if (freq_byte >= FREQUENCY_MIN_VALID && freq_byte <= FREQUENCY_MAX_VALID) {
+    if (freq_byte >= static_cast<uint8_t>(FREQUENCY_MIN_VALID) && freq_byte <= static_cast<uint8_t>(FREQUENCY_MAX_VALID)) {
       ESP_LOGD(GEN_TAG, "Found frequency %d Hz (single byte)", freq_byte);
       return static_cast<float>(freq_byte);
     }
@@ -810,7 +811,7 @@ float GenericHidProtocol::parse_frequency_from_report(uint8_t* data, size_t len)
   // Method 2: Check all byte positions for valid frequency values
   for (size_t i = 1; i < len; i++) {
     uint8_t freq_byte = data[i];
-    if ((freq_byte == 50 || freq_byte == 60) && freq_byte <= FREQUENCY_MAX_VALID) {
+    if ((freq_byte == 50 || freq_byte == 60) && freq_byte <= static_cast<uint8_t>(FREQUENCY_MAX_VALID)) {
       ESP_LOGD(GEN_TAG, "Found standard frequency %d Hz at byte %zu", freq_byte, i);
       return static_cast<float>(freq_byte);
     }
@@ -819,7 +820,7 @@ float GenericHidProtocol::parse_frequency_from_report(uint8_t* data, size_t len)
   // Method 3: 16-bit little-endian values
   for (size_t i = 1; i <= len - 2; i++) {
     uint16_t freq_word = data[i] | (data[i + 1] << 8);
-    if (freq_word >= FREQUENCY_MIN_VALID && freq_word <= FREQUENCY_MAX_VALID) {
+    if (freq_word >= static_cast<uint16_t>(FREQUENCY_MIN_VALID) && freq_word <= static_cast<uint16_t>(FREQUENCY_MAX_VALID)) {
       ESP_LOGD(GEN_TAG, "Found frequency %d Hz (16-bit LE) at bytes %zu-%zu", freq_word, i, i + 1);
       return static_cast<float>(freq_word);
     }
@@ -828,7 +829,7 @@ float GenericHidProtocol::parse_frequency_from_report(uint8_t* data, size_t len)
   // Method 4: 16-bit big-endian values
   for (size_t i = 1; i <= len - 2; i++) {
     uint16_t freq_word = (data[i] << 8) | data[i + 1];
-    if (freq_word >= FREQUENCY_MIN_VALID && freq_word <= FREQUENCY_MAX_VALID) {
+    if (freq_word >= static_cast<uint16_t>(FREQUENCY_MIN_VALID) && freq_word <= static_cast<uint16_t>(FREQUENCY_MAX_VALID)) {
       ESP_LOGD(GEN_TAG, "Found frequency %d Hz (16-bit BE) at bytes %zu-%zu", freq_word, i, i + 1);
       return static_cast<float>(freq_word);
     }
