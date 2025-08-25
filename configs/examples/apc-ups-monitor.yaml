@@ -1,25 +1,23 @@
 # Example: APC Back-UPS ES 700 Configuration
-# Complete production configuration for APC UPS
+# Complete production configuration for APC UPS with European defaults
 # Copy and customize this file for your APC device
 
 substitutions:
   name: "apc-ups-monitor"
   friendly_name: "Office APC UPS"
-  
-  # Device customization
-  timezone: "America/Vienna"    # Replace with your timezone
-  
-  # Testing/production mode
   simulation_mode: "false"        # Set to "true" for testing without hardware
 
 esphome:
   name: "${name}"
   friendly_name: "${friendly_name}"
-  comment: "APC Back-UPS ES 700 Monitor"
+  comment: "APC Back-UPS ES 700 Monitor with European defaults"
 
 # Use modular configuration packages
 packages:
-  # Core functionality
+  # Regional defaults (European voltage/frequency standards)
+  regional_defaults: !include ../regional/european_base.yaml
+  
+  # Core functionality  
   base_ups: !include ../base_ups.yaml
   essential: !include ../essential_sensors.yaml
   
@@ -31,12 +29,6 @@ packages:
   
   # APC-specific optimizations
   apc_device: !include ../device_types/apc_backups_es.yaml
-
-# Time component for accurate timestamps
-time:
-  - platform: sntp
-    id: sntp_time
-    timezone: "${timezone}"
 
 # Optional: Home Assistant API (uncomment to enable)
 # api:

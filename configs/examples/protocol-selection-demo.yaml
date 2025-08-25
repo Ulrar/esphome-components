@@ -1,5 +1,5 @@
 # Protocol Selection Demo Configuration
-# Demonstrates the new manual protocol selection feature
+# Demonstrates the new manual protocol selection feature with European defaults
 
 substitutions:
   name: "ups-protocol-demo"
@@ -9,10 +9,14 @@ substitutions:
 esphome:
   name: "${name}"
   friendly_name: "${friendly_name}"
-  comment: "Demonstration of manual protocol selection"
+  comment: "Demonstration of manual protocol selection with European defaults"
 
-# Use base configuration package
+# Use modular configuration packages
 packages:
+  # Regional defaults (European voltage/frequency standards)
+  regional_defaults: !include ../regional/european_base.yaml
+  
+  # Base functionality
   base_ups: !include ../base_ups.yaml
   essential: !include ../essential_sensors.yaml
 
@@ -28,6 +32,10 @@ ups_hid:
   # protocol: apc             # Force APC HID Protocol
   # protocol: cyberpower      # Force CyberPower HID Protocol  
   # protocol: generic         # Force Generic HID Protocol
+
+# Platform stubs for compilation
+button:
+binary_sensor:
 
 # Enhanced logging to see protocol selection
 logger:

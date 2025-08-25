@@ -1,0 +1,31 @@
+# North American Base Configuration (No Secrets Required)
+# Basic North American electrical standards without network/API configuration
+# Use this for examples and basic templates
+
+substitutions:
+  # North American regional defaults
+  timezone: "America/New_York"    # Default North American timezone (Eastern Time)
+
+# Base UPS configuration with North American defaults
+ups_hid:
+  id: ups_monitor
+  update_interval: 30s
+  protocol_timeout: 15s
+  protocol: auto
+  fallback_nominal_voltage: 120.0  # North American standard voltage - used only when AC power unavailable
+  simulation_mode: false
+
+# Time configuration with North American timezone
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: ${timezone}
+    servers:
+      - "pool.ntp.org"
+      - "time.nist.gov"
+
+# Logging optimized for North American users
+logger:
+  level: INFO
+  logs:
+    ups_hid: INFO

@@ -39,17 +39,8 @@ logger:
 
 # WiFi configuration template
 wifi:
-  # Configure your WiFi credentials
   ssid: !secret wifi_ssid
   password: !secret wifi_password
-  
-  # North American WiFi channel optimization (1-11 allowed in US/Canada)
-  channel: 6
-  
-  # Enable fast connect for better reconnection
-  fast_connect: true
-  
-  # Access point fallback (if main WiFi fails)
   ap:
     ssid: "${friendly_name} AP"
     password: !secret ap_password

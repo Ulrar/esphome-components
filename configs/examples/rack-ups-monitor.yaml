@@ -1,24 +1,25 @@
 # Example: CyberPower CP1500EPFCLCD Configuration
-# Complete production configuration for CyberPower UPS
+# Complete production configuration for CyberPower UPS with European defaults
 # Copy and customize this file for your CyberPower device
 
 substitutions:
   name: "rack-ups-monitor"
   friendly_name: "Rack CyberPower UPS"
-  
-  # Device customization
-  timezone: "America/Vienna"    # Replace with your timezone
-  
-  # Testing/production mode
   simulation_mode: "false"        # Set to "true" for testing without hardware
+  
+  # Override timezone if needed (defaults to Europe/Warsaw from regional template)
+  timezone: "Europe/Vienna"       # Austrian timezone
 
 esphome:
   name: "${name}"
   friendly_name: "${friendly_name}"
-  comment: "CyberPower CP1500EPFCLCD Monitor"
+  comment: "CyberPower CP1500EPFCLCD Monitor with European defaults"
 
 # Use modular configuration packages
 packages:
+  # Regional defaults (European voltage/frequency standards) 
+  regional_defaults: !include ../regional/european_base.yaml
+  
   # Core functionality
   base_ups: !include ../base_ups.yaml
   essential: !include ../essential_sensors.yaml
@@ -31,12 +32,6 @@ packages:
   
   # CyberPower-specific optimizations
   cyberpower_device: !include ../device_types/cyberpower_cp1500.yaml
-
-# Time component for accurate timestamps
-time:
-  - platform: sntp
-    id: sntp_time
-    timezone: "${timezone}"
 
 # Optional: Home Assistant API (uncomment to enable)
 # api:

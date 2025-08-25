@@ -1,0 +1,81 @@
+# North American Regional Template Test Configuration
+# Tests North American regional defaults (120V/60Hz)
+# Use: esphome compile configs/testing/north_american_template_test.yaml
+
+substitutions:
+  name: "north-american-test"
+  friendly_name: "North American Test"
+  simulation_mode: "true"        # Safe testing without hardware
+
+esphome:
+  name: "${name}"
+  friendly_name: "${friendly_name}"
+  comment: "Testing North American regional template (120V/60Hz)"
+
+# Core ESP32 configuration
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+# Minimal logging
+logger:
+  level: INFO
+  baud_rate: 115200
+
+# Basic network
+wifi:
+  ssid: "TestNetwork"
+  password: "TestPassword"
+
+# External components
+external_components:
+  - source:
+      type: local
+      path: ../../components
+
+# Use North American regional template
+packages:
+  regional_defaults: !include ../regional/north_american_defaults.yaml
+
+# UPS component (inherits North American defaults from regional template)
+ups_hid:
+  id: ups_monitor
+  update_interval: 30s
+  simulation_mode: ${simulation_mode}
+  # fallback_nominal_voltage comes from regional template (120V North American)
+
+# Platform stubs
+binary_sensor:
+button:
+
+# Test sensors to validate North American regional defaults
+sensor:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Level"
+    type: battery_level
+    unit_of_measurement: "%"
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Input Voltage (North American 120V)"
+    type: input_voltage
+    unit_of_measurement: "V"
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Input Frequency (North American 60Hz)"
+    type: frequency
+    unit_of_measurement: "Hz"
+
+text_sensor:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Status"
+    type: status
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor  
+    name: "Protocol Name"
+    type: protocol

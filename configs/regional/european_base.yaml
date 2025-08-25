@@ -1,0 +1,31 @@
+# European Base Configuration (No Secrets Required)
+# Basic European electrical standards without network/API configuration
+# Use this for examples and basic templates
+
+substitutions:
+  # European regional defaults
+  timezone: "Europe/Warsaw"       # Default European timezone
+
+# Base UPS configuration with European defaults  
+ups_hid:
+  id: ups_monitor
+  update_interval: 30s
+  protocol_timeout: 15s
+  protocol: auto
+  fallback_nominal_voltage: 230.0  # European standard voltage - used only when AC power unavailable
+  simulation_mode: false
+
+# Time configuration with European timezone
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: ${timezone}
+    servers:
+      - "pool.ntp.org"
+      - "time.nist.gov"
+
+# Logging optimized for European users
+logger:
+  level: INFO
+  logs:
+    ups_hid: INFO

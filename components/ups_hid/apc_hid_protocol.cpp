@@ -414,6 +414,7 @@ void ApcHidProtocol::parse_battery_report(const HidReport &report, UpsData &data
   ESP_LOGI(APC_HID_TAG, "Battery level: %.0f%%", data.battery.level);
   
   // Parse runtime if more bytes available (32-bit little-endian)
+  // CORRECTED: Raw HID value is in seconds (like NUT), convert to minutes for ESPHome
   // recv[2] + 256 * recv[3] + 256 * 256 * recv[4] + 256 * 256 * 256 * recv[5]
   if (report.data.size() >= 6) {
     uint32_t runtime_raw = report.data[2] + 
@@ -421,8 +422,9 @@ void ApcHidProtocol::parse_battery_report(const HidReport &report, UpsData &data
                           (report.data[4] << 16) + 
                           (report.data[5] << 24);
     if (runtime_raw > 0 && runtime_raw < 65535) { // Sanity check
-      data.battery.runtime_minutes = static_cast<float>(runtime_raw);
-      ESP_LOGI(APC_HID_TAG, "Runtime: %.0f minutes", data.battery.runtime_minutes);
+      // Convert seconds to minutes to match ESPHome sensor expectations
+      data.battery.runtime_minutes = static_cast<float>(runtime_raw) / 60.0f;
+      ESP_LOGI(APC_HID_TAG, "Runtime: %d seconds (%.1f minutes)", runtime_raw, data.battery.runtime_minutes);
     } else {
       // Set estimate based on battery level if raw value seems invalid
       data.battery.runtime_minutes = data.battery.level * 0.5f; 
@@ -564,11 +566,13 @@ void ApcHidProtocol::parse_power_summary_report(const HidReport &report, UpsData
   ESP_LOGI(APC_HID_TAG, "PowerSummary: Battery %.0f%%", data.battery.level);
   
   // Runtime at bytes 2-3 (16-bit little-endian, NUT offset 8)
+  // CORRECTED: Raw HID value is in seconds (like NUT), convert to minutes for ESPHome
   if (report.data.size() >= 4) {
     uint16_t runtime_raw = report.data[2] | (report.data[3] << 8);
     if (runtime_raw > 0 && runtime_raw < 65535) {
-      data.battery.runtime_minutes = static_cast<float>(runtime_raw);
-      ESP_LOGI(APC_HID_TAG, "PowerSummary: Runtime %d minutes", runtime_raw);
+      // Convert seconds to minutes to match ESPHome sensor expectations  
+      data.battery.runtime_minutes = static_cast<float>(runtime_raw) / 60.0f;
+      ESP_LOGI(APC_HID_TAG, "PowerSummary: Runtime %d seconds (%.1f minutes)", runtime_raw, data.battery.runtime_minutes);
     }
   }
 }
@@ -1734,6 +1738,7 @@ void ApcHidProtocol::read_frequency_data(UpsData &data) {
   
   // Report IDs commonly used for frequency measurements:
   const std::vector<uint8_t> frequency_report_ids = {
+    0x0d,                        // APC-specific config report (apparent power and frequency) - PRIORITY
     HID_USAGE_POW_FREQUENCY,     // 0x32 - Standard HID frequency usage
     HID_USAGE_POW_VOLTAGE,       // 0x30 - Input measurements (may include frequency)  
     HID_USAGE_POW_CURRENT,       // 0x31 - Output measurements (may include frequency)
@@ -1758,7 +1763,46 @@ void ApcHidProtocol::read_frequency_data(UpsData &data) {
 
 float ApcHidProtocol::parse_frequency_from_report(const HidReport &report) {
   if (report.data.size() < 2) {
+    ESP_LOGV(APC_HID_TAG, "Frequency report 0x%02X too short: %zu bytes", report.data[0], report.data.size());
     return NAN;
+  }
+  
+  ESP_LOGD(APC_HID_TAG, "Parsing frequency from report 0x%02X (%zu bytes): %02X %02X %02X %02X", 
+           report.data[0], report.data.size(), 
+           report.data.size() > 0 ? report.data[0] : 0,
+           report.data.size() > 1 ? report.data[1] : 0,
+           report.data.size() > 2 ? report.data[2] : 0,
+           report.data.size() > 3 ? report.data[3] : 0);
+  
+  // APC-specific method: Report 0x0d frequency at byte[3] (based on ESP32 NUT server documentation)
+  if (report.data[0] == 0x0d) {
+    ESP_LOGD(APC_HID_TAG, "APC Method - Report 0x0d analysis: size=%zu bytes", report.data.size());
+    if (report.data.size() >= 4) {
+      uint8_t freq_byte = report.data[3];
+      ESP_LOGV(APC_HID_TAG, "APC Method - Report 0x0d byte[3]: %d (0x%02X) - Range check: %s", 
+               freq_byte, freq_byte,
+               (freq_byte >= FREQUENCY_MIN_VALID && freq_byte <= FREQUENCY_MAX_VALID) ? "PASS" : "FAIL");
+      if (freq_byte >= FREQUENCY_MIN_VALID && freq_byte <= FREQUENCY_MAX_VALID) {
+        ESP_LOGI(APC_HID_TAG, "Found frequency %.0f Hz using APC Method (report 0x0d, byte[3])", static_cast<float>(freq_byte));
+        return static_cast<float>(freq_byte);
+      }
+    } else {
+      ESP_LOGW(APC_HID_TAG, "APC Method - Report 0x0d too short for frequency: only %zu bytes (need 4+)", report.data.size());
+      // Try alternative: byte[1] might contain frequency or frequency-derived value in some APC models
+      if (report.data.size() >= 2) {
+        uint8_t alt_freq = report.data[1];
+        ESP_LOGV(APC_HID_TAG, "APC Method - Report 0x0d byte[1]: %d (0x%02X)", alt_freq, alt_freq);
+        
+        // Check if this could be a frequency indicator (100 -> 50Hz, 120 -> 60Hz)
+        if (alt_freq == 100) {
+          ESP_LOGI(APC_HID_TAG, "Found frequency 50 Hz using APC Method (report 0x0d, byte[1] = 100 -> 50Hz)");
+          return 50.0f;
+        } else if (alt_freq == 120) {
+          ESP_LOGI(APC_HID_TAG, "Found frequency 60 Hz using APC Method (report 0x0d, byte[1] = 120 -> 60Hz)");
+          return 60.0f;
+        }
+      }
+    }
   }
   
   // Try different byte positions and formats commonly used for frequency
@@ -1767,7 +1811,11 @@ float ApcHidProtocol::parse_frequency_from_report(const HidReport &report) {
   // Method 1: Single byte at position 1 (common for simple frequency reports)
   if (report.data.size() >= 2) {
     uint8_t freq_byte = report.data[1];
+    ESP_LOGV(APC_HID_TAG, "Method 1 - Testing byte[1]: %d (0x%02X) - Range check: %s", 
+             freq_byte, freq_byte,
+             (freq_byte >= FREQUENCY_MIN_VALID && freq_byte <= FREQUENCY_MAX_VALID) ? "PASS" : "FAIL");
     if (freq_byte >= FREQUENCY_MIN_VALID && freq_byte <= FREQUENCY_MAX_VALID) {
+      ESP_LOGI(APC_HID_TAG, "Found frequency %.0f Hz using Method 1 (single byte)", static_cast<float>(freq_byte));
       return static_cast<float>(freq_byte);
     }
   }
@@ -1775,7 +1823,11 @@ float ApcHidProtocol::parse_frequency_from_report(const HidReport &report) {
   // Method 2: 16-bit little-endian value at position 1-2
   if (report.data.size() >= 3) {
     uint16_t freq_word = report.data[1] | (report.data[2] << 8);
+    ESP_LOGV(APC_HID_TAG, "Method 2 - Testing little-endian word[1-2]: %d (0x%04X) - Range check: %s", 
+             freq_word, freq_word,
+             (freq_word >= FREQUENCY_MIN_VALID && freq_word <= FREQUENCY_MAX_VALID) ? "PASS" : "FAIL");
     if (freq_word >= FREQUENCY_MIN_VALID && freq_word <= FREQUENCY_MAX_VALID) {
+      ESP_LOGI(APC_HID_TAG, "Found frequency %.0f Hz using Method 2 (16-bit little-endian)", static_cast<float>(freq_word));
       return static_cast<float>(freq_word);
     }
   }
@@ -1783,7 +1835,11 @@ float ApcHidProtocol::parse_frequency_from_report(const HidReport &report) {
   // Method 3: 16-bit big-endian value at position 1-2
   if (report.data.size() >= 3) {
     uint16_t freq_word = (report.data[1] << 8) | report.data[2];
+    ESP_LOGV(APC_HID_TAG, "Method 3 - Testing big-endian word[1-2]: %d (0x%04X) - Range check: %s", 
+             freq_word, freq_word,
+             (freq_word >= FREQUENCY_MIN_VALID && freq_word <= FREQUENCY_MAX_VALID) ? "PASS" : "FAIL");
     if (freq_word >= FREQUENCY_MIN_VALID && freq_word <= FREQUENCY_MAX_VALID) {
+      ESP_LOGI(APC_HID_TAG, "Found frequency %.0f Hz using Method 3 (16-bit big-endian)", static_cast<float>(freq_word));
       return static_cast<float>(freq_word);
     }
   }
@@ -1792,11 +1848,50 @@ float ApcHidProtocol::parse_frequency_from_report(const HidReport &report) {
   if (report.data.size() >= 3) {
     uint16_t freq_scaled = report.data[1] | (report.data[2] << 8);
     float freq_value = static_cast<float>(freq_scaled) / 10.0f;
+    ESP_LOGV(APC_HID_TAG, "Method 4 - Testing scaled frequency: raw=%d, scaled=%.1f - Range check: %s", 
+             freq_scaled, freq_value,
+             (freq_value >= FREQUENCY_MIN_VALID && freq_value <= FREQUENCY_MAX_VALID) ? "PASS" : "FAIL");
     if (freq_value >= FREQUENCY_MIN_VALID && freq_value <= FREQUENCY_MAX_VALID) {
+      ESP_LOGI(APC_HID_TAG, "Found frequency %.1f Hz using Method 4 (scaled 0.1x)", freq_value);
       return freq_value;
     }
   }
   
+  // Method 5: APC-specific frequency encoding - scale by 0.01 (some APC models use centihz)
+  if (report.data.size() >= 3) {
+    uint16_t freq_scaled = report.data[1] | (report.data[2] << 8);
+    float freq_value = static_cast<float>(freq_scaled) / 100.0f;
+    ESP_LOGV(APC_HID_TAG, "Method 5 - Testing APC centihz frequency: raw=%d, scaled=%.2f - Range check: %s", 
+             freq_scaled, freq_value,
+             (freq_value >= FREQUENCY_MIN_VALID && freq_value <= FREQUENCY_MAX_VALID) ? "PASS" : "FAIL");
+    if (freq_value >= FREQUENCY_MIN_VALID && freq_value <= FREQUENCY_MAX_VALID) {
+      ESP_LOGI(APC_HID_TAG, "Found frequency %.2f Hz using Method 5 (APC centihz 0.01x)", freq_value);
+      return freq_value;
+    }
+  }
+  
+  // Method 6: Try big-endian centihz scaling (some APC devices)
+  if (report.data.size() >= 3) {
+    uint16_t freq_scaled = (report.data[1] << 8) | report.data[2];
+    float freq_value = static_cast<float>(freq_scaled) / 100.0f;
+    ESP_LOGV(APC_HID_TAG, "Method 6 - Testing APC big-endian centihz: raw=%d, scaled=%.2f - Range check: %s", 
+             freq_scaled, freq_value,
+             (freq_value >= FREQUENCY_MIN_VALID && freq_value <= FREQUENCY_MAX_VALID) ? "PASS" : "FAIL");
+    if (freq_value >= FREQUENCY_MIN_VALID && freq_value <= FREQUENCY_MAX_VALID) {
+      ESP_LOGI(APC_HID_TAG, "Found frequency %.2f Hz using Method 6 (APC big-endian centihz)", freq_value);
+      return freq_value;
+    }
+  }
+  
+  // Method 7: Check for frequency encoded in a different byte position (NUT shows various layouts)
+  for (size_t i = 1; i < report.data.size(); i++) {
+    if (report.data[i] == 50 || report.data[i] == 60) {
+      ESP_LOGI(APC_HID_TAG, "Found exact frequency %d Hz at byte[%zu]", report.data[i], i);
+      return static_cast<float>(report.data[i]);
+    }
+  }
+  
+  ESP_LOGD(APC_HID_TAG, "No valid frequency found in report 0x%02X (tried 7 methods)", report.data[0]);
   return NAN;
 }
 

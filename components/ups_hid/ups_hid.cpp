@@ -274,6 +274,12 @@ void UpsHidComponent::update_sensors() {
       value = ups_data_.power.load_percent;
     } else if (type == "frequency" && !std::isnan(ups_data_.power.frequency)) {
       value = ups_data_.power.frequency;
+    } else if (type == "input_transfer_low" && !std::isnan(ups_data_.power.input_transfer_low)) {
+      value = ups_data_.power.input_transfer_low;
+    } else if (type == "input_transfer_high" && !std::isnan(ups_data_.power.input_transfer_high)) {
+      value = ups_data_.power.input_transfer_high;
+    } else if (type == "battery_runtime_low" && !std::isnan(ups_data_.battery.runtime_low_threshold)) {
+      value = ups_data_.battery.runtime_low_threshold;
     } else if (type == "ups_realpower_nominal" && !std::isnan(ups_data_.power.realpower_nominal)) {
       value = ups_data_.power.realpower_nominal;
     } else if (type == "ups_delay_shutdown" && !std::isnan(ups_data_.config.delay_shutdown)) {

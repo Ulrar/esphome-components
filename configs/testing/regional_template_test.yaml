@@ -1,0 +1,81 @@
+# Regional Template Test Configuration
+# Tests both European and North American regional defaults
+# Use: esphome compile configs/testing/regional_template_test.yaml
+
+substitutions:
+  name: "regional-template-test"
+  friendly_name: "Regional Template Test"
+  simulation_mode: "true"        # Safe testing without hardware
+
+esphome:
+  name: "${name}"
+  friendly_name: "${friendly_name}"
+  comment: "Testing regional template functionality and defaults"
+
+# Core ESP32 configuration
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+# Minimal logging
+logger:
+  level: INFO
+  baud_rate: 115200
+
+# Basic network
+wifi:
+  ssid: "TestNetwork"
+  password: "TestPassword"
+
+# External components
+external_components:
+  - source:
+      type: local
+      path: ../../components
+
+# Use European regional template (can be changed to ../regional/north_american_defaults.yaml)
+packages:
+  regional_defaults: !include ../regional/european_defaults.yaml
+
+# UPS component (inherits European defaults from regional template)
+ups_hid:
+  id: ups_monitor
+  update_interval: 30s
+  simulation_mode: ${simulation_mode}
+  # fallback_nominal_voltage comes from regional template (230V European)
+
+# Platform stubs
+binary_sensor:
+button:
+
+# Test sensors to validate regional defaults
+sensor:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Battery Level"
+    type: battery_level
+    unit_of_measurement: "%"
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Input Voltage (European 230V)"
+    type: input_voltage
+    unit_of_measurement: "V"
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Input Frequency (European 50Hz)"
+    type: frequency
+    unit_of_measurement: "Hz"
+
+text_sensor:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Status"
+    type: status
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor  
+    name: "Protocol Name"
+    type: protocol
