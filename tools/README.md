@@ -1,6 +1,6 @@
 # Development Tools
 
-This folder contains development tools for ESP32 ESPHome component development, including debugging utilities and vendor management tools.
+This folder contains development tools for ESP32 ESPHome component development and debugging utilities.
 
 ## USB Device Management
 
@@ -8,73 +8,25 @@ This folder contains development tools for ESP32 ESPHome component development, 
 
 Lists ESP32, UPS, and related USB devices connected to the system. Useful for identifying device paths and vendor/product IDs during development.
 
-## generate_vendor_list.py
+## Protocol Development
 
-This script keeps the UPS vendor ID lists synchronized between C++, scripts and Python code.
+The UPS HID component uses a modern self-registering protocol system. New protocols automatically register themselves using macros:
 
-### Purpose
+### Adding New Vendor-Specific Protocols
 
-The UPS HID component maintains a list of known UPS vendor IDs in two places:
-
-- `components/ups_hid/ups_vendors.h` (C++ runtime code)
-- `components/ups_hid/__init__.py` (Python configuration validation)
-
-This script extracts the vendor list from the C++ header file and updates the Python file to ensure they stay in sync.
-
-### Usage
-
-#### Command Line
-
-```bash
-cd /workspace
-python3 tools/generate_vendor_list.py
-```
-
-#### VSCode Task
-
-1. Open the Command Palette (`Ctrl+Shift+P` or `Cmd+Shift+P`)
-2. Type "Tasks: Run Task"
-3. Select "Generate UPS Vendor List"
-
-Or use the keyboard shortcut `Ctrl+Shift+P` -> "Tasks: Run Build Task" and select the vendor list generator.
-
-### When to Run
-
-Run this script whenever you:
-
-1. Add new UPS vendor IDs to `components/ups_hid/ups_vendors.h`
-2. Modify existing vendor information
-3. Want to ensure the C++ and Python lists are synchronized
-
-### Output
-
-The script will:
-
-- Parse the C++ header file for vendor definitions
-- Extract vendor IDs, names, and descriptions
-- Update the `KNOWN_VENDOR_IDS` dictionary in `__init__.py`
-- Display the number of vendors processed
-
-### Example Output
-
-```
-Parsing vendors from /workspace/components/ups_hid/ups_vendors.h...
-Found 7 vendors
-Updated /workspace/components/ups_hid/__init__.py
-```
-
-## Adding New Vendors
-
-To add a new UPS vendor:
-
-1. Edit `components/ups_hid/ups_vendors.h`
-2. Add a new entry to the `KNOWN_UPS_VENDORS` array:
+1. Create a new protocol class inheriting from `UpsProtocolBase`
+2. Implement required methods: `detect()`, `initialize()`, `read_data()`
+3. Register the protocol using the registration macro:
 
    ```cpp
-   {0x1234, "New Vendor", "New Vendor Description"},
+   // At the end of your protocol .cpp file
+   REGISTER_UPS_PROTOCOL_FOR_VENDOR(0x1234, my_protocol, 
+       esphome::ups_hid::create_my_protocol, 
+       "My Protocol Name", 
+       "Description of my protocol", 
+       100);  // Priority
    ```
 
-3. Run the generate_vendor_list.py script to update the Python file
-4. Compile and test the component
+### Universal Compatibility
 
-The script automatically maintains alphabetical ordering by vendor ID.
+All unknown UPS vendors automatically use the Generic HID protocol as a fallback, providing basic monitoring capabilities without requiring vendor-specific code. This ensures broad compatibility with minimal maintenance.

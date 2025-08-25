@@ -1,6 +1,5 @@
 #include "ups_hid.h"
 #include "ups_constants.h"
-#include "ups_vendors.h"
 #include "usb_transport_factory.h"
 #include "simulated_transport.h"
 #ifdef USE_ESP32

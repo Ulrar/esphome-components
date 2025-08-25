@@ -1181,8 +1181,7 @@ A: Yes, beeper settings are stored in the UPS device's NVRAM and persist across 
 
 1. Inherit from `UpsProtocolBase`
 2. Implement required methods: `detect()`, `initialize()`, `read_data()`
-3. Add to protocol detection in `detect_ups_protocol()`
-4. Update vendor ID mapping in `ups_vendors.h`
+3. Register protocol using `REGISTER_UPS_PROTOCOL_FOR_VENDOR()` macro
 
 ### Testing
 
