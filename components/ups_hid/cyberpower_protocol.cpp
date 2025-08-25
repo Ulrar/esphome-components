@@ -182,7 +182,7 @@ bool CyberPowerProtocol::read_data(UpsData &data) {
 
   // Read device info (Reports 0x02, 0x1b) - these are string descriptors
   HidReport serial_number_report;
-  if (read_hid_report(SERIAL_NUMBER_REPORT_ID, serial_number_report)) {
+  if (read_hid_report(usb::REPORT_ID_SERIAL_NUMBER, serial_number_report)) {
     parse_serial_number_report(serial_number_report, data);
   }
 
@@ -404,7 +404,7 @@ void CyberPowerProtocol::parse_input_voltage_report(const HidReport &report, Ups
   // NUT debug: Report 0x0f, Value: 231 (matches our 0x00E6 = 230)
   // Data format: [ID, volt_low, volt_high] - 16-bit little endian
   uint16_t voltage_raw = report.data[1] | (report.data[2] << 8);
-  data.power.input_voltage = static_cast<float>(voltage_raw);
+  data.power.input_voltage = static_cast<float>(voltage_raw) / battery::VOLTAGE_SCALE_FACTOR;
   
   ESP_LOGD(CP_TAG, "Input voltage: %.1fV (raw: 0x%02X%02X = %d)", 
            data.power.input_voltage, report.data[2], report.data[1], voltage_raw);
@@ -419,7 +419,7 @@ void CyberPowerProtocol::parse_output_voltage_report(const HidReport &report, Up
   // NUT debug: Report 0x12, Value: 231 (matches our 0x00E6 = 230)
   // Data format: [ID, volt_low, volt_high] - 16-bit little endian  
   uint16_t voltage_raw = report.data[1] | (report.data[2] << 8);
-  data.power.output_voltage = static_cast<float>(voltage_raw);
+  data.power.output_voltage = static_cast<float>(voltage_raw) / battery::VOLTAGE_SCALE_FACTOR;
   
   ESP_LOGD(CP_TAG, "Output voltage: %.1fV (raw: 0x%02X%02X = %d)", 
            data.power.output_voltage, report.data[2], report.data[1], voltage_raw);
@@ -822,9 +822,9 @@ void CyberPowerProtocol::read_missing_dynamic_values(UpsData &data) {
     parse_battery_capacity_limits_report(battery_capacity_limits_report, data);
   }
   
-  // 2. Battery chemistry/type (Report 0x03) - same as APC
+  // 2. Battery chemistry/type (shared report ID) - same as APC
   HidReport battery_chemistry_report;
-  if (read_hid_report(0x03, battery_chemistry_report)) {
+  if (read_hid_report(battery_chemistry::REPORT_ID, battery_chemistry_report)) {
     parse_battery_chemistry_report(battery_chemistry_report, data);
   }
   
@@ -832,7 +832,18 @@ void CyberPowerProtocol::read_missing_dynamic_values(UpsData &data) {
   // It's at offset 24 and already parsed in parse_battery_runtime_report
   // Just need to extract it properly
   
-  // 4. Set static/derived values based on NUT behavior  
+  // 4. Try to read manufacturing date (based on NUT: UPS.PowerSummary.iOEMInformation)
+  // CyberPower manufacturing date might be in reports 0x04, 0x05, or similar to APC reports
+  std::vector<uint8_t> mfr_date_reports = {0x04, 0x05, 0x06, 0x19, 0x1c, 0x1d, 0x1e, 0x1f, 0x20};
+  for (uint8_t report_id : mfr_date_reports) {
+    HidReport mfr_date_report;
+    if (read_hid_report(report_id, mfr_date_report)) {
+      parse_manufacturing_date_report(mfr_date_report, data);
+      break; // Found manufacturing date, stop trying other reports
+    }
+  }
+  
+  // 5. Set static/derived values based on NUT behavior  
   data.test.ups_test_result = "No test initiated";  // Default test result
   
   // NOTE: battery_status is now properly set based on charging state in parse_present_status_report
@@ -897,29 +908,10 @@ void CyberPowerProtocol::parse_battery_chemistry_report(const HidReport &report,
   uint8_t chemistry_raw = report.data[1];
   
   // Map chemistry values based on NUT libhid implementation (same as APC)
-  switch (chemistry_raw) {
-    case 1:
-      data.battery.type = "Alkaline";
-      break;
-    case 2:
-      data.battery.type = "NiCd";
-      break;
-    case 3:
-      data.battery.type = "NiMH";
-      break;
-    case 4:
-      data.battery.type = "PbAcid";  // Lead Acid (matches NUT output)
-      break;
-    case 5:
-      data.battery.type = "LiIon";
-      break;
-    case 6:
-      data.battery.type = "LiPoly";
-      break;
-    default:
-      data.battery.type = battery_status::UNKNOWN;
-      ESP_LOGW(CP_TAG, "Unknown CyberPower battery chemistry value: %d", chemistry_raw);
-      break;
+  data.battery.type = battery_chemistry::id_to_string(chemistry_raw);
+  
+  if (data.battery.type == battery_chemistry::UNKNOWN) {
+    ESP_LOGW(CP_TAG, "Unknown CyberPower battery chemistry value: %d", chemistry_raw);
   }
   
   ESP_LOGI(CP_TAG, "CyberPower Battery chemistry: %s (raw: %d)", 
@@ -1275,6 +1267,53 @@ namespace esphome {
 namespace ups_hid {
 
 // Creator function for CyberPower protocol
+void CyberPowerProtocol::parse_manufacturing_date_report(const HidReport &report, UpsData &data) {
+  if (report.data.size() < 4) {
+    ESP_LOGD(CP_TAG, "Manufacturing date report 0x%02X too short: %zu bytes", report.report_id, report.data.size());
+    return;
+  }
+  
+  // Try different CyberPower manufacturing date formats
+  // Format 1: Similar to APC - 16-bit date value (could be at different offsets)
+  for (size_t offset = 1; offset <= report.data.size() - 2; offset++) {
+    uint16_t date_raw = report.data[offset] | (report.data[offset + 1] << 8);
+    if (date_raw > 0x0100 && date_raw < 0xFFFF) { // Reasonable date range
+      // Try to decode as packed date (MMYY or YYMM format)
+      uint8_t byte1 = date_raw & 0xFF;
+      uint8_t byte2 = (date_raw >> 8) & 0xFF;
+      
+      // Try MMYY format (month/year)
+      if (byte1 >= 1 && byte1 <= 12 && byte2 >= 0 && byte2 <= 99) {
+        int year = 2000 + byte2; // Assume 2000s
+        int month = byte1;
+        char date_str[16];
+        snprintf(date_str, sizeof(date_str), "%04d/%02d", year, month);
+        
+        data.battery.mfr_date = std::string(date_str);
+        ESP_LOGI(CP_TAG, "CyberPower Battery manufacturing date: %s (raw: 0x%04X from report 0x%02X)", 
+                 data.battery.mfr_date.c_str(), date_raw, report.report_id);
+        return;
+      }
+      
+      // Try YYMM format (year/month) 
+      if (byte2 >= 1 && byte2 <= 12 && byte1 >= 0 && byte1 <= 99) {
+        int year = 2000 + byte1; // Assume 2000s
+        int month = byte2;
+        char date_str[16];
+        snprintf(date_str, sizeof(date_str), "%04d/%02d", year, month);
+        
+        data.battery.mfr_date = std::string(date_str);
+        ESP_LOGI(CP_TAG, "CyberPower Battery manufacturing date: %s (raw: 0x%04X from report 0x%02X)", 
+                 data.battery.mfr_date.c_str(), date_raw, report.report_id);
+        return;
+      }
+    }
+  }
+  
+  ESP_LOGD(CP_TAG, "Could not decode manufacturing date from report 0x%02X (%zu bytes)", 
+           report.report_id, report.data.size());
+}
+
 std::unique_ptr<UpsProtocolBase> create_cyberpower_protocol(UpsHidComponent* parent) {
     return std::make_unique<CyberPowerProtocol>(parent);
 }

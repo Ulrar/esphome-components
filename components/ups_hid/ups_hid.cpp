@@ -346,6 +346,14 @@ void UpsHidComponent::update_sensors() {
       value = ups_data_.power.status;
     } else if (type == text_sensor_type::PROTOCOL) {
       value = get_protocol_name();
+    } else if (type == text_sensor_type::BATTERY_MFR_DATE && !ups_data_.battery.mfr_date.empty()) {
+      value = ups_data_.battery.mfr_date;
+    } else if (type == text_sensor_type::UPS_MFR_DATE && !ups_data_.device.mfr_date.empty()) {
+      value = ups_data_.device.mfr_date;
+    } else if (type == text_sensor_type::BATTERY_TYPE && !ups_data_.battery.type.empty()) {
+      value = ups_data_.battery.type;
+    } else if (type == text_sensor_type::UPS_FIRMWARE_AUX && !ups_data_.device.firmware_aux.empty()) {
+      value = ups_data_.device.firmware_aux;
     }
     
     if (!value.empty()) {

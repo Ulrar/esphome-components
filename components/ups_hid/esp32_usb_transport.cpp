@@ -1,4 +1,5 @@
 #include "esp32_usb_transport.h"
+#include "ups_constants.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 
@@ -313,7 +314,7 @@ esp_err_t Esp32UsbTransport::get_string_descriptor(uint8_t string_index,
     transfer->device_handle = device_.dev_hdl;
     transfer->bEndpointAddress = 0; // Control endpoint
     transfer->num_bytes = transfer_size;
-    transfer->timeout_ms = 1000;
+    transfer->timeout_ms = timing::USB_CONTROL_TRANSFER_TIMEOUT_MS;
     
     // Create setup packet
     usb_setup_packet_t *setup = (usb_setup_packet_t*)transfer->data_buffer;
@@ -347,7 +348,7 @@ esp_err_t Esp32UsbTransport::get_string_descriptor(uint8_t string_index,
     
     ret = usb_host_transfer_submit_control(device_.client_hdl, transfer);
     if (ret == ESP_OK) {
-        if (xSemaphoreTake(done_sem, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        if (xSemaphoreTake(done_sem, pdMS_TO_TICKS(timing::USB_SEMAPHORE_TIMEOUT_MS)) == pdTRUE) {
             ret = ctx.result;
             if (ret == ESP_OK && ctx.actual_bytes > sizeof(usb_setup_packet_t)) {
                 // Parse the USB string descriptor
@@ -854,7 +855,7 @@ void Esp32UsbTransport::usb_client_task(void* arg) {
     while (transport->usb_tasks_running_.load()) {
         if (transport->device_.client_hdl) {
             // Use shorter timeout for more responsive event processing
-            esp_err_t ret = usb_host_client_handle_events(transport->device_.client_hdl, 100);
+            esp_err_t ret = usb_host_client_handle_events(transport->device_.client_hdl, timing::USB_CLIENT_EVENT_TIMEOUT_MS);
             
             if (ret == ESP_ERR_TIMEOUT) {
                 // Timeout is normal - continue processing

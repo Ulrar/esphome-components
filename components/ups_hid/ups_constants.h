@@ -19,6 +19,11 @@ namespace timing {
     
     static constexpr uint32_t ERROR_RATE_LIMIT_WINDOW_MS = 5000;   // 5 seconds
     static constexpr uint32_t MAX_ERRORS_PER_WINDOW = 3;
+    
+    // USB operation timeouts
+    static constexpr uint32_t USB_CONTROL_TRANSFER_TIMEOUT_MS = 1000;  // 1 second
+    static constexpr uint32_t USB_SEMAPHORE_TIMEOUT_MS = 1000;         // 1 second  
+    static constexpr uint32_t USB_CLIENT_EVENT_TIMEOUT_MS = 100;       // 100ms for event polling
 }
 
 // ==================== Protocol Limits ====================
@@ -76,10 +81,58 @@ namespace battery_status {
     static constexpr const char* CHARGING = "Charging";
     static constexpr const char* DISCHARGING = "Discharging";
     static constexpr const char* FULLY_CHARGED = "Fully Charged";
+    static constexpr const char* NOT_CHARGING = "Not Charging";
     static constexpr const char* NORMAL = "Normal";
+    static constexpr const char* FULL = "Full";
+    static constexpr const char* GOOD = "Good";
     static constexpr const char* LOW = "Low";
+    static constexpr const char* CRITICAL = "Critical";
+    static constexpr const char* NOT_PRESENT = "Not Present";
+    static constexpr const char* FAULT = "Fault";
     static constexpr const char* UNKNOWN = "Unknown";
+    
+    // Battery status suffixes (append to base status)
     static constexpr const char* TIME_LIMIT_EXPIRED_SUFFIX = " - Time Limit Expired";
+    static constexpr const char* REPLACE_BATTERY_SUFFIX = " - Replace Battery";
+    static constexpr const char* INTERNAL_FAILURE_SUFFIX = " - Internal Failure";
+    static constexpr const char* CHECK_BATTERY_SUFFIX = " - Check Battery";
+    static constexpr const char* SHUTDOWN_IMMINENT_SUFFIX = " - Shutdown Imminent";
+    static constexpr const char* FAULT_SUFFIX = " - Fault";
+}
+
+// ==================== Battery Chemistry Types ====================
+namespace battery_chemistry {
+    static constexpr const char* ALKALINE = "Alkaline";          // Chemistry code 1
+    static constexpr const char* NICD = "NiCd";                  // Chemistry code 2
+    static constexpr const char* NIMH = "NiMH";                  // Chemistry code 3
+    static constexpr const char* LEAD_ACID = "PbAcid";           // Chemistry code 4 (NUT standard)
+    static constexpr const char* LITHIUM_ION = "LiIon";         // Chemistry code 5
+    static constexpr const char* LITHIUM_POLYMER = "LiPoly";    // Chemistry code 6
+    static constexpr const char* UNKNOWN = battery_status::UNKNOWN;
+    
+    // Common HID report ID for battery chemistry (used by both APC and CyberPower)
+    static constexpr uint8_t REPORT_ID = 0x03;
+    
+    // Chemistry ID constants (HID standard values)
+    static constexpr uint8_t ID_ALKALINE = 1;
+    static constexpr uint8_t ID_NICD = 2;
+    static constexpr uint8_t ID_NIMH = 3;
+    static constexpr uint8_t ID_LEAD_ACID = 4;
+    static constexpr uint8_t ID_LITHIUM_ION = 5;
+    static constexpr uint8_t ID_LITHIUM_POLYMER = 6;
+    
+    // Helper function to convert chemistry ID to string
+    inline const char* id_to_string(uint8_t chemistry_id) {
+        switch (chemistry_id) {
+            case ID_ALKALINE: return ALKALINE;
+            case ID_NICD: return NICD;
+            case ID_NIMH: return NIMH;
+            case ID_LEAD_ACID: return LEAD_ACID;
+            case ID_LITHIUM_ION: return LITHIUM_ION;
+            case ID_LITHIUM_POLYMER: return LITHIUM_POLYMER;
+            default: return UNKNOWN;
+        }
+    }
 }
 
 // ==================== Beeper Actions ====================
@@ -157,6 +210,10 @@ namespace text_sensor_type {
     static constexpr const char* INPUT_SENSITIVITY = "input_sensitivity";
     static constexpr const char* STATUS = "status";
     static constexpr const char* PROTOCOL = "protocol";
+    static constexpr const char* BATTERY_MFR_DATE = "battery_mfr_date";
+    static constexpr const char* UPS_MFR_DATE = "ups_mfr_date";
+    static constexpr const char* BATTERY_TYPE = "battery_type";
+    static constexpr const char* UPS_FIRMWARE_AUX = "ups_firmware_aux";
 }
 
 // ==================== Input Sensitivity Values ====================
@@ -174,6 +231,19 @@ namespace protocol {
     static constexpr const char* CYBERPOWER = "CyberPower";
     static constexpr const char* GENERIC = "Generic";
     static constexpr const char* NONE = "None";
+}
+
+// ==================== USB/HID Constants ====================
+namespace usb {
+    // Common vendor IDs
+    static constexpr uint16_t VENDOR_ID_APC = 0x051D;
+    static constexpr uint16_t VENDOR_ID_CYBERPOWER = 0x0764;
+    
+    // Common product IDs
+    static constexpr uint16_t PRODUCT_ID_APC_BACK_UPS_ES_700 = 0x0002; // Back-UPS ES 700G (INPUT-ONLY)
+    
+    // Common HID report IDs used across multiple UPS vendors
+    static constexpr uint8_t REPORT_ID_SERIAL_NUMBER = 0x02;  // Serial number string descriptor index
 }
 
 // ==================== Log Messages ====================

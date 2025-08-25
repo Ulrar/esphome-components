@@ -59,7 +59,7 @@ class CyberPowerProtocol : public UpsProtocolBase {
   static const uint8_t REALPOWER_NOMINAL_REPORT_ID = 0x18; // Nominal real power
   static const uint8_t INPUT_SENSITIVITY_REPORT_ID = 0x1a; // Input sensitivity
   static const uint8_t FIRMWARE_VERSION_REPORT_ID = 0x1b;  // Firmware version
-  static const uint8_t SERIAL_NUMBER_REPORT_ID = 0x02;     // Serial number
+  // Note: Serial number report ID moved to shared constant usb::REPORT_ID_SERIAL_NUMBER
   static const uint8_t TEST_RESULT_REPORT_ID = 0x14;       // UPS test result (same as test command)
 
   // HID Report structure
@@ -102,6 +102,7 @@ class CyberPowerProtocol : public UpsProtocolBase {
   void read_missing_dynamic_values(UpsData &data);
   void parse_battery_capacity_limits_report(const HidReport &report, UpsData &data);
   void parse_battery_chemistry_report(const HidReport &report, UpsData &data);
+  void parse_manufacturing_date_report(const HidReport &report, UpsData &data);
   
   // String cleaning utilities
   std::string clean_firmware_string(const std::string &raw_firmware);

@@ -50,7 +50,7 @@ bool GenericHidProtocol::detect() {
   
   // Check if this is a known vendor that should use a specific protocol
   uint16_t vid = parent_->get_vendor_id();
-  if (vid == 0x051D || vid == 0x0764) { // APC or CyberPower
+  if (vid == usb::VENDOR_ID_APC || vid == usb::VENDOR_ID_CYBERPOWER) { // APC or CyberPower
     ESP_LOGD(GEN_TAG, "Known vendor 0x%04X should use specific protocol", vid);
     return false;
   }
@@ -394,7 +394,7 @@ void GenericHidProtocol::parse_battery_status(uint8_t* data, size_t len, UpsData
       }
       
       if (status & 0x10) {
-        ups_data.battery.status += " - Replace Battery";
+        ups_data.battery.status += battery_status::REPLACE_BATTERY_SUFFIX;
       }
       
       ESP_LOGD(GEN_TAG, "Battery status: 0x%02X -> Power: \"%s\", Battery: \"%s\"", 
@@ -438,7 +438,7 @@ void GenericHidProtocol::parse_present_status(uint8_t* data, size_t len, UpsData
     }
     
     if (status & 0x10) {
-      ups_data.battery.status += " - Replace Battery";
+      ups_data.battery.status += battery_status::REPLACE_BATTERY_SUFFIX;
     }
     
     if (status & 0x20) {
@@ -446,7 +446,7 @@ void GenericHidProtocol::parse_present_status(uint8_t* data, size_t len, UpsData
     }
     
     if (status & 0x40) {
-      ups_data.battery.status += " - Fault";
+      ups_data.battery.status += battery_status::FAULT_SUFFIX;
     }
     
     ESP_LOGD(GEN_TAG, "Present status: 0x%02X -> Power: \"%s\", Battery: \"%s\"", 

@@ -34,6 +34,55 @@ static const uint8_t APC_REPORT_ID_FIRMWARE = 0x04;       // Firmware version
 static const uint8_t APC_REPORT_ID_AUDIBLE_ALARM = 0x18;  // Audible alarm control (beeper)
 static const uint8_t APC_REPORT_ID_SENSITIVITY = 0x35;    // Input sensitivity (APCSensitivity)
 
+// Power and status report IDs
+static const uint8_t APC_REPORT_ID_POWER_SUMMARY = 0x0C;   // PowerSummary.RemainingCapacity + RunTimeToEmpty
+static const uint8_t APC_REPORT_ID_PRESENT_STATUS = 0x16;  // PowerSummary.PresentStatus bitmap
+static const uint8_t APC_REPORT_ID_INPUT_VOLTAGE = 0x31;   // UPS.Input.Voltage
+static const uint8_t APC_REPORT_ID_LOAD_PERCENT = 0x50;    // UPS.PowerConverter.PercentLoad  
+static const uint8_t APC_REPORT_ID_OUTPUT_VOLTAGE = 0x09;  // PowerSummary.Voltage (legacy)
+static const uint8_t APC_REPORT_ID_FREQUENCY = 0x0D;       // Frequency information
+
+// Extended configuration report IDs
+static const uint8_t APC_REPORT_ID_BATTERY_RUNTIME_LOW = 0x24; // Battery runtime low threshold
+static const uint8_t APC_REPORT_ID_BATTERY_VOLTAGE_NOMINAL = 0x25; // Battery voltage nominal
+static const uint8_t APC_REPORT_ID_BATTERY_VOLTAGE = 0x26;  // Battery voltage actual
+static const uint8_t APC_REPORT_ID_INPUT_VOLTAGE_NOMINAL = 0x30; // Input voltage nominal  
+static const uint8_t APC_REPORT_ID_DELAY_REBOOT = 0x40;    // Delay before reboot
+static const uint8_t APC_REPORT_ID_DELAY_SHUTDOWN = 0x41;  // Delay before shutdown
+static const uint8_t APC_REPORT_ID_TEST_RESULT = 0x52;     // Test result status
+static const uint8_t APC_REPORT_ID_AUDIBLE_BEEPER = 0x78;  // Alternative beeper control
+
+// Additional report IDs found in code
+// Note: Serial number report ID moved to shared constant usb::REPORT_ID_SERIAL_NUMBER
+static const uint8_t APC_REPORT_ID_MFR_DATE_UPS = 0x07;    // UPS manufacture date
+static const uint8_t APC_REPORT_ID_MFR_DATE_BATTERY = 0x20; // Battery manufacture date  
+// Note: Battery chemistry report ID moved to shared constant battery_chemistry::REPORT_ID
+static const uint8_t APC_REPORT_ID_CHARGE_WARNING = 0x0F;  // Battery charge warning threshold
+static const uint8_t APC_REPORT_ID_CHARGE_LOW = 0x11;      // Battery charge low threshold
+static const uint8_t APC_REPORT_ID_INPUT_TRANSFER_LOW = 0x32;  // Input low voltage transfer point
+static const uint8_t APC_REPORT_ID_INPUT_TRANSFER_HIGH = 0x33; // Input high voltage transfer point
+static const uint8_t APC_REPORT_ID_PANEL_TEST = 0x79;      // Panel/UPS test control
+static const uint8_t APC_REPORT_ID_BATTERY_TEST = 0x52;    // Battery test control (same as test result)
+
+// Status bit masks
+static const uint8_t APC_STATUS_AC_PRESENT = 0x01;        // Bit 0: AC present
+static const uint8_t APC_STATUS_CHARGING = 0x04;          // Bit 2: Charging
+static const uint8_t APC_STATUS_DISCHARGING = 0x10;       // Bit 4: Discharging  
+static const uint8_t APC_STATUS_GOOD = 0x20;              // Bit 5: Battery good
+static const uint8_t APC_STATUS_INTERNAL_FAILURE = 0x40;  // Bit 6: Internal failure
+static const uint8_t APC_STATUS_NEED_REPLACEMENT = 0x80;  // Bit 7: Need replacement
+
+// Present status bit masks  
+static const uint8_t APC_PRESENT_CHARGING = 0x01;         // Bit 0: Charging
+static const uint8_t APC_PRESENT_DISCHARGING = 0x02;      // Bit 1: Discharging
+static const uint8_t APC_PRESENT_AC_PRESENT = 0x04;       // Bit 2: AC present
+static const uint8_t APC_PRESENT_BATTERY_PRESENT = 0x08;  // Bit 3: Battery present
+static const uint8_t APC_PRESENT_BELOW_CAPACITY = 0x10;   // Bit 4: Below capacity
+static const uint8_t APC_PRESENT_SHUTDOWN_IMMINENT = 0x20; // Bit 5: Shutdown imminent
+static const uint8_t APC_PRESENT_TIME_LIMIT_EXPIRED = 0x40; // Bit 6: Time limit expired
+static const uint8_t APC_PRESENT_NEED_REPLACEMENT = 0x80;   // Bit 7: Need replacement
+static const uint8_t APC_PRESENT_OVERLOAD = 0x01;          // Bit 0 of second byte: Overload
+
 // APC-specific date conversion (hex-as-decimal format)
 static std::string convert_apc_date(uint32_t apc_date) {
   if (apc_date == 0) return status::UNKNOWN;
@@ -68,11 +117,11 @@ bool ApcHidProtocol::detect() {
   
   // Try key report IDs based on NUT analysis - these are the critical ones
   const uint8_t test_report_ids[] = {
-    0x0C, // CRITICAL: PowerSummary.RemainingCapacity + RunTimeToEmpty (NUT primary data)
-    0x16, // CRITICAL: PowerSummary.PresentStatus bitmap (status flags) 
-    0x06, // PowerSummary.APCStatusFlag (basic status byte)
-    0x01, // Legacy status check
-    0x09  // PowerSummary.Voltage
+    APC_REPORT_ID_POWER_SUMMARY,   // CRITICAL: PowerSummary.RemainingCapacity + RunTimeToEmpty (NUT primary data)
+    APC_REPORT_ID_PRESENT_STATUS,  // CRITICAL: PowerSummary.PresentStatus bitmap (status flags) 
+    APC_REPORT_ID_BATTERY,         // PowerSummary.APCStatusFlag (basic status byte)
+    APC_REPORT_ID_STATUS,          // Legacy status check
+    APC_REPORT_ID_OUTPUT_VOLTAGE   // PowerSummary.Voltage
   };
   
   HidReport test_report;
@@ -124,58 +173,58 @@ bool ApcHidProtocol::read_data(UpsData &data) {
   // CRITICAL FIX: Read NUT-compatible reports in the correct order first
   // Device info will be read after successful HID communication
   
-  // 1. Read PowerSummary report 0x0C (MOST IMPORTANT - battery % + runtime)
+  // 1. Read PowerSummary report (MOST IMPORTANT - battery % + runtime)
   HidReport power_summary_report;
-  if (read_hid_report(0x0C, power_summary_report)) {
+  if (read_hid_report(APC_REPORT_ID_POWER_SUMMARY, power_summary_report)) {
     parse_power_summary_report(power_summary_report, data);
     success = true;
   } else {
-    ESP_LOGV(APC_HID_TAG, "Failed to read PowerSummary report 0x0C");
+    ESP_LOGV(APC_HID_TAG, "Failed to read PowerSummary report");
   }
   
-  // 2. Read PresentStatus report 0x16 (status bitmap - AC, charging, discharging, etc.)
+  // 2. Read PresentStatus report (status bitmap - AC, charging, discharging, etc.)
   HidReport present_status_report;
-  if (read_hid_report(0x16, present_status_report)) {
+  if (read_hid_report(APC_REPORT_ID_PRESENT_STATUS, present_status_report)) {
     parse_present_status_report(present_status_report, data);
     success = true;
   } else {
-    ESP_LOGV(APC_HID_TAG, "Failed to read PresentStatus report 0x16");
+    ESP_LOGV(APC_HID_TAG, "Failed to read PresentStatus report");
   }
   
-  // 3. Read APCStatusFlag report 0x06 (legacy status byte)
+  // 3. Read APCStatusFlag report (legacy status byte)
   HidReport apc_status_report;
-  if (read_hid_report(0x06, apc_status_report)) {
+  if (read_hid_report(APC_REPORT_ID_BATTERY, apc_status_report)) {
     parse_apc_status_report(apc_status_report, data);
     success = true;
   } else {
-    ESP_LOGV(APC_HID_TAG, "Failed to read APCStatusFlag report 0x06");
+    ESP_LOGV(APC_HID_TAG, "Failed to read APCStatusFlag report");
   }
   
-  // 4. Read input voltage report 0x31 (NUT: UPS.Input.Voltage) 
+  // 4. Read input voltage report (NUT: UPS.Input.Voltage) 
   HidReport input_voltage_report;
-  if (read_hid_report(0x31, input_voltage_report)) {
+  if (read_hid_report(APC_REPORT_ID_INPUT_VOLTAGE, input_voltage_report)) {
     parse_input_voltage_report(input_voltage_report, data);
     success = true;
   } else {
-    ESP_LOGV(APC_HID_TAG, "Failed to read input voltage report 0x31");
+    ESP_LOGV(APC_HID_TAG, "Failed to read input voltage report");
   }
   
-  // 5. Read load percentage report 0x50 (NUT: UPS.PowerConverter.PercentLoad)
+  // 5. Read load percentage report (NUT: UPS.PowerConverter.PercentLoad)
   HidReport load_report;
-  if (read_hid_report(0x50, load_report)) {
+  if (read_hid_report(APC_REPORT_ID_LOAD_PERCENT, load_report)) {
     parse_load_report(load_report, data);
     success = true;
   } else {
-    ESP_LOGV(APC_HID_TAG, "Failed to read load report 0x50");
+    ESP_LOGV(APC_HID_TAG, "Failed to read load report");
   }
   
-  // 6. Read output voltage report 0x09 (legacy voltage reading)
+  // 6. Read output voltage report (legacy voltage reading)
   HidReport voltage_report;
-  if (read_hid_report(0x09, voltage_report)) {
+  if (read_hid_report(APC_REPORT_ID_OUTPUT_VOLTAGE, voltage_report)) {
     parse_voltage_report(voltage_report, data);
     success = true;
   } else {
-    ESP_LOGV(APC_HID_TAG, "Failed to read voltage report 0x09");
+    ESP_LOGV(APC_HID_TAG, "Failed to read voltage report");
   }
   
   // Set frequency to NaN - not available in debug logs for this APC model
@@ -262,10 +311,10 @@ bool ApcHidProtocol::read_hid_report(uint8_t report_id, HidReport &report) {
   size_t buffer_len = sizeof(buffer);
   esp_err_t ret;
   
-  // CRITICAL FIX: Try Input Report first (0x01) - this is what NUT uses for real-time data
+  // CRITICAL FIX: Try Input Report first (HID_REPORT_TYPE_INPUT) - this is what NUT uses for real-time data
   // Based on NUT logs showing PowerSummary fields work with Input Reports
   ESP_LOGV(APC_HID_TAG, "Trying Input report 0x%02X...", report_id);
-  ret = parent_->hid_get_report(0x01, report_id, buffer, &buffer_len, parent_->get_protocol_timeout());
+  ret = parent_->hid_get_report(HID_REPORT_TYPE_INPUT, report_id, buffer, &buffer_len, parent_->get_protocol_timeout());
   if (ret == ESP_OK && buffer_len > 0) {
     report.report_id = report_id;
     report.data.assign(buffer, buffer + buffer_len);
@@ -280,10 +329,10 @@ bool ApcHidProtocol::read_hid_report(uint8_t report_id, HidReport &report) {
     return false;
   }
   
-  // Fall back to Feature Report (0x03) for static/config data
+  // Fall back to Feature Report (HID_REPORT_TYPE_FEATURE) for static/config data
   buffer_len = sizeof(buffer); // Reset buffer length
   ESP_LOGV(APC_HID_TAG, "Trying Feature report 0x%02X...", report_id);
-  ret = parent_->hid_get_report(0x03, report_id, buffer, &buffer_len, parent_->get_protocol_timeout());
+  ret = parent_->hid_get_report(HID_REPORT_TYPE_FEATURE, report_id, buffer, &buffer_len, parent_->get_protocol_timeout());
   if (ret == ESP_OK && buffer_len > 0) {
     report.report_id = report_id;
     report.data.assign(buffer, buffer + buffer_len);
@@ -315,7 +364,7 @@ void ApcHidProtocol::log_raw_data(const uint8_t* buffer, size_t buffer_len) {
 
 bool ApcHidProtocol::write_hid_report(const HidReport &report) {
   // Use HID Feature Report for UPS control commands  
-  const uint8_t report_type = 0x03; // Feature Report
+  const uint8_t report_type = HID_REPORT_TYPE_FEATURE; // Feature Report
   
   esp_err_t ret = parent_->hid_set_report(report_type, report.report_id, 
                                           report.data.data(), report.data.size(), parent_->get_protocol_timeout());
@@ -335,19 +384,19 @@ void ApcHidProtocol::parse_status_report(const HidReport &report, UpsData &data)
   }
   
   // Parse APC HID status based on working NUT implementation
-  // report.data[0] = report ID (0x01)
+  // report.data[0] = report ID (APC_REPORT_ID_STATUS)
   // report.data[1] = status flags byte
   uint8_t status_byte = report.data[1];
   
   ESP_LOGD(APC_HID_TAG, "Status byte: 0x%02X", status_byte);
   
   // Parse status flags based on working NUT server implementation
-  bool ac_present = status_byte & 0x01;           // Bit 0: AC present
-  bool charging = status_byte & 0x04;             // Bit 2: Charging  
-  bool discharging = status_byte & 0x10;          // Bit 4: Discharging
-  bool good = status_byte & 0x20;                 // Bit 5: Battery good
-  bool internal_failure = status_byte & 0x40;     // Bit 6: Internal failure
-  bool need_replacement = status_byte & 0x80;     // Bit 7: Need replacement
+  bool ac_present = status_byte & APC_STATUS_AC_PRESENT;           // Bit 0: AC present
+  bool charging = status_byte & APC_STATUS_CHARGING;             // Bit 2: Charging  
+  bool discharging = status_byte & APC_STATUS_DISCHARGING;          // Bit 4: Discharging
+  bool good = status_byte & APC_STATUS_GOOD;                 // Bit 5: Battery good
+  bool internal_failure = status_byte & APC_STATUS_INTERNAL_FAILURE;     // Bit 6: Internal failure
+  bool need_replacement = status_byte & APC_STATUS_NEED_REPLACEMENT;     // Bit 7: Need replacement
   
   // Update power status based on AC presence and discharging
   if (ac_present && !discharging) {
@@ -364,17 +413,17 @@ void ApcHidProtocol::parse_status_report(const HidReport &report, UpsData &data)
   } else if (discharging) {
     data.battery.status = battery_status::DISCHARGING;
   } else {
-    data.battery.status = "Not Charging";
+    data.battery.status = battery_status::NOT_CHARGING;
   }
   
   // Check battery health
   if (!good || internal_failure || need_replacement) {
     if (need_replacement) {
-      data.battery.status += " - Replace Battery";
+      data.battery.status += battery_status::REPLACE_BATTERY_SUFFIX;
     } else if (internal_failure) {
-      data.battery.status += " - Internal Failure";
+      data.battery.status += battery_status::INTERNAL_FAILURE_SUFFIX;
     } else {
-      data.battery.status += " - Check Battery";
+      data.battery.status += battery_status::CHECK_BATTERY_SUFFIX;
     }
   }
   
@@ -408,8 +457,8 @@ void ApcHidProtocol::parse_battery_report(const HidReport &report, UpsData &data
   }
   
   // Parse battery level based on working ESP32 NUT server implementation
-  // Report 0x06: recv[1] = battery charge percentage
-  // report.data[0] = report ID (0x06)  
+  // APCStatusFlag report: recv[1] = battery charge percentage
+  // report.data[0] = report ID (APC_REPORT_ID_BATTERY)  
   // report.data[1] = battery charge level percentage (direct value)
   data.battery.level = static_cast<float>(report.data[1]);
   ESP_LOGI(APC_HID_TAG, "Battery level: %.0f%%", data.battery.level);
@@ -445,7 +494,7 @@ void ApcHidProtocol::parse_voltage_report(const HidReport &report, UpsData &data
   }
   
   // Parse voltage - handle both 2-byte and 3-byte reports
-  // report.data[0] = report ID (0x0E)
+  // report.data[0] = report ID (APC_REPORT_ID_VOLTAGE)
   // report.data[1] = voltage (primary byte)
   uint16_t voltage_raw = report.data[1];
   
@@ -457,7 +506,7 @@ void ApcHidProtocol::parse_voltage_report(const HidReport &report, UpsData &data
     ESP_LOGV(APC_HID_TAG, "8-bit voltage: 0x%02X", voltage_raw);
   }
   
-  // This report 0x09 provides output voltage, apply proper scaling
+  // This report provides output voltage, apply proper scaling
   // Raw values like 0x0557 (1367) need to be scaled to reasonable voltage
   float voltage_scaled;
   if (voltage_raw > 1000) {
@@ -479,7 +528,7 @@ void ApcHidProtocol::parse_power_report(const HidReport &report, UpsData &data) 
   }
   
   // Parse load - handle different report sizes
-  // report.data[0] = report ID (0x07)
+  // report.data[0] = report ID (APC_REPORT_ID_LOAD)
   
   if (report.data.size() >= 7) {
     // Working ESP32 NUT server format: recv[6] = UPS load percentage
@@ -553,14 +602,14 @@ void ApcHidProtocol::parse_device_info_report(const HidReport &report) {
 
 // NUT-compatible parser implementations based on real device data analysis
 void ApcHidProtocol::parse_power_summary_report(const HidReport &report, UpsData &data) {
-  // Report 0x0C: PowerSummary.RemainingCapacity + RunTimeToEmpty
+  // PowerSummary report: RemainingCapacity + RunTimeToEmpty
   // CORRECTED: ESP32 data [0C 64 B2 02] - byte 1 is battery %, bytes 2-3 are runtime
   if (report.data.size() < 2) {
     ESP_LOGW(APC_HID_TAG, "PowerSummary report too short: %zu bytes", report.data.size());
     return;
   }
   
-  // ESP32 data format: [0C 63 67 02] where 0x63 = 99% battery
+  // ESP32 data format: [APC_REPORT_ID_POWER_SUMMARY 63 67 02] where 0x63 = 99% battery
   // Battery percentage at byte 1 (NUT offset 0 within report payload)
   data.battery.level = static_cast<float>(report.data[1]);
   ESP_LOGD(APC_HID_TAG, "Raw battery byte: 0x%02X = %d%%", report.data[1], report.data[1]);
@@ -579,7 +628,7 @@ void ApcHidProtocol::parse_power_summary_report(const HidReport &report, UpsData
 }
 
 void ApcHidProtocol::parse_present_status_report(const HidReport &report, UpsData &data) {
-  // Report 0x16: PowerSummary.PresentStatus - HID field structure
+  // PresentStatus report: PowerSummary.PresentStatus - HID field structure
   // Based on NUT logs showing exact offsets for each 1-bit field:
   // Offset 0: Charging, Offset 1: Discharging, Offset 2: ACPresent, Offset 3: BatteryPresent, etc.
   if (report.data.size() < 2) {
@@ -594,20 +643,20 @@ void ApcHidProtocol::parse_present_status_report(const HidReport &report, UpsDat
   
   // Extract individual status bits based on NUT field offsets
   // NUT shows these are 1-bit fields at specific offsets within the report
-  bool charging = (packed_status & 0x01) != 0;        // Offset 0, Size 1
-  bool discharging = (packed_status & 0x02) != 0;     // Offset 1, Size 1
-  bool ac_present = (packed_status & 0x04) != 0;      // Offset 2, Size 1  
-  bool battery_present = (packed_status & 0x08) != 0; // Offset 3, Size 1
-  bool below_capacity = (packed_status & 0x10) != 0;  // Offset 4, Size 1
-  bool shutdown_imminent = (packed_status & 0x20) != 0; // Offset 5, Size 1
-  bool time_limit_expired = (packed_status & 0x40) != 0; // Offset 6, Size 1
-  bool need_replacement = (packed_status & 0x80) != 0;   // Offset 7, Size 1
+  bool charging = (packed_status & APC_PRESENT_CHARGING) != 0;        // Offset 0, Size 1
+  bool discharging = (packed_status & APC_PRESENT_DISCHARGING) != 0;     // Offset 1, Size 1
+  bool ac_present = (packed_status & APC_PRESENT_AC_PRESENT) != 0;      // Offset 2, Size 1  
+  bool battery_present = (packed_status & APC_PRESENT_BATTERY_PRESENT) != 0; // Offset 3, Size 1
+  bool below_capacity = (packed_status & APC_PRESENT_BELOW_CAPACITY) != 0;  // Offset 4, Size 1
+  bool shutdown_imminent = (packed_status & APC_PRESENT_SHUTDOWN_IMMINENT) != 0; // Offset 5, Size 1
+  bool time_limit_expired = (packed_status & APC_PRESENT_TIME_LIMIT_EXPIRED) != 0; // Offset 6, Size 1
+  bool need_replacement = (packed_status & APC_PRESENT_NEED_REPLACEMENT) != 0;   // Offset 7, Size 1
   
   // Check for Overload at Offset 8 (second byte if available)
   bool overload = false;
   if (report.data.size() >= 3) {
     uint8_t second_byte = report.data[2];
-    overload = (second_byte & 0x01) != 0;  // Offset 8 = bit 0 of second byte
+    overload = (second_byte & APC_PRESENT_OVERLOAD) != 0;  // Offset 8 = bit 0 of second byte
     ESP_LOGD(APC_HID_TAG, "Second status byte: 0x%02X, Overload: %d", second_byte, overload);
   }
   
@@ -626,23 +675,23 @@ void ApcHidProtocol::parse_present_status_report(const HidReport &report, UpsDat
   } else if (discharging) {
     data.battery.status = battery_status::DISCHARGING;
   } else {
-    data.battery.status = "Normal";
+    data.battery.status = battery_status::NORMAL;
   }
   
   // Handle battery issues
   if (below_capacity || shutdown_imminent) {
     data.battery.charge_low = battery::LOW_THRESHOLD_PERCENT;  // Indicate low battery threshold
     if (shutdown_imminent) {
-      data.battery.status += " - Shutdown Imminent";
+      data.battery.status += battery_status::SHUTDOWN_IMMINENT_SUFFIX;
     }
   }
   
   if (need_replacement) {
-    data.battery.status += " - Replace Battery";
+    data.battery.status += battery_status::REPLACE_BATTERY_SUFFIX;
   }
   
   if (!battery_present) {
-    data.battery.status = "Not Present";
+    data.battery.status = battery_status::NOT_PRESENT;
   }
   
   if (overload) {
@@ -655,14 +704,14 @@ void ApcHidProtocol::parse_present_status_report(const HidReport &report, UpsDat
 }
 
 void ApcHidProtocol::parse_apc_status_report(const HidReport &report, UpsData &data) {
-  // Report 0x06: PowerSummary.APCStatusFlag (single byte legacy status)
+  // APCStatusFlag report: PowerSummary.APCStatusFlag (single byte legacy status)
   // ESP32 data format: [06 XX] where XX is the status value
   if (report.data.size() < 2) {
     ESP_LOGW(APC_HID_TAG, "APCStatus report too short: %zu bytes", report.data.size());
     return;
   }
   
-  // ESP32 data format: [06 08] where 0x08 = AC present  
+  // ESP32 data format: [APC_REPORT_ID_BATTERY 08] where 0x08 = AC present  
   uint8_t apc_status = report.data[1]; // Byte 1 contains the status value
   ESP_LOGD(APC_HID_TAG, "Raw APCStatusFlag byte: 0x%02X", apc_status);
   ESP_LOGI(APC_HID_TAG, "APCStatusFlag: 0x%02X", apc_status);
@@ -684,11 +733,11 @@ void ApcHidProtocol::parse_apc_status_report(const HidReport &report, UpsData &d
   }
   
   // Don't override PresentStatus data, just log for debugging
-  // PresentStatus (report 0x16) is more detailed and authoritative
+  // PresentStatus report is more detailed and authoritative
 }
 
 void ApcHidProtocol::parse_input_voltage_report(const HidReport &report, UpsData &data) {
-  // Report 0x31: UPS.Input.Voltage (16-bit value)
+  // Input voltage report: UPS.Input.Voltage (16-bit value)
   // NUT logs show values like 236V, 232V (AC input voltage)
   if (report.data.size() < 3) {
     ESP_LOGW(APC_HID_TAG, "Input voltage report too short: %zu bytes", report.data.size());
@@ -703,7 +752,7 @@ void ApcHidProtocol::parse_input_voltage_report(const HidReport &report, UpsData
 }
 
 void ApcHidProtocol::parse_load_report(const HidReport &report, UpsData &data) {
-  // Report 0x50: UPS.PowerConverter.PercentLoad (8-bit percentage)
+  // Load report: UPS.PowerConverter.PercentLoad (8-bit percentage)
   // NUT logs show values like 23%, 16% (load percentage)
   if (report.data.size() < 2) {
     ESP_LOGW(APC_HID_TAG, "Load report too short: %zu bytes", report.data.size());
@@ -723,9 +772,9 @@ void ApcHidProtocol::read_device_information(UpsData &data) {
   // Based on NUT apc_format_serial/apc_format_model implementation
   
   // Read serial number from standard USB HID report (same as CyberPower)
-  // NUT debug shows: UPS.PowerSummary.iSerialNumber, ReportID: 0x02, Value: 2
+  // NUT debug shows: UPS.PowerSummary.iSerialNumber, ReportID: usb::REPORT_ID_SERIAL_NUMBER, Value: 2
   HidReport serial_report;
-  if (read_hid_report(0x02, serial_report)) {
+  if (read_hid_report(usb::REPORT_ID_SERIAL_NUMBER, serial_report)) {
     parse_serial_number_report(serial_report, data);
   }
   
@@ -756,7 +805,7 @@ void ApcHidProtocol::parse_serial_number_report(const HidReport &report, UpsData
     return;
   }
 
-  // NUT debug shows: UPS.PowerSummary.iSerialNumber, ReportID: 0x02, Value: 2 
+  // NUT debug shows: UPS.PowerSummary.iSerialNumber, ReportID: usb::REPORT_ID_SERIAL_NUMBER, Value: 2 
   // This is a USB string descriptor index, not the actual serial number
   uint8_t string_index = report.data[1];
   
@@ -913,7 +962,7 @@ void ApcHidProtocol::parse_firmware_version_report(const HidReport &report, UpsD
 
 void ApcHidProtocol::parse_beeper_status_report(const HidReport &report, UpsData &data) {
   // Parse APC beeper status based on NUT UPS.PowerSummary.AudibleAlarmControl
-  // NUT debug shows: ReportID: 0x18, Value: 2 (AudibleAlarmControl)
+  // NUT debug shows: ReportID: APC_REPORT_ID_AUDIBLE_ALARM, Value: 2 (AudibleAlarmControl)
   // APC beeper mapping: 1=disabled, 2=enabled, 3=muted
   if (report.data.size() < 2) {
     ESP_LOGV(APC_HID_TAG, "Beeper status report too short: %zu bytes", report.data.size());
@@ -921,7 +970,7 @@ void ApcHidProtocol::parse_beeper_status_report(const HidReport &report, UpsData
   }
   
   uint8_t beeper_value = report.data[1];
-  ESP_LOGD(APC_HID_TAG, "Raw APC beeper from report 0x18: 0x%02X (%d)", beeper_value, beeper_value);
+  ESP_LOGD(APC_HID_TAG, "Raw APC beeper from report 0x%02X: 0x%02X (%d)", APC_REPORT_ID_AUDIBLE_ALARM, beeper_value, beeper_value);
   
   // DYNAMIC BEEPER STATUS MAPPING: Handle known APC values with intelligent fallbacks
   switch (beeper_value) {
@@ -988,7 +1037,7 @@ void ApcHidProtocol::parse_beeper_status_report(const HidReport &report, UpsData
 
 void ApcHidProtocol::parse_input_sensitivity_report(const HidReport &report, UpsData &data) {
   // Parse APC input sensitivity based on NUT UPS.Input.APCSensitivity
-  // NUT debug shows: ReportID: 0x35, Value: 1 (APCSensitivity)
+  // NUT debug shows: ReportID: APC_REPORT_ID_SENSITIVITY, Value: 1 (APCSensitivity)
   // APC sensitivity mapping: 0=high, 1=normal/medium, 2=low
   if (report.data.size() < 2) {
     ESP_LOGV(APC_HID_TAG, "Input sensitivity report too short: %zu bytes", report.data.size());
@@ -996,7 +1045,7 @@ void ApcHidProtocol::parse_input_sensitivity_report(const HidReport &report, Ups
   }
   
   uint8_t sensitivity_value = report.data[1];
-  ESP_LOGD(APC_HID_TAG, "Raw APC sensitivity from report 0x35: 0x%02X (%d)", sensitivity_value, sensitivity_value);
+  ESP_LOGD(APC_HID_TAG, "Raw APC sensitivity from report 0x%02X: 0x%02X (%d)", APC_REPORT_ID_SENSITIVITY, sensitivity_value, sensitivity_value);
   
   // DYNAMIC SENSITIVITY MAPPING: Handle known APC values and provide intelligent fallbacks
   switch (sensitivity_value) {
@@ -1058,78 +1107,78 @@ void ApcHidProtocol::parse_input_sensitivity_report(const HidReport &report, Ups
 void ApcHidProtocol::read_missing_dynamic_values(UpsData &data) {
   ESP_LOGD(APC_HID_TAG, "Reading APC missing dynamic values from NUT analysis...");
   
-  // 1. Battery voltage nominal (Report 0x25)
+  // 1. Battery voltage nominal (Report APC_REPORT_ID_BATTERY_VOLTAGE_NOMINAL)
   HidReport battery_voltage_nominal_report;
-  if (read_hid_report(0x25, battery_voltage_nominal_report)) {
+  if (read_hid_report(APC_REPORT_ID_BATTERY_VOLTAGE_NOMINAL, battery_voltage_nominal_report)) {
     parse_battery_voltage_nominal_report(battery_voltage_nominal_report, data);
   }
   
-  // 1b. Battery voltage actual (Report 0x26) - MISSING from original implementation
+  // 1b. Battery voltage actual (Report APC_REPORT_ID_BATTERY_VOLTAGE) - MISSING from original implementation
   HidReport battery_voltage_report;
-  if (read_hid_report(0x26, battery_voltage_report)) {
+  if (read_hid_report(APC_REPORT_ID_BATTERY_VOLTAGE, battery_voltage_report)) {
     parse_battery_voltage_actual_report(battery_voltage_report, data);
   }
   
-  // 2. Input voltage nominal (Report 0x30)
+  // 2. Input voltage nominal (Report APC_REPORT_ID_INPUT_VOLTAGE_NOMINAL)
   HidReport input_voltage_nominal_report;
-  if (read_hid_report(0x30, input_voltage_nominal_report)) {
+  if (read_hid_report(APC_REPORT_ID_INPUT_VOLTAGE_NOMINAL, input_voltage_nominal_report)) {
     parse_input_voltage_nominal_report(input_voltage_nominal_report, data);
   }
   
-  // 3. Input transfer limits (Reports 0x32, 0x33)
+  // 3. Input transfer limits (Reports APC_REPORT_ID_INPUT_TRANSFER_LOW, APC_REPORT_ID_INPUT_TRANSFER_HIGH)
   HidReport input_transfer_low_report;
-  if (read_hid_report(0x32, input_transfer_low_report)) {
+  if (read_hid_report(APC_REPORT_ID_INPUT_TRANSFER_LOW, input_transfer_low_report)) {
     parse_input_transfer_limits_report(input_transfer_low_report, data);
   }
   
   HidReport input_transfer_high_report;
-  if (read_hid_report(0x33, input_transfer_high_report)) {
+  if (read_hid_report(APC_REPORT_ID_INPUT_TRANSFER_HIGH, input_transfer_high_report)) {
     parse_input_transfer_limits_report(input_transfer_high_report, data);
   }
   
-  // 4. Battery runtime low threshold (Report 0x24)
+  // 4. Battery runtime low threshold (Report APC_REPORT_ID_BATTERY_RUNTIME_LOW)
   HidReport battery_runtime_low_report;
-  if (read_hid_report(0x24, battery_runtime_low_report)) {
+  if (read_hid_report(APC_REPORT_ID_BATTERY_RUNTIME_LOW, battery_runtime_low_report)) {
     parse_battery_runtime_low_report(battery_runtime_low_report, data);
   }
   
-  // 5. Manufacturing dates (Reports 0x07, 0x20, 0x7b)
+  // 5. Manufacturing dates (Reports APC_REPORT_ID_MFR_DATE_UPS, APC_REPORT_ID_MFR_DATE_BATTERY, 0x7b)
   HidReport power_summary_mfr_date_report;
-  if (read_hid_report(0x07, power_summary_mfr_date_report)) {
+  if (read_hid_report(APC_REPORT_ID_MFR_DATE_UPS, power_summary_mfr_date_report)) {
     parse_manufacture_date_report(power_summary_mfr_date_report, data, false); // UPS mfr date
   }
   
   HidReport battery_mfr_date_report;
-  if (read_hid_report(0x20, battery_mfr_date_report)) {
+  if (read_hid_report(APC_REPORT_ID_MFR_DATE_BATTERY, battery_mfr_date_report)) {
     parse_manufacture_date_report(battery_mfr_date_report, data, true); // Battery mfr date
   }
   
-  // 6. UPS delay shutdown (Report 0x41)
+  // 6. UPS delay shutdown (Report APC_REPORT_ID_DELAY_SHUTDOWN)
   HidReport ups_delay_shutdown_report;
-  if (read_hid_report(0x41, ups_delay_shutdown_report)) {
+  if (read_hid_report(APC_REPORT_ID_DELAY_SHUTDOWN, ups_delay_shutdown_report)) {
     parse_ups_delay_shutdown_report(ups_delay_shutdown_report, data);
   }
 
-  // 7. UPS delay reboot (Report 0x40)  
+  // 7. UPS delay reboot (Report APC_REPORT_ID_DELAY_REBOOT)  
   HidReport ups_delay_reboot_report;
-  if (read_hid_report(0x40, ups_delay_reboot_report)) {
+  if (read_hid_report(APC_REPORT_ID_DELAY_REBOOT, ups_delay_reboot_report)) {
     parse_ups_delay_reboot_report(ups_delay_reboot_report, data);
   }
   
-  // 7. Battery charge thresholds (Reports 0x0f, 0x11)
+  // 7. Battery charge thresholds (Reports APC_REPORT_ID_CHARGE_WARNING, APC_REPORT_ID_CHARGE_LOW)
   HidReport battery_charge_warning_report;
-  if (read_hid_report(0x0f, battery_charge_warning_report)) {
+  if (read_hid_report(APC_REPORT_ID_CHARGE_WARNING, battery_charge_warning_report)) {
     parse_battery_charge_threshold_report(battery_charge_warning_report, data, false); // warning
   }
   
   HidReport battery_charge_low_report;
-  if (read_hid_report(0x11, battery_charge_low_report)) {
+  if (read_hid_report(APC_REPORT_ID_CHARGE_LOW, battery_charge_low_report)) {
     parse_battery_charge_threshold_report(battery_charge_low_report, data, true); // low
   }
   
-  // 8. Battery chemistry/type (Report 0x03)
+  // 8. Battery chemistry/type (shared report ID)
   HidReport battery_chemistry_report;
-  if (read_hid_report(0x03, battery_chemistry_report)) {
+  if (read_hid_report(battery_chemistry::REPORT_ID, battery_chemistry_report)) {
     parse_battery_chemistry_report(battery_chemistry_report, data);
   }
   
@@ -1145,21 +1194,21 @@ void ApcHidProtocol::read_missing_dynamic_values(UpsData &data) {
   // Set battery status based on current battery level and charging state
   if (!std::isnan(data.battery.level)) {
     if (data.battery.level >= 90) {
-      data.battery.status = "Full";
+      data.battery.status = battery_status::FULL;
     } else if (data.battery.level >= 20) {
-      data.battery.status = "Good";
+      data.battery.status = battery_status::GOOD;
     } else if (data.battery.level >= 10) {
-      data.battery.status = "Low";
+      data.battery.status = battery_status::LOW;
     } else {
-      data.battery.status = "Critical";
+      data.battery.status = battery_status::CRITICAL;
     }
     ESP_LOGI(APC_HID_TAG, "APC Battery status: %s (%.0f%%)", data.battery.status.c_str(), data.battery.level);
   }
   
-  // 8. Test result reading (Report 0x52 - same as test command)
+  // 8. Test result reading (Report APC_REPORT_ID_TEST_RESULT - same as test command)
   // Based on NUT: "UPS.Battery.Test" maps to test result
   HidReport test_result_report;
-  if (read_hid_report(0x52, test_result_report)) {
+  if (read_hid_report(APC_REPORT_ID_TEST_RESULT, test_result_report)) {
     parse_test_result_report(test_result_report, data);
   }
   
@@ -1172,7 +1221,7 @@ void ApcHidProtocol::parse_battery_voltage_nominal_report(const HidReport &repor
     return;
   }
   
-  // NUT debug: ReportID: 0x25, Value: 12 (UPS.Battery.ConfigVoltage)
+  // NUT debug: ReportID: APC_REPORT_ID_BATTERY_VOLTAGE_NOMINAL, Value: 12 (UPS.Battery.ConfigVoltage)
   // Data format: [ID, volt_low, volt_high] - 16-bit little endian
   // CRITICAL FIX: Raw value 1200 needs to be scaled to 12.0V (divide by 100)
   uint16_t voltage_raw = report.data[1] | (report.data[2] << 8);
@@ -1188,7 +1237,7 @@ void ApcHidProtocol::parse_battery_voltage_actual_report(const HidReport &report
     return;
   }
   
-  // NUT debug: ReportID: 0x26, Value: 13.67 (UPS.Battery.Voltage)
+  // NUT debug: ReportID: APC_REPORT_ID_BATTERY_VOLTAGE, Value: 13.67 (UPS.Battery.Voltage)
   // Data format: [ID, volt_low, volt_high] - 16-bit little endian
   // The value should be similar to 13.67V based on NUT debug
   uint16_t voltage_raw = report.data[1] | (report.data[2] << 8);
@@ -1224,7 +1273,7 @@ void ApcHidProtocol::parse_input_voltage_nominal_report(const HidReport &report,
     return;
   }
   
-  // NUT debug: ReportID: 0x30, Value: 230 (UPS.Input.ConfigVoltage)
+  // NUT debug: ReportID: APC_REPORT_ID_INPUT_VOLTAGE_NOMINAL, Value: 230 (UPS.Input.ConfigVoltage)
   // Data format: [ID, volt_low, volt_high] - 16-bit little endian
   uint16_t voltage_raw = report.data[1] | (report.data[2] << 8);
   data.power.input_voltage_nominal = static_cast<float>(voltage_raw);
@@ -1242,13 +1291,13 @@ void ApcHidProtocol::parse_input_transfer_limits_report(const HidReport &report,
   // Data format: [ID, limit_low, limit_high] - 16-bit little endian
   uint16_t limit_raw = report.data[1] | (report.data[2] << 8);
   
-  if (report.report_id == 0x32) {
-    // NUT debug: ReportID: 0x32, Value: 180 (UPS.Input.LowVoltageTransfer)
+  if (report.report_id == APC_REPORT_ID_INPUT_TRANSFER_LOW) {
+    // NUT debug: ReportID: APC_REPORT_ID_INPUT_TRANSFER_LOW, Value: 180 (UPS.Input.LowVoltageTransfer)
     data.power.input_transfer_low = static_cast<float>(limit_raw);
     ESP_LOGI(APC_HID_TAG, "APC Input transfer low: %.0fV (raw: 0x%02X%02X = %d)", 
              data.power.input_transfer_low, report.data[2], report.data[1], limit_raw);
-  } else if (report.report_id == 0x33) {
-    // NUT debug: ReportID: 0x33, Value: 266 (UPS.Input.HighVoltageTransfer)
+  } else if (report.report_id == APC_REPORT_ID_INPUT_TRANSFER_HIGH) {
+    // NUT debug: ReportID: APC_REPORT_ID_INPUT_TRANSFER_HIGH, Value: 266 (UPS.Input.HighVoltageTransfer)
     data.power.input_transfer_high = static_cast<float>(limit_raw);
     ESP_LOGI(APC_HID_TAG, "APC Input transfer high: %.0fV (raw: 0x%02X%02X = %d)", 
              data.power.input_transfer_high, report.data[2], report.data[1], limit_raw);
@@ -1261,7 +1310,7 @@ void ApcHidProtocol::parse_battery_runtime_low_report(const HidReport &report, U
     return;
   }
   
-  // NUT debug: ReportID: 0x24, Value: 120 (UPS.Battery.RemainingTimeLimit)
+  // NUT debug: ReportID: APC_REPORT_ID_BATTERY_RUNTIME_LOW, Value: 120 (UPS.Battery.RemainingTimeLimit)
   // Data format: [ID, time_low, time_high] - 16-bit little endian
   uint16_t time_raw = report.data[1] | (report.data[2] << 8);
   data.battery.runtime_low = static_cast<float>(time_raw);
@@ -1301,7 +1350,7 @@ void ApcHidProtocol::parse_ups_delay_shutdown_report(const HidReport &report, Up
     return;
   }
   
-  // NUT debug: ReportID: 0x41, Value: -1 (but NUT output shows ups.delay.shutdown: 20)
+  // NUT debug: ReportID: APC_REPORT_ID_DELAY_SHUTDOWN, Value: -1 (but NUT output shows ups.delay.shutdown: 20)
   // This suggests NUT does additional processing/conversion
   // Data format: [ID, delay_low, delay_high] - 16-bit signed little endian
   int16_t delay_raw = static_cast<int16_t>(report.data[1] | (report.data[2] << 8));
@@ -1325,7 +1374,7 @@ void ApcHidProtocol::parse_ups_delay_reboot_report(const HidReport &report, UpsD
     return;
   }
   
-  // NUT debug: ReportID: 0x40, Value: 0 
+  // NUT debug: ReportID: APC_REPORT_ID_DELAY_REBOOT, Value: 0 
   // APC uses 8-bit value for reboot delay
   uint8_t delay_raw = report.data[1];
   
@@ -1378,12 +1427,12 @@ void ApcHidProtocol::parse_battery_charge_threshold_report(const HidReport &repo
   uint8_t threshold_raw = report.data[1];
   
   if (is_low_threshold) {
-    // NUT debug: ReportID: 0x11, Value: 10 (RemainingCapacityLimit)
+    // NUT debug: ReportID: APC_REPORT_ID_CHARGE_LOW, Value: 10 (RemainingCapacityLimit)
     data.battery.charge_low = static_cast<float>(threshold_raw);
     ESP_LOGI(APC_HID_TAG, "APC Battery charge low threshold: %.0f%% (raw: %d)", 
              data.battery.charge_low, threshold_raw);
   } else {
-    // NUT debug: ReportID: 0x0f, Value: 50 (WarningCapacityLimit)
+    // NUT debug: ReportID: APC_REPORT_ID_CHARGE_WARNING, Value: 50 (WarningCapacityLimit)
     data.battery.charge_warning = static_cast<float>(threshold_raw);
     ESP_LOGI(APC_HID_TAG, "APC Battery charge warning threshold: %.0f%% (raw: %d)", 
              data.battery.charge_warning, threshold_raw);
@@ -1396,33 +1445,14 @@ void ApcHidProtocol::parse_battery_chemistry_report(const HidReport &report, Ups
     return;
   }
   
-  // NUT debug: ReportID: 0x03, Value: 4 (iDeviceChemistry)
+  // NUT debug: ReportID: APC_REPORT_ID_BATTERY_CHEMISTRY, Value: 4 (iDeviceChemistry)
   uint8_t chemistry_raw = report.data[1];
   
   // Map chemistry values based on NUT libhid implementation
-  switch (chemistry_raw) {
-    case 1:
-      data.battery.type = "Alkaline";
-      break;
-    case 2:
-      data.battery.type = "NiCd";
-      break;
-    case 3:
-      data.battery.type = "NiMH";
-      break;
-    case 4:
-      data.battery.type = "PbAc";  // Lead Acid (matches NUT output)
-      break;
-    case 5:
-      data.battery.type = "LiIon";
-      break;
-    case 6:
-      data.battery.type = "LiPoly";
-      break;
-    default:
-      data.battery.type = battery_status::UNKNOWN;
-      ESP_LOGW(APC_HID_TAG, "Unknown APC battery chemistry value: %d", chemistry_raw);
-      break;
+  data.battery.type = battery_chemistry::id_to_string(chemistry_raw);
+  
+  if (data.battery.type == battery_chemistry::UNKNOWN) {
+    ESP_LOGW(APC_HID_TAG, "Unknown APC battery chemistry value: %d", chemistry_raw);
   }
   
   ESP_LOGI(APC_HID_TAG, "APC Battery chemistry: %s (raw: %d)", 
@@ -1433,9 +1463,9 @@ bool ApcHidProtocol::beeper_enable() {
   ESP_LOGD(APC_HID_TAG, "Sending APC beeper enable command");
   
   // APC DEVICE SPECIFIC: From NUT debug, your device supports TWO beeper report IDs:
-  // 0x18: UPS.PowerSummary.AudibleAlarmControl
-  // 0x78: UPS.AudibleAlarmControl  
-  uint8_t report_ids_to_try[] = {0x18, 0x78, 0x1f, 0x0c};
+  // APC_REPORT_ID_AUDIBLE_ALARM: UPS.PowerSummary.AudibleAlarmControl
+  // APC_REPORT_ID_AUDIBLE_BEEPER: UPS.AudibleAlarmControl  
+  uint8_t report_ids_to_try[] = {APC_REPORT_ID_AUDIBLE_ALARM, APC_REPORT_ID_AUDIBLE_BEEPER, APC_REPORT_ID_BEEPER, APC_REPORT_ID_POWER_SUMMARY};
   
   for (size_t i = 0; i < sizeof(report_ids_to_try); i++) {
     uint8_t report_id = report_ids_to_try[i];
@@ -1443,7 +1473,7 @@ bool ApcHidProtocol::beeper_enable() {
     
     uint8_t beeper_data[2] = {report_id, beeper::CONTROL_ENABLE};  // Report ID, Value=2 (enabled)
     
-    esp_err_t ret = parent_->hid_set_report(0x03, report_id, beeper_data, sizeof(beeper_data), parent_->get_protocol_timeout());
+    esp_err_t ret = parent_->hid_set_report(HID_REPORT_TYPE_FEATURE, report_id, beeper_data, sizeof(beeper_data), parent_->get_protocol_timeout());
     if (ret == ESP_OK) {
       ESP_LOGI(APC_HID_TAG, "APC beeper enabled successfully with report ID 0x%02X", report_id);
       return true;
@@ -1460,9 +1490,9 @@ bool ApcHidProtocol::beeper_disable() {
   ESP_LOGD(APC_HID_TAG, "Sending APC beeper disable command");
   
   // APC DEVICE SPECIFIC: From NUT debug, your device supports TWO beeper report IDs:
-  // 0x18: UPS.PowerSummary.AudibleAlarmControl
-  // 0x78: UPS.AudibleAlarmControl  
-  uint8_t report_ids_to_try[] = {0x18, 0x78, 0x1f, 0x0c};
+  // APC_REPORT_ID_AUDIBLE_ALARM: UPS.PowerSummary.AudibleAlarmControl
+  // APC_REPORT_ID_AUDIBLE_BEEPER: UPS.AudibleAlarmControl  
+  uint8_t report_ids_to_try[] = {APC_REPORT_ID_AUDIBLE_ALARM, APC_REPORT_ID_AUDIBLE_BEEPER, APC_REPORT_ID_BEEPER, APC_REPORT_ID_POWER_SUMMARY};
   
   for (size_t i = 0; i < sizeof(report_ids_to_try); i++) {
     uint8_t report_id = report_ids_to_try[i];
@@ -1470,7 +1500,7 @@ bool ApcHidProtocol::beeper_disable() {
     
     uint8_t beeper_data[2] = {report_id, beeper::CONTROL_DISABLE};  // Report ID, Value=1 (disabled)
     
-    esp_err_t ret = parent_->hid_set_report(0x03, report_id, beeper_data, sizeof(beeper_data), parent_->get_protocol_timeout());
+    esp_err_t ret = parent_->hid_set_report(HID_REPORT_TYPE_FEATURE, report_id, beeper_data, sizeof(beeper_data), parent_->get_protocol_timeout());
     if (ret == ESP_OK) {
       ESP_LOGI(APC_HID_TAG, "APC beeper disabled successfully with report ID 0x%02X", report_id);
       return true;
@@ -1492,7 +1522,7 @@ bool ApcHidProtocol::beeper_mute() {
   // - Different from DISABLE (1) which turns off beeper completely
   // - Current device status shows "enabled" (2), mute changes to "muted" (3)
   
-  uint8_t report_ids_to_try[] = {0x18, 0x78};
+  uint8_t report_ids_to_try[] = {APC_REPORT_ID_AUDIBLE_ALARM, APC_REPORT_ID_AUDIBLE_BEEPER};
   
   for (size_t i = 0; i < sizeof(report_ids_to_try); i++) {
     uint8_t report_id = report_ids_to_try[i];
@@ -1500,7 +1530,7 @@ bool ApcHidProtocol::beeper_mute() {
     
     uint8_t beeper_data[2] = {report_id, beeper::CONTROL_MUTE};  // Report ID, Value=3 (muted/acknowledged)
     
-    esp_err_t ret = parent_->hid_set_report(0x03, report_id, beeper_data, sizeof(beeper_data), parent_->get_protocol_timeout());
+    esp_err_t ret = parent_->hid_set_report(HID_REPORT_TYPE_FEATURE, report_id, beeper_data, sizeof(beeper_data), parent_->get_protocol_timeout());
     if (ret == ESP_OK) {
       ESP_LOGI(APC_HID_TAG, "APC beeper muted (current alarms acknowledged) with report ID 0x%02X", report_id);
       return true;
@@ -1554,8 +1584,8 @@ bool ApcHidProtocol::beeper_test() {
   
   // Step 4: Restore original beeper state
   ESP_LOGI(APC_HID_TAG, "Step 4: Restoring original beeper state: %d", original_state);
-  uint8_t restore_data[2] = {0x18, original_state};
-  esp_err_t ret = parent_->hid_set_report(0x03, APC_REPORT_ID_AUDIBLE_ALARM, restore_data, sizeof(restore_data), parent_->get_protocol_timeout());
+  uint8_t restore_data[2] = {APC_REPORT_ID_AUDIBLE_ALARM, original_state};
+  esp_err_t ret = parent_->hid_set_report(HID_REPORT_TYPE_FEATURE, APC_REPORT_ID_AUDIBLE_ALARM, restore_data, sizeof(restore_data), parent_->get_protocol_timeout());
   
   if (ret == ESP_OK) {
     ESP_LOGI(APC_HID_TAG, "APC beeper test sequence completed successfully");
@@ -1576,19 +1606,19 @@ bool ApcHidProtocol::start_battery_test_quick() {
     return false;
   }
   
-  // APC Back-UPS ES 700G (PID=0x0002) is INPUT-ONLY and doesn't support HID SET_REPORT
+  // APC Back-UPS ES 700G (PID=usb::PRODUCT_ID_APC_BACK_UPS_ES_700) is INPUT-ONLY and doesn't support HID SET_REPORT
   uint16_t product_id = parent_->get_product_id();
-  if (product_id == 0x0002) {
-    ESP_LOGW(APC_HID_TAG, "APC Back-UPS ES 700G (PID=0x0002) is INPUT-ONLY device - battery tests not supported via HID");
+  if (product_id == usb::PRODUCT_ID_APC_BACK_UPS_ES_700) {
+    ESP_LOGW(APC_HID_TAG, "APC Back-UPS ES 700G (PID=0x%04X) is INPUT-ONLY device - battery tests not supported via HID", usb::PRODUCT_ID_APC_BACK_UPS_ES_700);
     ESP_LOGI(APC_HID_TAG, "Tip: Use the physical TEST button on the UPS instead");
     return false;
   }
   
-  // For supported models: Based on NUT debug logs, APC uses report ID 0x52 for battery test
+  // For supported models: Based on NUT debug logs, APC uses report ID APC_REPORT_ID_TEST_RESULT for battery test
   // Command value 1 = Quick test (based on NUT test_write_info struct)
-  uint8_t test_data[2] = {0x52, test::COMMAND_QUICK};
+  uint8_t test_data[2] = {APC_REPORT_ID_TEST_RESULT, test::COMMAND_QUICK};
   
-  esp_err_t ret = parent_->hid_set_report(0x03, 0x52, test_data, sizeof(test_data), parent_->get_protocol_timeout());
+  esp_err_t ret = parent_->hid_set_report(HID_REPORT_TYPE_FEATURE, APC_REPORT_ID_TEST_RESULT, test_data, sizeof(test_data), parent_->get_protocol_timeout());
   if (ret == ESP_OK) {
     ESP_LOGI(APC_HID_TAG, "APC quick battery test command sent successfully");
     return true;
@@ -1602,19 +1632,19 @@ bool ApcHidProtocol::start_battery_test_quick() {
 bool ApcHidProtocol::start_battery_test_deep() {
   ESP_LOGI(APC_HID_TAG, "Starting APC deep battery test");
   
-  // APC Back-UPS ES 700G (PID=0x0002) is INPUT-ONLY and doesn't support HID SET_REPORT
+  // APC Back-UPS ES 700G (PID=usb::PRODUCT_ID_APC_BACK_UPS_ES_700) is INPUT-ONLY and doesn't support HID SET_REPORT
   uint16_t product_id = parent_->get_product_id();
-  if (product_id == 0x0002) {
-    ESP_LOGW(APC_HID_TAG, "APC Back-UPS ES 700G (PID=0x0002) is INPUT-ONLY device - battery tests not supported via HID");
+  if (product_id == usb::PRODUCT_ID_APC_BACK_UPS_ES_700) {
+    ESP_LOGW(APC_HID_TAG, "APC Back-UPS ES 700G (PID=0x%04X) is INPUT-ONLY device - battery tests not supported via HID", usb::PRODUCT_ID_APC_BACK_UPS_ES_700);
     ESP_LOGI(APC_HID_TAG, "Tip: Use the physical TEST button on the UPS instead");
     return false;
   }
   
-  // For supported models: Based on NUT debug logs, APC uses report ID 0x52 for battery test
+  // For supported models: Based on NUT debug logs, APC uses report ID APC_REPORT_ID_TEST_RESULT for battery test
   // Command value 2 = Deep test (based on NUT test_write_info struct)
-  uint8_t test_data[2] = {0x52, test::COMMAND_DEEP};
+  uint8_t test_data[2] = {APC_REPORT_ID_TEST_RESULT, test::COMMAND_DEEP};
   
-  esp_err_t ret = parent_->hid_set_report(0x03, 0x52, test_data, sizeof(test_data), parent_->get_protocol_timeout());
+  esp_err_t ret = parent_->hid_set_report(HID_REPORT_TYPE_FEATURE, APC_REPORT_ID_TEST_RESULT, test_data, sizeof(test_data), parent_->get_protocol_timeout());
   if (ret == ESP_OK) {
     ESP_LOGI(APC_HID_TAG, "APC deep battery test command sent successfully");
     return true;
@@ -1628,19 +1658,19 @@ bool ApcHidProtocol::start_battery_test_deep() {
 bool ApcHidProtocol::stop_battery_test() {
   ESP_LOGI(APC_HID_TAG, "Stopping APC battery test");
   
-  // APC Back-UPS ES 700G (PID=0x0002) is INPUT-ONLY and doesn't support HID SET_REPORT
+  // APC Back-UPS ES 700G (PID=usb::PRODUCT_ID_APC_BACK_UPS_ES_700) is INPUT-ONLY and doesn't support HID SET_REPORT
   uint16_t product_id = parent_->get_product_id();
-  if (product_id == 0x0002) {
-    ESP_LOGW(APC_HID_TAG, "APC Back-UPS ES 700G (PID=0x0002) is INPUT-ONLY device - battery tests not supported via HID");
+  if (product_id == usb::PRODUCT_ID_APC_BACK_UPS_ES_700) {
+    ESP_LOGW(APC_HID_TAG, "APC Back-UPS ES 700G (PID=0x%04X) is INPUT-ONLY device - battery tests not supported via HID", usb::PRODUCT_ID_APC_BACK_UPS_ES_700);
     ESP_LOGI(APC_HID_TAG, "Physical test will stop automatically after completion");
     return false;
   }
   
-  // For supported models: Based on NUT debug logs, APC uses report ID 0x52 for battery test
+  // For supported models: Based on NUT debug logs, APC uses report ID APC_REPORT_ID_TEST_RESULT for battery test
   // Command value 3 = Abort test (based on NUT test_write_info struct)
-  uint8_t test_data[2] = {0x52, test::COMMAND_ABORT};
+  uint8_t test_data[2] = {APC_REPORT_ID_TEST_RESULT, test::COMMAND_ABORT};
   
-  esp_err_t ret = parent_->hid_set_report(0x03, 0x52, test_data, sizeof(test_data), parent_->get_protocol_timeout());
+  esp_err_t ret = parent_->hid_set_report(HID_REPORT_TYPE_FEATURE, APC_REPORT_ID_TEST_RESULT, test_data, sizeof(test_data), parent_->get_protocol_timeout());
   if (ret == ESP_OK) {
     ESP_LOGI(APC_HID_TAG, "APC battery test stop command sent successfully");
     return true;
@@ -1654,11 +1684,11 @@ bool ApcHidProtocol::stop_battery_test() {
 bool ApcHidProtocol::start_ups_test() {
   ESP_LOGI(APC_HID_TAG, "Starting APC UPS panel test");
   
-  // Based on NUT debug logs, APC uses report ID 0x79 for panel test
+  // Based on NUT debug logs, APC uses report ID APC_REPORT_ID_PANEL_TEST for panel test
   // Command value 1 = Start panel test (based on NUT analysis)
-  uint8_t test_data[2] = {0x79, 1};
+  uint8_t test_data[2] = {APC_REPORT_ID_PANEL_TEST, 1};
   
-  esp_err_t ret = parent_->hid_set_report(0x03, 0x79, test_data, sizeof(test_data), parent_->get_protocol_timeout());
+  esp_err_t ret = parent_->hid_set_report(HID_REPORT_TYPE_FEATURE, APC_REPORT_ID_PANEL_TEST, test_data, sizeof(test_data), parent_->get_protocol_timeout());
   if (ret == ESP_OK) {
     ESP_LOGI(APC_HID_TAG, "APC UPS panel test command sent successfully");
     return true;
@@ -1671,11 +1701,11 @@ bool ApcHidProtocol::start_ups_test() {
 bool ApcHidProtocol::stop_ups_test() {
   ESP_LOGI(APC_HID_TAG, "Stopping APC UPS panel test");
   
-  // Based on NUT debug logs, APC uses report ID 0x79 for panel test
+  // Based on NUT debug logs, APC uses report ID APC_REPORT_ID_PANEL_TEST for panel test
   // Command value 0 = Stop/abort panel test (based on NUT analysis)
-  uint8_t test_data[2] = {0x79, 0};
+  uint8_t test_data[2] = {APC_REPORT_ID_PANEL_TEST, 0};
   
-  esp_err_t ret = parent_->hid_set_report(0x03, 0x79, test_data, sizeof(test_data), parent_->get_protocol_timeout());
+  esp_err_t ret = parent_->hid_set_report(HID_REPORT_TYPE_FEATURE, APC_REPORT_ID_PANEL_TEST, test_data, sizeof(test_data), parent_->get_protocol_timeout());
   if (ret == ESP_OK) {
     ESP_LOGI(APC_HID_TAG, "APC UPS panel test stop command sent successfully");
     return true;
@@ -1697,7 +1727,7 @@ void ApcHidProtocol::parse_test_result_report(const HidReport &report, UpsData &
   // 4 = "Aborted", 5 = "In progress", 6 = "No test initiated", 7 = "Test scheduled"
   uint8_t test_result_value = report.data[1];
   
-  ESP_LOGD(APC_HID_TAG, "Raw test result from report 0x52: 0x%02X (%d)", test_result_value, test_result_value);
+  ESP_LOGD(APC_HID_TAG, "Raw test result from report 0x%02X: 0x%02X (%d)", APC_REPORT_ID_TEST_RESULT, test_result_value, test_result_value);
   
   switch (test_result_value) {
     case 1:
@@ -1739,12 +1769,12 @@ void ApcHidProtocol::read_frequency_data(UpsData &data) {
   
   // Report IDs commonly used for frequency measurements:
   const std::vector<uint8_t> frequency_report_ids = {
-    0x0d,                        // APC-specific config report (apparent power and frequency) - PRIORITY
-    HID_USAGE_POW_FREQUENCY,     // 0x32 - Standard HID frequency usage
-    HID_USAGE_POW_VOLTAGE,       // 0x30 - Input measurements (may include frequency)  
-    HID_USAGE_POW_CURRENT,       // 0x31 - Output measurements (may include frequency)
-    HID_USAGE_POW_OUTPUT,        // 0x1C - Output collection (might contain frequency)
-    HID_USAGE_POW_INPUT,         // 0x1A - Input collection (might contain frequency)
+    APC_REPORT_ID_FREQUENCY,     // APC-specific config report (apparent power and frequency) - PRIORITY
+    HID_USAGE_POW_FREQUENCY,     // Standard HID frequency usage
+    HID_USAGE_POW_VOLTAGE,       // Input measurements (may include frequency)  
+    HID_USAGE_POW_CURRENT,       // Output measurements (may include frequency)
+    HID_USAGE_POW_OUTPUT,        // Output collection (might contain frequency)
+    HID_USAGE_POW_INPUT,         // Input collection (might contain frequency)
   };
   
   for (uint8_t report_id : frequency_report_ids) {
@@ -1775,31 +1805,31 @@ float ApcHidProtocol::parse_frequency_from_report(const HidReport &report) {
            report.data.size() > 2 ? report.data[2] : 0,
            report.data.size() > 3 ? report.data[3] : 0);
   
-  // APC-specific method: Report 0x0d frequency at byte[3] (based on ESP32 NUT server documentation)
-  if (report.data[0] == 0x0d) {
-    ESP_LOGD(APC_HID_TAG, "APC Method - Report 0x0d analysis: size=%zu bytes", report.data.size());
+  // APC-specific method: Report APC_REPORT_ID_FREQUENCY frequency at byte[3] (based on ESP32 NUT server documentation)
+  if (report.data[0] == APC_REPORT_ID_FREQUENCY) {
+    ESP_LOGD(APC_HID_TAG, "APC Method - Report 0x%02X analysis: size=%zu bytes", APC_REPORT_ID_FREQUENCY, report.data.size());
     if (report.data.size() >= 4) {
       uint8_t freq_byte = report.data[3];
-      ESP_LOGV(APC_HID_TAG, "APC Method - Report 0x0d byte[3]: %d (0x%02X) - Range check: %s", 
+      ESP_LOGV(APC_HID_TAG, "APC Method - Report 0x%02X byte[3]: %d (0x%02X) - Range check: %s", APC_REPORT_ID_FREQUENCY, 
                freq_byte, freq_byte,
                (freq_byte >= FREQUENCY_MIN_VALID && freq_byte <= FREQUENCY_MAX_VALID) ? "PASS" : "FAIL");
       if (freq_byte >= FREQUENCY_MIN_VALID && freq_byte <= FREQUENCY_MAX_VALID) {
-        ESP_LOGI(APC_HID_TAG, "Found frequency %.0f Hz using APC Method (report 0x0d, byte[3])", static_cast<float>(freq_byte));
+        ESP_LOGI(APC_HID_TAG, "Found frequency %.0f Hz using APC Method (report 0x%02X, byte[3])", static_cast<float>(freq_byte), APC_REPORT_ID_FREQUENCY);
         return static_cast<float>(freq_byte);
       }
     } else {
-      ESP_LOGW(APC_HID_TAG, "APC Method - Report 0x0d too short for frequency: only %zu bytes (need 4+)", report.data.size());
+      ESP_LOGW(APC_HID_TAG, "APC Method - Report 0x%02X too short for frequency: only %zu bytes (need 4+)", APC_REPORT_ID_FREQUENCY, report.data.size());
       // Try alternative: byte[1] might contain frequency or frequency-derived value in some APC models
       if (report.data.size() >= 2) {
         uint8_t alt_freq = report.data[1];
-        ESP_LOGV(APC_HID_TAG, "APC Method - Report 0x0d byte[1]: %d (0x%02X)", alt_freq, alt_freq);
+        ESP_LOGV(APC_HID_TAG, "APC Method - Report 0x%02X byte[1]: %d (0x%02X)", APC_REPORT_ID_FREQUENCY, alt_freq, alt_freq);
         
         // Check if this could be a frequency indicator (100 -> 50Hz, 120 -> 60Hz)
         if (alt_freq == 100) {
-          ESP_LOGI(APC_HID_TAG, "Found frequency 50 Hz using APC Method (report 0x0d, byte[1] = 100 -> 50Hz)");
+          ESP_LOGI(APC_HID_TAG, "Found frequency 50 Hz using APC Method (report 0x%02X, byte[1] = 100 -> 50Hz)", APC_REPORT_ID_FREQUENCY);
           return 50.0f;
         } else if (alt_freq == 120) {
-          ESP_LOGI(APC_HID_TAG, "Found frequency 60 Hz using APC Method (report 0x0d, byte[1] = 120 -> 60Hz)");
+          ESP_LOGI(APC_HID_TAG, "Found frequency 60 Hz using APC Method (report 0x%02X, byte[1] = 120 -> 60Hz)", APC_REPORT_ID_FREQUENCY);
           return 60.0f;
         }
       }
