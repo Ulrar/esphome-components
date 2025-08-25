@@ -160,6 +160,16 @@ namespace test {
     static constexpr uint8_t COMMAND_QUICK = 1;
     static constexpr uint8_t COMMAND_DEEP = 2;
     static constexpr uint8_t COMMAND_ABORT = 3;
+    
+    // Test result status strings (shared by APC and CyberPower)
+    static constexpr const char* RESULT_DONE_PASSED = "Done and passed";
+    static constexpr const char* RESULT_DONE_WARNING = "Done and warning";
+    static constexpr const char* RESULT_DONE_ERROR = "Done and error";
+    static constexpr const char* RESULT_ABORTED = "Aborted";
+    static constexpr const char* RESULT_IN_PROGRESS = "In progress";
+    static constexpr const char* RESULT_NO_TEST = "No test initiated";
+    static constexpr const char* RESULT_SCHEDULED = "Test scheduled";
+    static constexpr const char* RESULT_ERROR_READING = "Error reading test result";
 }
 
 // ==================== Sensor Type Identifiers ====================

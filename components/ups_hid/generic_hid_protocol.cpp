@@ -230,7 +230,7 @@ bool GenericHidProtocol::read_data(UpsData &data) {
   }
   
   // Set default test result
-  data.test.ups_test_result = "No test initiated";
+  data.test.ups_test_result = test::RESULT_NO_TEST;
   
   return success;
 }

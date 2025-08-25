@@ -844,7 +844,7 @@ void CyberPowerProtocol::read_missing_dynamic_values(UpsData &data) {
   }
   
   // 5. Set static/derived values based on NUT behavior  
-  data.test.ups_test_result = "No test initiated";  // Default test result
+  data.test.ups_test_result = test::RESULT_NO_TEST;  // Default test result
   
   // NOTE: battery_status is now properly set based on charging state in parse_present_status_report
   
@@ -1127,7 +1127,7 @@ void CyberPowerProtocol::parse_test_result_report(const HidReport &report, UpsDa
   // Parse test result from Report 0x14 (UPS.Output.Test)
   // Based on NUT test_read_info lookup table
   if (report.data.size() < 2) {
-    data.test.ups_test_result = "Error reading test result";
+    data.test.ups_test_result = test::RESULT_ERROR_READING;
     return;
   }
 
@@ -1140,25 +1140,25 @@ void CyberPowerProtocol::parse_test_result_report(const HidReport &report, UpsDa
 
   switch (test_result_value) {
     case 1:
-      data.test.ups_test_result = "Done and passed";
+      data.test.ups_test_result = test::RESULT_DONE_PASSED;
       break;
     case 2:
-      data.test.ups_test_result = "Done and warning";
+      data.test.ups_test_result = test::RESULT_DONE_WARNING;
       break;
     case 3:
-      data.test.ups_test_result = "Done and error";
+      data.test.ups_test_result = test::RESULT_DONE_ERROR;
       break;
     case 4:
-      data.test.ups_test_result = "Aborted";
+      data.test.ups_test_result = test::RESULT_ABORTED;
       break;
     case 5:
-      data.test.ups_test_result = "In progress";
+      data.test.ups_test_result = test::RESULT_IN_PROGRESS;
       break;
     case 6:
-      data.test.ups_test_result = "No test initiated";
+      data.test.ups_test_result = test::RESULT_NO_TEST;
       break;
     case 7:
-      data.test.ups_test_result = "Test scheduled";
+      data.test.ups_test_result = test::RESULT_SCHEDULED;
       break;
     default:
       data.test.ups_test_result = "Unknown test result (" + std::to_string(test_result_value) + ")";
