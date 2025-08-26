@@ -1,0 +1,122 @@
+# Example: Complete UPS Configuration with Entity Grouping
+# Demonstrates improved organization using sorting_group_id
+# All entities are organized into logical groups in the web interface
+
+substitutions:
+  name: "grouped-ups-monitor"
+  friendly_name: "UPS Monitor (Grouped)"
+  simulation_mode: "true"        # Set to "false" for real hardware
+
+esphome:
+  name: "${name}"
+  friendly_name: "${friendly_name}"
+  comment: "UPS Monitor with organized entity groups"
+
+# Include entity grouping configuration
+packages:
+  # MUST BE FIRST - Sets up web server v3 with sorting groups
+  entity_groups: !include ../entity_groups.yaml
+  
+  # Core functionality
+  base_ups: !include ../base_ups.yaml
+  
+  # Grouped sensor packages (use these instead of non-grouped versions)
+  essential_grouped: !include ../essential_sensors_grouped.yaml
+  extended_grouped: !include ../extended_sensors_grouped.yaml  # Create this similarly
+  timer_grouped: !include ../timer_sensors_grouped.yaml        # Create this similarly
+  controls_grouped: !include ../ups_controls_grouped.yaml
+  
+  # Optional: Device-specific optimizations
+  # cyberpower_device: !include ../device_types/cyberpower_cp1500.yaml
+
+# Benefits of this configuration:
+# 
+# Web Interface Organization:
+# ├── ⚡ Power Status (sorting_weight: 10)
+# │   ├── UPS Online
+# │   ├── On Battery Power
+# │   ├── Low Battery Warning
+# │   └── Overload Warning
+# │
+# ├── 🔋 Battery Monitoring (sorting_weight: 20)
+# │   ├── Battery Level
+# │   ├── Runtime Remaining
+# │   ├── Battery Charging
+# │   ├── Battery Voltage
+# │   └── Battery Status
+# │
+# ├── ⚡ Voltage & Frequency (sorting_weight: 30)
+# │   ├── Input Voltage
+# │   ├── Output Voltage
+# │   ├── Input Frequency
+# │   └── Transfer Thresholds
+# │
+# ├── 📊 Load & Power (sorting_weight: 40)
+# │   ├── Load Percentage
+# │   ├── UPS Load Power
+# │   └── Real Power Nominal
+# │
+# ├── ⏱️ Active Timers (sorting_weight: 50)
+# │   ├── Timer Shutdown
+# │   ├── Timer Start
+# │   ├── Timer Reboot
+# │   └── Active Timer Count
+# │
+# ├── ⚙️ Configuration (sorting_weight: 60)
+# │   ├── Delay Shutdown
+# │   ├── Delay Start
+# │   ├── Delay Reboot
+# │   ├── Beeper Status
+# │   └── Input Sensitivity
+# │
+# ├── 🔔 Beeper Controls (sorting_weight: 70)
+# │   ├── Enable
+# │   ├── Disable
+# │   ├── Mute
+# │   └── Test
+# │
+# ├── 🧪 Test Controls (sorting_weight: 80)
+# │   ├── Quick Battery Test
+# │   ├── Deep Battery Test
+# │   ├── Stop Battery Test
+# │   ├── Panel Test
+# │   ├── Stop Panel Test
+# │   └── Test Result
+# │
+# ├── ℹ️ Device Information (sorting_weight: 90)
+# │   ├── Manufacturer
+# │   ├── Model
+# │   ├── Serial Number
+# │   ├── Firmware Version
+# │   └── Manufacture Date
+# │
+# └── 📡 System Status (sorting_weight: 100)
+#     ├── Uptime
+#     ├── WiFi Signal
+#     ├── IP Address
+#     └── ESPHome Version
+
+# Home Assistant Benefits:
+# - Entities appear in logical groups in device view
+# - Easier to find specific information
+# - Reduces cognitive load when managing UPS
+# - Better suited for dashboard organization
+# - Improved accessibility for automation setup
+
+# Navigation Benefits:
+# - Critical info (power status) appears first
+# - Related entities grouped together
+# - Less scrolling required
+# - Clear visual hierarchy
+# - Intuitive organization matches mental model
+
+# Optional: Add custom automations that leverage grouped entities
+script:
+  - id: log_all_groups
+    then:
+      - logger.log:
+          format: "Power Status: Online=%d, Battery=%d%%, Runtime=%d min"
+          args: 
+            - 'id(ups_online).state'
+            - 'int(id(battery_level).state)'
+            - 'int(id(runtime_remaining).state)'

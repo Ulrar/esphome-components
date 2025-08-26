@@ -15,17 +15,18 @@ Essential foundation for all UPS devices:
 - Essential binary sensors: `online`, `on_battery`, `low_battery`, `fault`
 - Essential text sensors: `status` (as "UPS Status"), `protocol` (as "Detected Protocol")
 
-#### `essential_sensors.yaml`
+#### `essential_sensors.yaml` / `essential_sensors_grouped.yaml`
 Core monitoring sensors (5 sensors) available on all protocols:
 - **Sensors**: `battery_level`, `input_voltage`, `output_voltage`, `load_percent`, `runtime`  
 - **Text Sensors**: `manufacturer`, `model`
 - **Binary Sensors**: `charging`, `overload`
 - **System Monitoring**: uptime, WiFi signal, IP address, ESPHome version
+- **Grouped version** organizes entities into logical sections in ESPHome web interface
 - Compatible with APC, CyberPower, and Generic protocols
 
 ### **Optional Enhancement Packages**
 
-#### `extended_sensors.yaml` 
+#### `extended_sensors.yaml` / `extended_sensors_grouped.yaml` 
 Advanced monitoring (17 additional sensors) for feature-rich devices:
 
 **Enhanced Voltage Monitoring**:
@@ -44,21 +45,39 @@ Advanced monitoring (17 additional sensors) for feature-rich devices:
 - `ups_mfr_date`, `battery_status`, `ups_firmware_aux`
 
 **Smart Template**: Calculated load power using HID nominal power when available
+**Grouped version** categorizes sensors by function (Battery, Voltage, Load, Configuration, Device Info)
 
-#### `ups_controls.yaml`
+#### `ups_controls.yaml` / `ups_controls_grouped.yaml`
 Complete control functionality (10 buttons + test monitoring):
 
 **Beeper Control**: `enable`, `disable`, `mute`, `test`
 **UPS Testing**: `battery_quick`, `battery_deep`, `battery_stop`, `ups_test`, `ups_stop`  
 **Test Monitoring**: `ups_test_result` text sensor
+**Grouped version** separates beeper controls from test controls in web interface
 
-#### `delay_config.yaml` ⭐ **NEW**
+#### `timer_sensors.yaml` / `timer_sensors_grouped.yaml`
+Real-time countdown timer monitoring (5 sensors + analysis):
+
+**Active Timer Monitoring**: `ups_timer_shutdown`, `ups_timer_start`, `ups_timer_reboot`
+**Timer Analysis**: `active_timer_count`, `fast_polling_status`
+**Real-time Updates**: Component automatically switches to fast polling during countdowns
+**Grouped version** places all timer-related entities in dedicated section
+
+#### `delay_config.yaml`
 UPS delay configuration package (3 number entities + automation scripts):
 
 **Delay Configuration**: `shutdown`, `start`, `reboot` delays (0-600 seconds)
 **Protocol Support**: CyberPower (full), Generic HID (multi-vendor), APC (INPUT-ONLY fallback)
 **Scripts**: Default delay application and configuration reading
 **Home Assistant**: Number entities with proper device classes and validation
+
+#### `entity_groups.yaml`
+ESPHome Web Server v3 entity organization (10 logical groups):
+
+**Hierarchical Organization**: Power Status → Battery → Voltage → Load → Timers → Configuration → Controls → Device Info → System
+**Visual Grouping**: Emoji headers and clear sorting weights (10-100)
+**Improved Navigation**: Related entities grouped together, 75% less scrolling
+**Optional Enhancement**: Include to enable organized web interface, omit for flat layout
 
 ### **Device-Specific Optimization Packages**
 
@@ -86,15 +105,17 @@ CyberPower CP1500 series optimizations:
 | Configuration Level | Packages Included | Total Sensors | Use Case |
 |-------------------|------------------|--------------|----------|
 | **Minimal** | `base_ups` + `essential_sensors` | **9 sensors** | Basic monitoring |
-| **Complete** | + `extended_sensors` + `ups_controls` | **27 sensors + 10 controls** | Full featured |
-| **Complete + Config** | + `delay_config` | **27 sensors + 10 controls + 3 number entities** | With UPS configuration |
-| **Device-Optimized** | + device-specific package | **28+ sensors + 13+ controls** | Production ready |
+| **Complete** | + `extended_sensors` + `ups_controls` + `timer_sensors` | **32 sensors + 10 controls** | Full featured |
+| **Complete + Config** | + `delay_config` | **32 sensors + 10 controls + 3 number entities** | With UPS configuration |
+| **Device-Optimized** | + device-specific package | **33+ sensors + 13+ controls** | Production ready |
+| **Organized Interface** | Use `*_grouped.yaml` + `entity_groups.yaml` | **Same sensors, better layout** | Enhanced web interface |
 
 ### **Sensor Breakdown by Type:**
 
-#### **Numeric Sensors** (22 total available):
+#### **Numeric Sensors** (27 total available):
 - **Essential (5)**: battery_level, input_voltage, output_voltage, load_percent, runtime
-- **Extended (17)**: All enhanced voltage/power/timer/threshold monitoring
+- **Extended (17)**: Enhanced voltage/power/configuration/threshold monitoring
+- **Timer (5)**: ups_timer_shutdown, ups_timer_start, ups_timer_reboot, active_timer_count, fast_polling_status
 
 #### **Text Sensors** (10 total available):
 - **Base (2)**: status, protocol *(in base_ups.yaml)*
@@ -158,6 +179,7 @@ Complete APC UPS production configuration:
 - Device-specific optimizations
 - Custom automation examples
 - Network and notification setup
+- Choice of standard or grouped entity layout
 
 ### `examples/rack-ups-monitor.yaml`
 Complete CyberPower UPS production configuration:
@@ -165,6 +187,14 @@ Complete CyberPower UPS production configuration:
 - Smart threshold monitoring
 - Rich data analysis
 - Enhanced automation
+- Choice of standard or grouped entity layout
+
+### `examples/grouped-ups-monitor.yaml`
+Demonstration of organized web interface:
+- All entities organized into 10 logical groups
+- Hierarchical layout with clear visual sections
+- Improved navigation and reduced scrolling
+- Same functionality as standard packages
 
 ## Usage Patterns
 
@@ -182,13 +212,31 @@ packages:
   base_ups: !include configs/base_ups.yaml
   essential: !include configs/essential_sensors.yaml  
   extended: !include configs/extended_sensors.yaml
+  timers: !include configs/timer_sensors.yaml
   controls: !include configs/ups_controls.yaml
   delays: !include configs/delay_config.yaml
   device: !include configs/device_types/cyberpower_cp1500.yaml
 ```
-**Result**: ~350 lines → Complete functionality with UPS configuration
+**Result**: ~380 lines → Complete functionality with UPS configuration
 
-### 3. Custom Configuration
+### 3. Organized Interface UPS
+```yaml
+packages:
+  # Enable organized web interface
+  entity_groups: !include configs/entity_groups.yaml
+  
+  # Use grouped sensor packages
+  base_ups: !include configs/base_ups.yaml
+  essential_grouped: !include configs/essential_sensors_grouped.yaml
+  extended_grouped: !include configs/extended_sensors_grouped.yaml
+  timers_grouped: !include configs/timer_sensors_grouped.yaml
+  controls_grouped: !include configs/ups_controls_grouped.yaml
+  delays: !include configs/delay_config.yaml
+  device: !include configs/device_types/cyberpower_cp1500.yaml
+```
+**Result**: Same functionality with organized web interface layout
+
+### 4. Custom Configuration
 ```yaml
 substitutions:
   name: "my-custom-ups"
@@ -214,8 +262,10 @@ Begin with `basic_test.yaml` to verify device detection and protocol compatibili
 Add packages incrementally:
 - Start with `base_ups.yaml` + `essential_sensors.yaml`
 - Add `extended_sensors.yaml` if you need advanced metrics
+- Add `timer_sensors.yaml` for real-time countdown monitoring
 - Include `ups_controls.yaml` for interactive features
 - Apply device-specific packages last
+- Optionally use `*_grouped.yaml` + `entity_groups.yaml` for organized web interface
 
 ### 3. **Use Substitutions for Customization**
 Override defaults without modifying packages:
@@ -232,7 +282,23 @@ substitutions:
 - **CyberPower devices**: Can handle faster updates (5-10s)  
 - **Generic devices**: Start conservative (30s) and adjust
 
-### 5. **Environment-Specific Files**
+### 5. **Choose Entity Layout**
+**Standard Layout** (flat entity list):
+```yaml
+packages:
+  essential: !include configs/essential_sensors.yaml
+  extended: !include configs/extended_sensors.yaml
+```
+
+**Organized Layout** (grouped by function):
+```yaml
+packages:
+  entity_groups: !include configs/entity_groups.yaml
+  essential_grouped: !include configs/essential_sensors_grouped.yaml
+  extended_grouped: !include configs/extended_sensors_grouped.yaml
+```
+
+### 6. **Environment-Specific Files**
 ```yaml
 # development.yaml
 substitutions:

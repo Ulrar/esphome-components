@@ -17,18 +17,25 @@ packages:
   # Regional defaults (European voltage/frequency standards)
   regional_defaults: !include ../regional/european_base.yaml
   
+  # OPTIONAL: Entity grouping (improves web interface organization)
+  # Uncomment to enable organized entity groups in ESPHome web interface
+  entity_groups: !include ../entity_groups.yaml
+  
   # Core functionality  
   base_ups: !include ../base_ups.yaml
+  
+  # Choose EITHER grouped OR standard sensor packages (not both):
+  # Standard packages (current default):
   essential: !include ../essential_sensors.yaml
-  
-  # Extended monitoring (optional - comment out if not needed)
-  extended: !include ../extended_sensors.yaml
-  
-  # Timer countdown sensors (Real-time shutdown/startup monitoring)
+  extended: !include ../extended_sensors.yaml  # Optional
   timers: !include ../timer_sensors.yaml
-  
-  # Control buttons (optional - comment out if not needed)  
   controls: !include ../ups_controls.yaml
+  
+  # OR grouped packages (better organization):
+  # essential_grouped: !include ../essential_sensors_grouped.yaml
+  # extended_grouped: !include ../extended_sensors_grouped.yaml
+  # timers_grouped: !include ../timer_sensors_grouped.yaml
+  # controls_grouped: !include ../ups_controls_grouped.yaml
   
   # Delay configuration (Shutdown/Start/Reboot timers)
   delay_config: !include ../delay_config.yaml

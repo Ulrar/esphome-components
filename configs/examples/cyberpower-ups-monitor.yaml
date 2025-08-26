@@ -36,6 +36,8 @@ packages:
   # CyberPower-specific optimizations
   cyberpower_device: !include ../device_types/cyberpower_cp1500.yaml
 
+  controls_grouped: !include ../ups_controls_grouped.yaml
+  
 # Optional: Home Assistant API (uncomment to enable)
 # api:
 #   encryption:

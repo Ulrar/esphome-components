@@ -1,0 +1,51 @@
+# Entity Grouping Configuration for UPS HID Component
+# Improves organization in ESPHome web interface and Home Assistant
+# Use with: packages: !include configs/entity_groups.yaml
+
+web_server:
+  version: 3
+  sorting_groups:
+    # Primary monitoring groups
+    - id: ups_power_status
+      name: "⚡ Power Status"
+      sorting_weight: 10
+      
+    - id: ups_battery_monitoring
+      name: "🔋 Battery Monitoring"
+      sorting_weight: 20
+      
+    - id: ups_voltage_monitoring
+      name: "⚡ Voltage & Frequency"
+      sorting_weight: 30
+      
+    - id: ups_load_monitoring
+      name: "📊 Load & Power"
+      sorting_weight: 40
+      
+    # Configuration and timers
+    - id: ups_timers
+      name: "⏱️ Active Timers"
+      sorting_weight: 50
+      
+    - id: ups_configuration
+      name: "⚙️ Configuration"
+      sorting_weight: 60
+      
+    # Control groups
+    - id: ups_beeper_controls
+      name: "🔔 Beeper Controls"
+      sorting_weight: 70
+      
+    - id: ups_test_controls
+      name: "🧪 Test Controls"
+      sorting_weight: 80
+      
+    # Device information
+    - id: ups_device_info
+      name: "ℹ️ Device Information"
+      sorting_weight: 90
+      
+    # System monitoring (ESP32)
+    - id: system_monitoring
+      name: "📡 System Status"
+      sorting_weight: 100

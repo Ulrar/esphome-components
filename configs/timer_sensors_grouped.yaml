@@ -1,0 +1,121 @@
+# Timer Sensors Package with Entity Grouping
+# Real-time countdown timer sensors with improved organization
+# Use with: packages: !include configs/timer_sensors_grouped.yaml
+
+sensor:
+  # === ACTIVE TIMERS GROUP ===
+  # These sensors show REAL-TIME countdowns during UPS operations
+  # Normal operation: Negative values (e.g., -60, -120)
+  # Active countdown: Positive values (e.g., 60, 59, 58, 57...)
+  # Fast polling: Automatically switches to 2-second intervals during countdown
+  
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Timer Shutdown"
+    id: ups_timer_shutdown
+    type: ups_timer_shutdown
+    unit_of_measurement: "s"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+    icon: "mdi:timer-outline"
+    web_server:
+      sorting_group_id: ups_timers
+      sorting_weight: 10
+    # Shows countdown during UPS shutdown sequence (e.g., 60→59→58...)
+    # Negative during normal operation (e.g., -60)
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Timer Start"
+    id: ups_timer_start
+    type: ups_timer_start
+    unit_of_measurement: "s"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+    icon: "mdi:timer-outline"
+    web_server:
+      sorting_group_id: ups_timers
+      sorting_weight: 20
+    # Shows countdown during UPS startup sequence (e.g., 120→119→118...)
+    # Negative during normal operation (e.g., -120)
+
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Timer Reboot"
+    id: ups_timer_reboot
+    type: ups_timer_reboot
+    unit_of_measurement: "s"
+    device_class: duration
+    state_class: measurement
+    accuracy_decimals: 0
+    icon: "mdi:timer-outline"
+    web_server:
+      sorting_group_id: ups_timers
+      sorting_weight: 30
+    # Shows countdown during UPS reboot sequence
+    # Negative during normal operation
+
+  # === TIMER ANALYSIS GROUP ===
+  # Template sensors to analyze timer behavior and fast polling state
+  
+  - platform: template
+    name: "Active Timer Count"
+    id: active_timer_count
+    icon: "mdi:timer-alert-outline"
+    lambda: |-
+      // Count how many timers are actively counting down (positive values)
+      int active_count = 0;
+      float shutdown_timer = id(ups_timer_shutdown).state;
+      float start_timer = id(ups_timer_start).state;
+      float reboot_timer = id(ups_timer_reboot).state;
+      
+      if (!std::isnan(shutdown_timer) && shutdown_timer > 0) active_count++;
+      if (!std::isnan(start_timer) && start_timer > 0) active_count++;
+      if (!std::isnan(reboot_timer) && reboot_timer > 0) active_count++;
+      
+      return (float)active_count;
+    update_interval: 2s
+    web_server:
+      sorting_group_id: ups_timers
+      sorting_weight: 40
+    # 0 = No active countdowns, >0 = Timers are counting down
+
+  - platform: template
+    name: "Fast Polling Status"
+    id: fast_polling_status
+    icon: "mdi:speedometer"
+    lambda: |-
+      // Indicates when fast polling should be active
+      float active_timers = id(active_timer_count).state;
+      return (!std::isnan(active_timers) && active_timers > 0) ? 1.0 : 0.0;
+    update_interval: 2s
+    entity_category: diagnostic
+    web_server:
+      sorting_group_id: ups_timers
+      sorting_weight: 50
+    # 1 = Fast polling active (2s intervals), 0 = Normal polling (30s intervals)
+
+# === EXPECTED BEHAVIOR ===
+# Normal Operation (Simulation/No UPS Activity):
+# - ups_timer_shutdown: -60 (APC: -20, CyberPower: -60)
+# - ups_timer_start: -120 (CyberPower), -60 (APC reboot timer)
+# - ups_timer_reboot: -60 (varies by protocol)
+# - ups_delay_shutdown: 60 (static config)
+# - ups_delay_start: 120 (static config)
+# - active_timer_count: 0
+# - fast_polling_status: 0
+
+# During UPS Shutdown Sequence (Real Hardware):
+# - ups_timer_shutdown: 60→59→58→57... (live countdown!)
+# - Component switches to 2-second polling automatically
+# - active_timer_count: 1
+# - fast_polling_status: 1
+# - Home Assistant sees real-time countdown updates
+
+# During UPS Startup Sequence (Real Hardware):
+# - ups_timer_start: 120→119→118→117... (live countdown!)
+# - Component uses fast polling (2-second intervals)
+# - active_timer_count: 1
+# - fast_polling_status: 1
