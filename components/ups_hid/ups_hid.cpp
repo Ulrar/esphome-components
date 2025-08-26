@@ -7,7 +7,8 @@
 #endif
 #include "protocol_factory.h"
 #include "apc_hid_protocol.h"
-#include "cyberpower_protocol.h" 
+#include "cyberpower_protocol.h"
+#include "number.h" 
 #include "generic_hid_protocol.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
@@ -60,6 +61,9 @@ void UpsHidComponent::update() {
     update_sensors();
     consecutive_failures_ = 0;
     last_successful_read_ = millis();
+    
+    // Check for timer updates (fast polling during countdowns)
+    check_and_update_timers();
   } else {
     consecutive_failures_++;
     ESP_LOGW(TAG, log_messages::READ_FAILED, consecutive_failures_);
@@ -361,6 +365,16 @@ void UpsHidComponent::update_sensors() {
     }
   }
   
+  // Update delay number components
+  for (auto* delay_number : delay_numbers_) {
+    if (delay_number != nullptr) {
+      // Determine which delay value to use based on the delay type
+      // This will be handled by the number component itself
+      // We just need to trigger an update with the current config values
+      // The number component will query the appropriate value
+    }
+  }
+  
   ESP_LOGV(TAG, "Updated %zu sensors, %zu binary sensors, %zu text sensors", 
            sensors_.size(), binary_sensors_.size(), text_sensors_.size());
 }
@@ -379,6 +393,11 @@ void UpsHidComponent::register_binary_sensor(binary_sensor::BinarySensor *sens, 
 void UpsHidComponent::register_text_sensor(text_sensor::TextSensor *sens, const std::string &type) {
   text_sensors_[type] = sens;
   ESP_LOGD(TAG, "Registered text sensor: %s", type.c_str());
+}
+
+void UpsHidComponent::register_delay_number(UpsDelayNumber *number) {
+  delay_numbers_.push_back(number);
+  ESP_LOGD(TAG, "Registered delay number component");
 }
 
 // Test control methods
@@ -455,6 +474,31 @@ bool UpsHidComponent::beeper_test() {
   return active_protocol_->beeper_test();
 }
 
+// Delay configuration methods
+bool UpsHidComponent::set_shutdown_delay(int seconds) {
+  if (!active_protocol_) {
+    ESP_LOGW(TAG, "No active protocol for delay configuration");
+    return false;
+  }
+  return active_protocol_->set_shutdown_delay(seconds);
+}
+
+bool UpsHidComponent::set_start_delay(int seconds) {
+  if (!active_protocol_) {
+    ESP_LOGW(TAG, "No active protocol for delay configuration");
+    return false;
+  }
+  return active_protocol_->set_start_delay(seconds);
+}
+
+bool UpsHidComponent::set_reboot_delay(int seconds) {
+  if (!active_protocol_) {
+    ESP_LOGW(TAG, "No active protocol for delay configuration");
+    return false;
+  }
+  return active_protocol_->set_reboot_delay(seconds);
+}
+
 // Additional protocol access method
 std::string UpsHidComponent::get_protocol_name() const {
   if (active_protocol_) {
@@ -503,6 +547,71 @@ void UpsHidComponent::cleanup() {
   connected_ = false;
   
   ESP_LOGD(TAG, "Component cleanup completed");
+}
+
+// Timer polling implementation
+void UpsHidComponent::check_and_update_timers() {
+  if (!active_protocol_) return;
+  
+  uint32_t now = millis();
+  
+  // Check if we need to poll timers
+  bool should_poll_timers = false;
+  
+  if (fast_polling_mode_) {
+    // In fast polling mode, check every 2 seconds
+    if (now - last_timer_poll_ >= FAST_POLL_INTERVAL_MS) {
+      should_poll_timers = true;
+    }
+  } else {
+    // Check if any timers might be active (less frequent check)
+    if (now - last_timer_poll_ >= get_update_interval()) {
+      should_poll_timers = true;
+    }
+  }
+  
+  if (should_poll_timers) {
+    last_timer_poll_ = now;
+    
+    // Try to read timer data
+    UpsData timer_data = ups_data_;  // Copy current data
+    if (active_protocol_->read_timer_data(timer_data)) {
+      // Update only timer-related fields
+      {
+        std::lock_guard<std::mutex> lock(data_mutex_);
+        ups_data_.test.timer_shutdown = timer_data.test.timer_shutdown;
+        ups_data_.test.timer_start = timer_data.test.timer_start;
+        ups_data_.test.timer_reboot = timer_data.test.timer_reboot;
+      }
+      
+      // Update fast polling mode based on timer activity
+      bool timers_active = has_active_timers();
+      if (timers_active != fast_polling_mode_) {
+        set_fast_polling_mode(timers_active);
+      }
+      
+      // Update timer sensors immediately when values change
+      update_sensors();
+    }
+  }
+}
+
+bool UpsHidComponent::has_active_timers() const {
+  std::lock_guard<std::mutex> lock(data_mutex_);
+  return (ups_data_.test.timer_shutdown > 0 || 
+          ups_data_.test.timer_start > 0 || 
+          ups_data_.test.timer_reboot > 0);
+}
+
+void UpsHidComponent::set_fast_polling_mode(bool enable) {
+  if (enable != fast_polling_mode_) {
+    fast_polling_mode_ = enable;
+    if (enable) {
+      ESP_LOGI(TAG, "Enabled fast polling for timer countdown");
+    } else {
+      ESP_LOGI(TAG, "Disabled fast polling, returning to normal interval");
+    }
+  }
 }
 
 

@@ -116,7 +116,6 @@ components/
 └── ...
 
 tools/
-├── generate_vendor_list.py # Vendor ID synchronization tool
 ├── scan-usb.sh             # USB device scanning utility
 └── README.md               # Tools documentation
 
@@ -126,8 +125,6 @@ tools/
 
 ### Development Tools
 
-- **Generate Vendor List**: `python3 tools/generate_vendor_list.py`
-  - Synchronizes vendor IDs between C++ and Python code
 - **Scan USB Devices**: `bash tools/scan-usb.sh`
   - Lists connected ESP32, UPS, and serial devices
 - **VSCode Tasks**: Integrated development tasks via Command Palette

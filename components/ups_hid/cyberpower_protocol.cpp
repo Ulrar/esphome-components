@@ -1314,6 +1314,153 @@ void CyberPowerProtocol::parse_manufacturing_date_report(const HidReport &report
            report.report_id, report.data.size());
 }
 
+bool CyberPowerProtocol::read_timer_data(UpsData &data) {
+  ESP_LOGD(CP_TAG, "Reading CyberPower timer countdown data");
+  
+  HidReport delay_shutdown_report;
+  HidReport delay_start_report;
+  bool success = false;
+  
+  // Read delay shutdown report (timer countdown data)
+  if (read_hid_report(DELAY_SHUTDOWN_REPORT_ID, delay_shutdown_report)) {
+    // Parse the delay configuration (this updates data.config.delay_shutdown)
+    parse_delay_shutdown_report(delay_shutdown_report, data);
+    
+    // For CyberPower, follow NUT behavior: timer shows negative of delay configuration during normal operation
+    // From CP_NUT_debug.md: ups.delay.shutdown: 60, ups.timer.shutdown: -60 (normal operation)
+    // During actual shutdown, the timer would show positive countdown values
+    
+    // In normal operation, CyberPower timers should be negative of the configured delay
+    if (data.config.delay_shutdown > 0) {
+      // Normal operation - timer is inactive, show negative of configuration value
+      data.test.timer_shutdown = -data.config.delay_shutdown;
+      ESP_LOGV(CP_TAG, "Timer shutdown inactive: %d (config: %d)", 
+               data.test.timer_shutdown, data.config.delay_shutdown);
+    } else {
+      // Use default if no configuration available
+      data.test.timer_shutdown = -defaults::CYBERPOWER_SHUTDOWN_DELAY_SEC;
+      ESP_LOGV(CP_TAG, "Timer shutdown inactive (default): %d", data.test.timer_shutdown);
+    }
+    
+    // TODO: During actual UPS shutdown, we would need to detect the active countdown state
+    // This would require monitoring for changing values or specific status indicators
+    // For now, we follow NUT's normal operation behavior
+    
+    success = true;
+  }
+  
+  // Read delay start report (timer countdown data)
+  if (read_hid_report(DELAY_START_REPORT_ID, delay_start_report)) {
+    // Parse the delay configuration (this updates data.config.delay_start)
+    parse_delay_start_report(delay_start_report, data);
+    
+    // Follow same pattern as shutdown timer
+    if (data.config.delay_start > 0) {
+      // Normal operation - timer is inactive, show negative of configuration value
+      data.test.timer_start = -data.config.delay_start;
+      ESP_LOGV(CP_TAG, "Timer start inactive: %d (config: %d)", 
+               data.test.timer_start, data.config.delay_start);
+    } else {
+      // Use default if no configuration available
+      data.test.timer_start = -defaults::CYBERPOWER_STARTUP_DELAY_SEC;
+      ESP_LOGV(CP_TAG, "Timer start inactive (default): %d", data.test.timer_start);
+    }
+    success = true;
+  }
+  
+  // CyberPower typically doesn't have a separate reboot timer, use shutdown timer
+  data.test.timer_reboot = data.test.timer_shutdown;
+  
+  if (success) {
+    ESP_LOGD(CP_TAG, "CyberPower timer data updated - shutdown: %d, start: %d, reboot: %d",
+             data.test.timer_shutdown, data.test.timer_start, data.test.timer_reboot);
+  }
+  
+  return success;
+}
+
+// Delay configuration methods
+bool CyberPowerProtocol::set_shutdown_delay(int seconds) {
+  ESP_LOGI(CP_TAG, "Setting shutdown delay to %d seconds", seconds);
+  
+  // Validate range (0-7200 seconds = 0-2 hours)
+  if (seconds < 0 || seconds > 7200) {
+    ESP_LOGW(CP_TAG, "Shutdown delay %d seconds out of range (0-7200)", seconds);
+    return false;
+  }
+  
+  // Prepare HID SET_REPORT data for shutdown delay
+  // Format: Report ID 0x15, 2 bytes little-endian seconds value
+  uint8_t delay_data[3];
+  delay_data[0] = DELAY_SHUTDOWN_REPORT_ID;
+  delay_data[1] = seconds & 0xFF;           // Low byte
+  delay_data[2] = (seconds >> 8) & 0xFF;    // High byte
+  
+  ESP_LOGD(CP_TAG, "Writing shutdown delay: Report 0x%02X, Value: %d (0x%02X 0x%02X)", 
+           DELAY_SHUTDOWN_REPORT_ID, seconds, delay_data[1], delay_data[2]);
+  
+  esp_err_t ret = parent_->hid_set_report(HID_REPORT_TYPE_FEATURE, DELAY_SHUTDOWN_REPORT_ID, 
+                                         delay_data + 1, 2, parent_->get_protocol_timeout());
+  
+  if (ret == ESP_OK) {
+    ESP_LOGI(CP_TAG, "Shutdown delay set successfully to %d seconds", seconds);
+    return true;
+  } else {
+    ESP_LOGW(CP_TAG, "Failed to set shutdown delay: %s", esp_err_to_name(ret));
+    return false;
+  }
+}
+
+bool CyberPowerProtocol::set_start_delay(int seconds) {
+  ESP_LOGI(CP_TAG, "Setting start delay to %d seconds", seconds);
+  
+  // Validate range (0-7200 seconds = 0-2 hours)
+  if (seconds < 0 || seconds > 7200) {
+    ESP_LOGW(CP_TAG, "Start delay %d seconds out of range (0-7200)", seconds);
+    return false;
+  }
+  
+  // Prepare HID SET_REPORT data for start delay
+  // Format: Report ID 0x16, 2 bytes little-endian seconds value
+  uint8_t delay_data[3];
+  delay_data[0] = DELAY_START_REPORT_ID;
+  delay_data[1] = seconds & 0xFF;           // Low byte
+  delay_data[2] = (seconds >> 8) & 0xFF;    // High byte
+  
+  ESP_LOGD(CP_TAG, "Writing start delay: Report 0x%02X, Value: %d (0x%02X 0x%02X)", 
+           DELAY_START_REPORT_ID, seconds, delay_data[1], delay_data[2]);
+  
+  esp_err_t ret = parent_->hid_set_report(HID_REPORT_TYPE_FEATURE, DELAY_START_REPORT_ID, 
+                                         delay_data + 1, 2, parent_->get_protocol_timeout());
+  
+  if (ret == ESP_OK) {
+    ESP_LOGI(CP_TAG, "Start delay set successfully to %d seconds", seconds);
+    return true;
+  } else {
+    ESP_LOGW(CP_TAG, "Failed to set start delay: %s", esp_err_to_name(ret));
+    return false;
+  }
+}
+
+bool CyberPowerProtocol::set_reboot_delay(int seconds) {
+  ESP_LOGI(CP_TAG, "Setting reboot delay to %d seconds", seconds);
+  
+  // CyberPower typically uses shutdown delay for reboot timing
+  // But some models may have a separate reboot delay report
+  // For now, we'll set both shutdown and start delays for reboot
+  
+  bool shutdown_ok = set_shutdown_delay(seconds);
+  bool start_ok = set_start_delay(seconds);
+  
+  if (shutdown_ok && start_ok) {
+    ESP_LOGI(CP_TAG, "Reboot delay set successfully to %d seconds", seconds);
+    return true;
+  } else {
+    ESP_LOGW(CP_TAG, "Failed to set reboot delay completely");
+    return false;
+  }
+}
+
 std::unique_ptr<UpsProtocolBase> create_cyberpower_protocol(UpsHidComponent* parent) {
     return std::make_unique<CyberPowerProtocol>(parent);
 }

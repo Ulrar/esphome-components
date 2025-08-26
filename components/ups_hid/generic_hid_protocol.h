@@ -36,6 +36,11 @@ public:
     bool detect() override;
     bool initialize() override;
     bool read_data(UpsData &data) override;
+    
+    // Delay configuration methods
+    bool set_shutdown_delay(int seconds) override;
+    bool set_start_delay(int seconds) override;
+    bool set_reboot_delay(int seconds) override;
 
     // Report discovery and enumeration
     void enumerate_reports();

@@ -19,6 +19,7 @@ packages:
   base_ups: !include ../base_ups.yaml
   essential: !include ../essential_sensors.yaml
   extended: !include ../extended_sensors.yaml
+  timers: !include ../timer_sensors.yaml
   controls: !include ../ups_controls.yaml
 
 # Override for simulation testing

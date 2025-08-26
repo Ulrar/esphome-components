@@ -1,0 +1,84 @@
+# UPS Delay Configuration Package
+# Provides configurable delay settings for shutdown, start, and reboot operations
+# Use with: packages: delay_config: !include configs/delay_config.yaml
+
+number:
+  # Shutdown delay configuration (0-600 seconds)
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Shutdown Delay"
+    id: ups_shutdown_delay_config
+    delay_type: shutdown
+    min_value: 0
+    max_value: 600
+    step: 10
+    unit_of_measurement: "s"
+    device_class: duration
+    entity_category: config
+    icon: "mdi:timer-settings"
+    mode: box
+    
+  # Start/power-on delay configuration (0-600 seconds)  
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Start Delay"
+    id: ups_start_delay_config
+    delay_type: start
+    min_value: 0
+    max_value: 600
+    step: 10
+    unit_of_measurement: "s"
+    device_class: duration
+    entity_category: config
+    icon: "mdi:timer-settings"
+    mode: box
+    
+  # Reboot delay configuration (0-600 seconds)
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "UPS Reboot Delay"
+    id: ups_reboot_delay_config
+    delay_type: reboot
+    min_value: 0
+    max_value: 600
+    step: 10
+    unit_of_measurement: "s"
+    device_class: duration
+    entity_category: config
+    icon: "mdi:timer-settings"
+    mode: box
+
+# Script to read current delay values from UPS  
+script:
+  - id: read_delay_configuration
+    then:
+      - logger.log:
+          format: "Current delay configuration - Shutdown: %.0fs, Start: %.0fs, Reboot: %.0fs"
+          args:
+            - "id(ups_shutdown_delay_config).state"
+            - "id(ups_start_delay_config).state"  
+            - "id(ups_reboot_delay_config).state"
+          level: INFO
+      # Note: These show the configuration values, not the actual UPS timer values
+      
+  - id: apply_default_delays
+    then:
+      # Apply common delay settings for your environment
+      - number.set:
+          id: ups_shutdown_delay_config
+          value: 60.0
+      - number.set:
+          id: ups_start_delay_config
+          value: 120.0
+      - number.set:
+          id: ups_reboot_delay_config
+          value: 60.0
+      - logger.log: "Applied default delay configuration"
+
+# Expected Behavior:
+# CyberPower: Full bidirectional support - read and write delays
+# Generic HID: Attempts common report IDs - may work with many devices
+# APC: Limited support - INPUT-ONLY devices cannot write delays
+#
+# Configuration changes are sent immediately to the UPS via USB HID SET_REPORT
+# The UPS will store these values in non-volatile memory

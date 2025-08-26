@@ -2004,6 +2004,178 @@ void ApcHidProtocol::detect_nominal_power_rating(const std::string& model_name, 
   }
 }
 
+bool ApcHidProtocol::read_timer_data(UpsData &data) {
+  ESP_LOGD(APC_HID_TAG, "Reading APC timer countdown data");
+  
+  HidReport delay_shutdown_report;
+  HidReport delay_reboot_report;
+  bool success = false;
+  
+  // Read delay shutdown report to get the RAW timer value
+  if (read_hid_report(APC_REPORT_ID_DELAY_SHUTDOWN, delay_shutdown_report)) {
+    // Parse the delay configuration (this updates data.config.delay_shutdown)
+    parse_ups_delay_shutdown_report(delay_shutdown_report, data);
+    
+    // Now read the RAW HID value to determine actual timer state
+    // From NUT analysis: HID value -1 means timer inactive, positive values mean countdown active
+    if (delay_shutdown_report.data.size() >= 3) {
+      int16_t raw_timer_value = static_cast<int16_t>(
+        delay_shutdown_report.data[1] | (delay_shutdown_report.data[2] << 8)
+      );
+      
+      ESP_LOGD(APC_HID_TAG, "Raw timer shutdown HID value: %d", raw_timer_value);
+      
+      // Follow NUT convention: negative = inactive, positive = active countdown
+      if (raw_timer_value == -1) {
+        // Timer is inactive (normal operation)
+        data.test.timer_shutdown = -1;
+        ESP_LOGV(APC_HID_TAG, "Timer shutdown inactive (normal operation)");
+      } else if (raw_timer_value > 0) {
+        // Timer is actively counting down
+        data.test.timer_shutdown = raw_timer_value;
+        ESP_LOGI(APC_HID_TAG, "Timer shutdown ACTIVE countdown: %d seconds", raw_timer_value);
+      } else {
+        // Other negative values - treat as inactive but preserve the value
+        data.test.timer_shutdown = raw_timer_value;
+        ESP_LOGV(APC_HID_TAG, "Timer shutdown inactive: %d", raw_timer_value);
+      }
+    } else {
+      // Fallback if report is too short
+      data.test.timer_shutdown = -1;
+      ESP_LOGW(APC_HID_TAG, "Timer shutdown report too short, assuming inactive");
+    }
+    success = true;
+  }
+  
+  // Read delay reboot report to get the RAW timer value
+  if (read_hid_report(APC_REPORT_ID_DELAY_REBOOT, delay_reboot_report)) {
+    // Parse the delay configuration (this updates data.config.delay_reboot)
+    parse_ups_delay_reboot_report(delay_reboot_report, data);
+    
+    // Read the RAW HID value for reboot timer
+    if (delay_reboot_report.data.size() >= 2) {
+      uint8_t raw_reboot_value = delay_reboot_report.data[1];
+      
+      ESP_LOGD(APC_HID_TAG, "Raw timer reboot HID value: %d", raw_reboot_value);
+      
+      // APC reboot timer: 0 typically means no reboot delay (immediate)
+      if (raw_reboot_value == 0) {
+        data.test.timer_reboot = -1; // Inactive (or immediate reboot)
+        ESP_LOGV(APC_HID_TAG, "Timer reboot inactive (immediate/no delay)");
+      } else {
+        // Positive value indicates active reboot countdown
+        data.test.timer_reboot = static_cast<int>(raw_reboot_value);
+        ESP_LOGD(APC_HID_TAG, "Timer reboot countdown: %d seconds", raw_reboot_value);
+      }
+    } else {
+      data.test.timer_reboot = -1;
+      ESP_LOGW(APC_HID_TAG, "Timer reboot report too short, assuming inactive");
+    }
+    success = true;
+  }
+  
+  // APC doesn't have a separate "start" timer - use reboot timer value
+  data.test.timer_start = data.test.timer_reboot;
+  
+  if (success) {
+    ESP_LOGD(APC_HID_TAG, "APC timer data updated - shutdown: %d, start: %d, reboot: %d",
+             data.test.timer_shutdown, data.test.timer_start, data.test.timer_reboot);
+  }
+  
+  return success;
+}
+
+// Delay configuration methods
+bool ApcHidProtocol::set_shutdown_delay(int seconds) {
+  ESP_LOGI(APC_HID_TAG, "Setting shutdown delay to %d seconds", seconds);
+  
+  // Validate range (0-600 seconds = 0-10 minutes for APC)
+  if (seconds < 0 || seconds > 600) {
+    ESP_LOGW(APC_HID_TAG, "Shutdown delay %d seconds out of range (0-600)", seconds);
+    return false;
+  }
+  
+  // Check if device supports SET_REPORT operations
+  if (!parent_->is_connected()) {
+    ESP_LOGW(APC_HID_TAG, "Cannot set shutdown delay - device not connected");
+    return false;
+  }
+  
+  // For APC Back-UPS ES 700G (INPUT-ONLY device), we need special handling
+  // These devices don't have OUT endpoints and may not support SET_REPORT
+  // We'll attempt control transfer anyway as it might work on some models
+  
+  // Prepare HID SET_REPORT data for shutdown delay
+  // APC uses report 0x41 for delay before shutdown
+  // Format: Report ID 0x41, 2 bytes little-endian seconds value
+  uint8_t delay_data[2];
+  delay_data[0] = seconds & 0xFF;           // Low byte
+  delay_data[1] = (seconds >> 8) & 0xFF;    // High byte
+  
+  ESP_LOGD(APC_HID_TAG, "Writing shutdown delay: Report 0x%02X, Value: %d (0x%02X 0x%02X)", 
+           APC_REPORT_ID_DELAY_SHUTDOWN, seconds, delay_data[0], delay_data[1]);
+  
+  // Attempt SET_REPORT via control transfer (works even on INPUT-ONLY devices sometimes)
+  esp_err_t ret = parent_->hid_set_report(HID_REPORT_TYPE_FEATURE, APC_REPORT_ID_DELAY_SHUTDOWN, 
+                                         delay_data, 2, parent_->get_protocol_timeout());
+  
+  if (ret == ESP_OK) {
+    ESP_LOGI(APC_HID_TAG, "Shutdown delay set successfully to %d seconds", seconds);
+    return true;
+  } else if (ret == ESP_ERR_NOT_SUPPORTED) {
+    ESP_LOGW(APC_HID_TAG, "Device does not support delay configuration (INPUT-ONLY device)");
+    ESP_LOGI(APC_HID_TAG, "Note: APC Back-UPS ES 700G is INPUT-ONLY and cannot be configured via USB");
+    return false;
+  } else {
+    ESP_LOGW(APC_HID_TAG, "Failed to set shutdown delay: %s", esp_err_to_name(ret));
+    return false;
+  }
+}
+
+bool ApcHidProtocol::set_start_delay(int seconds) {
+  ESP_LOGI(APC_HID_TAG, "Setting start/reboot delay to %d seconds", seconds);
+  
+  // Validate range (0-600 seconds = 0-10 minutes for APC)
+  if (seconds < 0 || seconds > 600) {
+    ESP_LOGW(APC_HID_TAG, "Start delay %d seconds out of range (0-600)", seconds);
+    return false;
+  }
+  
+  // Check if device supports SET_REPORT operations
+  if (!parent_->is_connected()) {
+    ESP_LOGW(APC_HID_TAG, "Cannot set start delay - device not connected");
+    return false;
+  }
+  
+  // APC uses report 0x40 for reboot/start delay
+  // Format: Report ID 0x40, 1 byte seconds value (limited to 255 seconds)
+  uint8_t delay_data[1];
+  delay_data[0] = std::min(seconds, 255);  // Limit to 255 for single byte
+  
+  ESP_LOGD(APC_HID_TAG, "Writing start/reboot delay: Report 0x%02X, Value: %d (0x%02X)", 
+           APC_REPORT_ID_DELAY_REBOOT, delay_data[0], delay_data[0]);
+  
+  // Attempt SET_REPORT via control transfer
+  esp_err_t ret = parent_->hid_set_report(HID_REPORT_TYPE_FEATURE, APC_REPORT_ID_DELAY_REBOOT, 
+                                         delay_data, 1, parent_->get_protocol_timeout());
+  
+  if (ret == ESP_OK) {
+    ESP_LOGI(APC_HID_TAG, "Start/reboot delay set successfully to %d seconds", delay_data[0]);
+    return true;
+  } else if (ret == ESP_ERR_NOT_SUPPORTED) {
+    ESP_LOGW(APC_HID_TAG, "Device does not support delay configuration (INPUT-ONLY device)");
+    return false;
+  } else {
+    ESP_LOGW(APC_HID_TAG, "Failed to set start/reboot delay: %s", esp_err_to_name(ret));
+    return false;
+  }
+}
+
+bool ApcHidProtocol::set_reboot_delay(int seconds) {
+  // For APC, reboot delay is the same as start delay (report 0x40)
+  return set_start_delay(seconds);
+}
+
 } // namespace ups_hid
 } // namespace esphome
 

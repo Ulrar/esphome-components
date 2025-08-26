@@ -28,6 +28,14 @@ public:
   bool stop_battery_test() override;
   bool start_ups_test() override;
   bool stop_ups_test() override;
+  
+  // Timer polling for real-time countdown
+  bool read_timer_data(UpsData &data) override;
+  
+  // Delay configuration methods
+  bool set_shutdown_delay(int seconds) override;
+  bool set_start_delay(int seconds) override;
+  bool set_reboot_delay(int seconds) override;
 
 private:
   struct HidReport {

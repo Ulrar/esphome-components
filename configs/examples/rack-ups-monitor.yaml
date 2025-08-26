@@ -27,8 +27,14 @@ packages:
   # Extended monitoring (recommended for CyberPower - rich sensor data)
   extended: !include ../extended_sensors.yaml
   
+  # Timer countdown sensors (Real-time shutdown/startup monitoring)
+  timers: !include ../timer_sensors.yaml
+    
   # Control buttons (recommended - CyberPower has excellent beeper support)
   controls: !include ../ups_controls.yaml
+  
+  # Delay configuration (Shutdown/Start/Reboot timers)
+  delay_config: !include ../delay_config.yaml
   
   # CyberPower-specific optimizations
   cyberpower_device: !include ../device_types/cyberpower_cp1500.yaml

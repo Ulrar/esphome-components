@@ -33,6 +33,10 @@ external_components:
       type: local
       path: ../../components
 
+# Timer functionality package
+packages:
+  timers: !include ../timer_sensors.yaml
+
 # UPS component only
 ups_hid:
   id: ups_monitor
@@ -45,7 +49,7 @@ ups_hid:
 button:
 binary_sensor:
 
-# Single sensor test
+# Additional sensors for testing
 sensor:
   - platform: ups_hid
     ups_hid_id: ups_monitor

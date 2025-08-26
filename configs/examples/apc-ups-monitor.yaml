@@ -24,8 +24,14 @@ packages:
   # Extended monitoring (optional - comment out if not needed)
   extended: !include ../extended_sensors.yaml
   
+  # Timer countdown sensors (Real-time shutdown/startup monitoring)
+  timers: !include ../timer_sensors.yaml
+  
   # Control buttons (optional - comment out if not needed)  
   controls: !include ../ups_controls.yaml
+  
+  # Delay configuration (Shutdown/Start/Reboot timers)
+  delay_config: !include ../delay_config.yaml
   
   # APC-specific optimizations
   apc_device: !include ../device_types/apc_backups_es.yaml
@@ -54,5 +60,63 @@ script:
           level: INFO
       # Add your notification logic here
 
+  - id: timer_countdown_alert
+    then:
+      - logger.log:
+          format: "TIMER COUNTDOWN - Shutdown: %.0fs, Start: %.0fs, Reboot: %.0fs (Active: %.0f, Fast Poll: %.0f)"
+          args:
+            - "id(ups_timer_shutdown).state"
+            - "id(ups_timer_start).state"
+            - "id(ups_timer_reboot).state"
+            - "id(active_timer_count).state"
+            - "id(fast_polling_status).state"
+          level: INFO
+      # Add critical countdown automation here (e.g., server shutdown at 30s)
+
+  - id: shutdown_warning_alert
+    then:
+      - if:
+          condition:
+            # Timer is actively counting down and less than 60 seconds
+            lambda: |-
+              float timer = id(ups_timer_shutdown).state;
+              return (!std::isnan(timer) && timer > 0 && timer < 60);
+          then:
+            - logger.log:
+                format: "CRITICAL: APC UPS SHUTTING DOWN IN %.0f SECONDS!"
+                args:
+                  - "id(ups_timer_shutdown).state"
+                level: ERROR
+            # Add emergency server shutdown logic here
+
+# Enhanced monitoring for APC timer functionality
+interval:
+  # Monitor timer status every 15 seconds (component handles fast polling automatically)
+  - interval: 15s
+    then:
+      - script.execute: timer_countdown_alert
+      - script.execute: shutdown_warning_alert
+
+# Expected Timer Behavior:
+# Normal Operation:
+# - ups_timer_shutdown: -1 (APC default inactive state)
+# - ups_timer_start: -1 (APC reboot timer inactive)  
+# - ups_timer_reboot: -1 (same as shutdown)
+# - active_timer_count: 0
+# - fast_polling_status: 0
+# - Component polls every 15 seconds (from device config)
+
+# During UPS Shutdown:
+# - ups_timer_shutdown: 20→19→18→17... (LIVE COUNTDOWN!)
+# - Component automatically switches to 2-second polling
+# - active_timer_count: 1
+# - fast_polling_status: 1
+# - Critical alerts trigger for emergency server shutdown
+
+# During UPS Startup:
+# - ups_timer_start: similar countdown behavior
+# - Component uses 2-second fast polling
+# - Coordination for sequential server startup
+
 # Custom automations would be handled in Home Assistant
-# The base sensors from base_ups.yaml and essential_sensors.yaml provide all the data needed
+# The timer sensors enable sophisticated countdown-based automation

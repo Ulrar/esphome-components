@@ -96,11 +96,18 @@ namespace esphome
       bool beeper_disable();
       bool beeper_mute();
       bool beeper_test();
+      
+      // Delay configuration methods
+      bool set_shutdown_delay(int seconds);
+      bool set_start_delay(int seconds);
+      bool set_reboot_delay(int seconds);
+      void request_delay_refresh() { /* No-op for now - could trigger update if needed */ }
 
       // Sensor registration methods
       void register_sensor(sensor::Sensor *sens, const std::string &type);
       void register_binary_sensor(binary_sensor::BinarySensor *sens, const std::string &type);
       void register_text_sensor(text_sensor::TextSensor *sens, const std::string &type);
+      void register_delay_number(class UpsDelayNumber *number);
       
       // Protocol access for button components
       UpsProtocolBase* get_active_protocol() const { return active_protocol_.get(); }
@@ -120,6 +127,11 @@ namespace esphome
       UpsData ups_data_;
       mutable std::mutex data_mutex_;  // Protect ups_data_ access
       
+      // Fast polling for timer countdown
+      bool fast_polling_mode_{false};
+      uint32_t last_timer_poll_{0};
+      static constexpr uint32_t FAST_POLL_INTERVAL_MS = 2000;  // 2 seconds during countdown
+      
       // Error rate limiting to prevent log spam
       struct ErrorRateLimit {
         uint32_t last_error_time{0};
@@ -137,12 +149,18 @@ namespace esphome
       std::unordered_map<std::string, sensor::Sensor *> sensors_;
       std::unordered_map<std::string, binary_sensor::BinarySensor *> binary_sensors_;
       std::unordered_map<std::string, text_sensor::TextSensor *> text_sensors_;
+      std::vector<class UpsDelayNumber *> delay_numbers_;
 
       // Core methods
       bool initialize_transport();
       bool detect_protocol();
       bool read_ups_data();
       void update_sensors();
+      
+      // Timer polling methods
+      void check_and_update_timers();
+      bool has_active_timers() const;
+      void set_fast_polling_mode(bool enable);
       
       // Error rate limiting helpers
       bool should_log_error(ErrorRateLimit& limiter);
@@ -200,6 +218,14 @@ namespace esphome
       virtual bool stop_battery_test() { return false; }
       virtual bool start_ups_test() { return false; }
       virtual bool stop_ups_test() { return false; }
+      
+      // Timer polling method for real-time countdown
+      virtual bool read_timer_data(UpsData &data) { return false; }
+      
+      // Delay configuration methods
+      virtual bool set_shutdown_delay(int seconds) { return false; }
+      virtual bool set_start_delay(int seconds) { return false; }
+      virtual bool set_reboot_delay(int seconds) { return false; }
 
     protected:
       UpsHidComponent *parent_;
