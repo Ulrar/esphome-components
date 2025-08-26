@@ -7,6 +7,7 @@ A ESPHome component for monitoring UPS devices via USB connection on ESP32-S3. D
 - 🔋 **Real-time UPS monitoring**: Battery level, voltages, load, runtime, status
 - 🧪 **UPS self-test control**: Battery tests (quick/deep), panel tests, with real-time result monitoring
 - 🔊 **Beeper control**: Enable/disable/mute/test UPS audible alarms via HID write operations
+- ⏱️ **Delay configuration**: Configure UPS shutdown, start, and reboot delays via USB HID
 - 🌈 **Visual status indicator**: RGB LED with customizable status colors
 - 🏠 **Home Assistant integration**: Automatic entity discovery via ESPHome API
 - 🔌 **Multi-protocol support**: APC HID, CyberPower HID, Generic HID
@@ -781,6 +782,103 @@ automation:
         message: "UPS test completed: {{ states('text_sensor.ups_test_result') }}"
 ```
 
+### UPS Delay Configuration ⭐ **NEW**
+
+The component now supports configuring UPS delay timers via USB HID SET_REPORT operations:
+
+```yaml
+number:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    delay_type: shutdown            # Delay type: shutdown, start, reboot
+    name: "UPS Shutdown Delay"
+    min_value: 0
+    max_value: 600                  # Max 600 seconds (10 minutes)
+    step: 10
+    unit_of_measurement: "s"
+    device_class: duration
+    entity_category: config
+    icon: "mdi:timer-settings"
+    mode: box
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    delay_type: start               # Power-on delay after utility returns
+    name: "UPS Start Delay"
+    min_value: 0
+    max_value: 600
+    step: 10
+    unit_of_measurement: "s"
+    device_class: duration
+    entity_category: config
+    icon: "mdi:timer-settings"
+    mode: box
+    
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    delay_type: reboot             # Delay for reboot operations
+    name: "UPS Reboot Delay"
+    min_value: 0
+    max_value: 600
+    step: 10
+    unit_of_measurement: "s"
+    device_class: duration
+    entity_category: config
+    icon: "mdi:timer-settings"
+    mode: box
+```
+
+**Available delay types:**
+- `shutdown`: Time UPS waits before cutting power during outage
+- `start`: Time UPS waits before restoring power after utility returns  
+- `reboot`: Time between shutdown and restart during reboot command
+
+**Protocol Support:**
+
+| Protocol | Support Level | Report IDs | Max Delay | Features |
+|----------|---------------|------------|-----------|----------|
+| **CyberPower** | ✅ **Full** | 0x15 (shutdown), 0x16 (start) | 7200s (2 hours) | Complete bidirectional |
+| **Generic HID** | ⚡ **Multi-vendor** | 0x15, 0x41, 0x57, standard HID | 7200s (2 hours) | Tries multiple report IDs |
+| **APC** | ⚠️ **Limited** | 0x41 (shutdown), 0x40 (reboot) | 600s (10 minutes) | INPUT-ONLY fallback |
+
+**Configuration Examples:**
+
+```yaml
+# Automation script to apply default delays
+script:
+  - id: apply_default_delays
+    then:
+      - number.set:
+          id: ups_shutdown_delay_config
+          value: 60.0                # 60 seconds shutdown delay
+      - number.set:
+          id: ups_start_delay_config
+          value: 120.0               # 2 minutes start delay
+      - number.set:
+          id: ups_reboot_delay_config
+          value: 60.0                # 60 seconds reboot delay
+      - logger.log: "Applied default delay configuration"
+
+# Home Assistant automation example
+automation:
+  - alias: "Configure UPS for Extended Outages"
+    trigger:
+      platform: state
+      entity_id: binary_sensor.extended_outage_predicted
+      to: 'on'
+    action:
+      - service: number.set_value
+        target:
+          entity_id: number.ups_shutdown_delay
+        data:
+          value: 300                 # 5 minutes for extended outages
+```
+
+**Important Notes:**
+- **Persistence**: Delay settings are stored in UPS non-volatile memory
+- **APC Limitation**: INPUT-ONLY devices (like Back-UPS ES 700G) cannot be configured
+- **Safety**: Start with longer delays (60+ seconds) to ensure safe shutdown
+- **Testing**: Use simulation mode first, then test with non-critical systems
 
 ```yaml
 # Enable detailed USB debugging if needed

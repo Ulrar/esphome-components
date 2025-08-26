@@ -52,6 +52,14 @@ Complete control functionality (10 buttons + test monitoring):
 **UPS Testing**: `battery_quick`, `battery_deep`, `battery_stop`, `ups_test`, `ups_stop`  
 **Test Monitoring**: `ups_test_result` text sensor
 
+#### `delay_config.yaml` ⭐ **NEW**
+UPS delay configuration package (3 number entities + automation scripts):
+
+**Delay Configuration**: `shutdown`, `start`, `reboot` delays (0-600 seconds)
+**Protocol Support**: CyberPower (full), Generic HID (multi-vendor), APC (INPUT-ONLY fallback)
+**Scripts**: Default delay application and configuration reading
+**Home Assistant**: Number entities with proper device classes and validation
+
 ### **Device-Specific Optimization Packages**
 
 #### `device_types/apc_backups_es.yaml`
@@ -79,7 +87,8 @@ CyberPower CP1500 series optimizations:
 |-------------------|------------------|--------------|----------|
 | **Minimal** | `base_ups` + `essential_sensors` | **9 sensors** | Basic monitoring |
 | **Complete** | + `extended_sensors` + `ups_controls` | **27 sensors + 10 controls** | Full featured |
-| **Device-Optimized** | + device-specific package | **28+ sensors + 10 controls** | Production ready |
+| **Complete + Config** | + `delay_config` | **27 sensors + 10 controls + 3 number entities** | With UPS configuration |
+| **Device-Optimized** | + device-specific package | **28+ sensors + 13+ controls** | Production ready |
 
 ### **Sensor Breakdown by Type:**
 
@@ -101,6 +110,9 @@ CyberPower CP1500 series optimizations:
 #### **Button Controls** (10 total, all in ups_controls.yaml):
 - **Beeper (4)**: enable, disable, mute, test
 - **Testing (6)**: battery_quick, battery_deep, battery_stop, ups_test, ups_stop
+
+#### **Number Controls** (3 total, all in delay_config.yaml):
+- **Delay Configuration (3)**: shutdown_delay, start_delay, reboot_delay
 
 #### **Smart Templates** (2 calculated sensors):
 - **Generic**: UPS Load Power (uses HID data when available)
@@ -171,9 +183,10 @@ packages:
   essential: !include configs/essential_sensors.yaml  
   extended: !include configs/extended_sensors.yaml
   controls: !include configs/ups_controls.yaml
+  delays: !include configs/delay_config.yaml
   device: !include configs/device_types/cyberpower_cp1500.yaml
 ```
-**Result**: ~300 lines → Complete functionality
+**Result**: ~350 lines → Complete functionality with UPS configuration
 
 ### 3. Custom Configuration
 ```yaml
