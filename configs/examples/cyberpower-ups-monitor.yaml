@@ -1,0 +1,132 @@
+# Example: CyberPower CP1500EPFCLCD Configuration
+# Complete production configuration for CyberPower UPS with North American defaults
+# Copy and customize this file for your CyberPower device
+
+substitutions:
+  name: "cyberpower-ups-monitor"
+  friendly_name: "CyberPower UPS Monitor"
+  simulation_mode: "false"        # Set to "true" for testing without hardware
+
+esphome:
+  name: "${name}"
+  friendly_name: "${friendly_name}"
+  comment: "CyberPower CP1500EPFCLCD Monitor with comprehensive timer support"
+
+# Use modular configuration packages
+packages:
+  # Regional defaults (North American voltage/frequency standards)
+  regional_defaults: !include ../regional/north_american_base.yaml
+  
+  # Core functionality  
+  base_ups: !include ../base_ups.yaml
+  essential: !include ../essential_sensors.yaml
+  
+  # Extended monitoring (recommended for CyberPower - rich sensor support)
+  extended: !include ../extended_sensors.yaml
+  
+  # Timer countdown sensors (Real-time shutdown/startup monitoring)
+  timers: !include ../timer_sensors.yaml
+  
+  # Control buttons (recommended - full beeper/test control)  
+  controls: !include ../ups_controls.yaml
+  
+  # Delay configuration (Shutdown/Start/Reboot timers)
+  delay_config: !include ../delay_config.yaml
+  
+  # CyberPower-specific optimizations
+  cyberpower_device: !include ../device_types/cyberpower_cp1500.yaml
+
+# Optional: Home Assistant API (uncomment to enable)
+# api:
+#   encryption:
+#     key: "your_32_character_encryption_key_here=="
+
+# CyberPower-specific automation examples
+script:
+  - id: power_outage_alert
+    then:
+      - logger.log:
+          format: "POWER OUTAGE DETECTED - Battery at %.1f%% (%.1fV), Load: %.1f%% (%.0fW), Runtime: %.1f minutes"
+          args:
+            - "id(battery_level).state" 
+            - "id(battery_voltage).state"
+            - "id(load_percentage).state"
+            - "id(ups_load_power_cp).state"
+            - "id(runtime_remaining).state"
+          level: WARN
+      # Add your notification logic here (e.g., Home Assistant service call)
+      
+  - id: power_restored_alert  
+    then:
+      - logger.log:
+          format: "POWER RESTORED - UPS back online, Input: %.1fV"
+          args:
+            - "id(input_voltage).state"
+          level: INFO
+      # Add your notification logic here
+
+  - id: timer_countdown_alert
+    then:
+      - logger.log:
+          format: "TIMER COUNTDOWN - Shutdown: %.0fs, Start: %.0fs, Reboot: %.0fs (Active: %.0f, Fast Poll: %.0f)"
+          args:
+            - "id(ups_timer_shutdown).state"
+            - "id(ups_timer_start).state"
+            - "id(ups_timer_reboot).state"
+            - "id(active_timer_count).state"
+            - "id(fast_polling_status).state"
+          level: INFO
+      # Add critical countdown automation here (e.g., server shutdown at 30s)
+
+  - id: shutdown_warning_alert
+    then:
+      - if:
+          condition:
+            # Timer is actively counting down and less than 60 seconds
+            lambda: |-
+              float timer = id(ups_timer_shutdown).state;
+              return (!std::isnan(timer) && timer > 0 && timer < 60);
+          then:
+            - logger.log:
+                format: "CRITICAL: UPS SHUTTING DOWN IN %.0f SECONDS!"
+                args:
+                  - "id(ups_timer_shutdown).state"
+                level: ERROR
+            # Add emergency server shutdown logic here
+
+# Enhanced monitoring for CyberPower timer functionality
+interval:
+  # Monitor timer status every 15 seconds (component handles fast polling automatically)
+  - interval: 15s
+    then:
+      - script.execute: timer_countdown_alert
+      - script.execute: shutdown_warning_alert
+
+  # Detailed CyberPower status every 2 minutes
+  - interval: 120s  
+    then:
+      - script.execute: cyberpower_detailed_status
+
+# Expected Timer Behavior:
+# Normal Operation:
+# - ups_timer_shutdown: -60 (CyberPower default delay)
+# - ups_timer_start: -120 (CyberPower default startup delay)  
+# - ups_timer_reboot: -60 (same as shutdown)
+# - active_timer_count: 0
+# - fast_polling_status: 0
+# - Component polls every 10 seconds (from device config)
+
+# During UPS Shutdown:
+# - ups_timer_shutdown: 60→59→58→57... (LIVE COUNTDOWN!)
+# - Component automatically switches to 2-second polling
+# - active_timer_count: 1
+# - fast_polling_status: 1
+# - Critical alerts trigger for emergency server shutdown
+
+# During UPS Startup:
+# - ups_timer_start: 120→119→118... (LIVE COUNTDOWN!)
+# - Component uses 2-second fast polling
+# - Coordination for sequential server startup
+
+# Custom automations would be handled in Home Assistant
+# The timer sensors enable sophisticated countdown-based automation

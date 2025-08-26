@@ -19,6 +19,9 @@ packages:
   # Base functionality
   base_ups: !include ../base_ups.yaml
   essential: !include ../essential_sensors.yaml
+  
+  # Delay configuration (demonstrates number platform integration)
+  delay_config: !include ../delay_config.yaml
 
 # Protocol Selection Examples
 ups_hid:
