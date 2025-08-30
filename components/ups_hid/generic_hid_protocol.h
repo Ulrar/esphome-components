@@ -52,13 +52,17 @@ public:
     void parse_present_status(uint8_t* data, size_t len, UpsData& ups_data);
     void parse_general_status(uint8_t* data, size_t len, UpsData& ups_data);
     void parse_voltage(uint8_t* data, size_t len, UpsData& ups_data, bool is_input);
-    void parse_load(uint8_t* data, size_t len, UpsData& ups_data);
     void parse_input_sensitivity(uint8_t* data, size_t len, UpsData& ups_data, const char* style);
     bool parse_unknown_report(uint8_t* data, size_t len, UpsData& ups_data);
     
     // Frequency reading methods
     void read_frequency_data(UpsData &data);
     float parse_frequency_from_report(uint8_t* data, size_t len);
+    
+    // Configuration reading methods
+    void read_delay_configuration(UpsData &data);
+    void read_beeper_status(UpsData &data);
+    void read_load_percentage(UpsData &data);
 
     // Test control methods (generic implementations)
     bool start_battery_test_quick() override;
