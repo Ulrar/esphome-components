@@ -101,9 +101,15 @@ void UpsHidComponent::dump_config() {
     ESP_LOGCONFIG(TAG, "  Status: %s", status::DISCONNECTED);
   }
 
+#ifdef USE_SENSOR
   ESP_LOGCONFIG(TAG, "  Registered Sensors: %zu", sensors_.size());
+#endif
+#ifdef USE_BINARY_SENSOR
   ESP_LOGCONFIG(TAG, "  Registered Binary Sensors: %zu", binary_sensors_.size());
+#endif
+#ifdef USE_TEXT_SENSOR
   ESP_LOGCONFIG(TAG, "  Registered Text Sensors: %zu", text_sensors_.size());
+#endif
 }
 
 // Transport abstraction methods
@@ -252,7 +258,28 @@ bool UpsHidComponent::read_ups_data() {
 void UpsHidComponent::update_sensors() {
   std::lock_guard<std::mutex> lock(data_mutex_);
   
+  // Check if any sensors are registered - if not, skip sensor updates
+  size_t total_sensors = 0;
+#ifdef USE_SENSOR
+  total_sensors += sensors_.size();
+#endif
+#ifdef USE_BINARY_SENSOR
+  total_sensors += binary_sensors_.size();
+#endif
+#ifdef USE_TEXT_SENSOR
+  total_sensors += text_sensors_.size();
+#endif
+  
+  if (total_sensors == 0) {
+    // Data provider mode - no sensor entities, just providing data for direct access
+    ESP_LOGVV(TAG, "Data provider mode: no sensors registered, data available via direct access methods");
+    return;
+  }
+  
+  ESP_LOGVV(TAG, "Updating %zu registered sensor entities", total_sensors);
+  
   // Update all registered sensors with current data
+#ifdef USE_SENSOR  
   for (auto& sensor_pair : sensors_) {
     const std::string& type = sensor_pair.first;
     sensor::Sensor* sensor = sensor_pair.second;
@@ -304,8 +331,10 @@ void UpsHidComponent::update_sensors() {
       sensor->publish_state(value);
     }
   }
+#endif
   
   // Update binary sensors
+#ifdef USE_BINARY_SENSOR
   for (auto& sensor_pair : binary_sensors_) {
     const std::string& type = sensor_pair.first;
     binary_sensor::BinarySensor* sensor = sensor_pair.second;
@@ -322,8 +351,10 @@ void UpsHidComponent::update_sensors() {
     
     sensor->publish_state(state);
   }
+#endif
   
   // Update text sensors
+#ifdef USE_TEXT_SENSOR  
   for (auto& sensor_pair : text_sensors_) {
     const std::string& type = sensor_pair.first;
     text_sensor::TextSensor* sensor = sensor_pair.second;
@@ -364,6 +395,7 @@ void UpsHidComponent::update_sensors() {
       sensor->publish_state(value);
     }
   }
+#endif
   
   // Update delay number components
   for (auto* delay_number : delay_numbers_) {
@@ -375,25 +407,48 @@ void UpsHidComponent::update_sensors() {
     }
   }
   
+  // Log sensor counts (conditional on platform availability)
+#ifdef USE_SENSOR
+  size_t sensor_count = sensors_.size();
+#else
+  size_t sensor_count = 0;
+#endif
+#ifdef USE_BINARY_SENSOR
+  size_t binary_sensor_count = binary_sensors_.size(); 
+#else
+  size_t binary_sensor_count = 0;
+#endif
+#ifdef USE_TEXT_SENSOR
+  size_t text_sensor_count = text_sensors_.size();
+#else
+  size_t text_sensor_count = 0;
+#endif
+  
   ESP_LOGV(TAG, "Updated %zu sensors, %zu binary sensors, %zu text sensors", 
-           sensors_.size(), binary_sensors_.size(), text_sensors_.size());
+           sensor_count, binary_sensor_count, text_sensor_count);
 }
 
-// Sensor registration methods
+// Sensor registration methods (conditional on platform availability)
+#ifdef USE_SENSOR
 void UpsHidComponent::register_sensor(sensor::Sensor *sens, const std::string &type) {
   sensors_[type] = sens;
   ESP_LOGD(TAG, "Registered sensor: %s", type.c_str());
 }
+#endif
 
+#ifdef USE_BINARY_SENSOR
 void UpsHidComponent::register_binary_sensor(binary_sensor::BinarySensor *sens, const std::string &type) {
   binary_sensors_[type] = sens;
   ESP_LOGD(TAG, "Registered binary sensor: %s", type.c_str());
 }
+#endif
 
+#ifdef USE_TEXT_SENSOR
 void UpsHidComponent::register_text_sensor(text_sensor::TextSensor *sens, const std::string &type) {
   text_sensors_[type] = sens;
   ESP_LOGD(TAG, "Registered text sensor: %s", type.c_str());
 }
+#endif
 
 void UpsHidComponent::register_delay_number(UpsDelayNumber *number) {
   delay_numbers_.push_back(number);
@@ -612,6 +667,72 @@ void UpsHidComponent::set_fast_polling_mode(bool enable) {
       ESP_LOGI(TAG, "Disabled fast polling, returning to normal interval");
     }
   }
+}
+
+// Convenient state getters for lambda expressions (no sensor entities required)
+bool UpsHidComponent::is_online() const {
+  std::lock_guard<std::mutex> lock(data_mutex_);
+  // UPS is online when input voltage is valid (same logic as binary sensor update)
+  return ups_data_.power.input_voltage_valid();
+}
+
+bool UpsHidComponent::is_on_battery() const {
+  std::lock_guard<std::mutex> lock(data_mutex_);
+  // UPS is on battery when NOT online (opposite of online state)
+  return !ups_data_.power.input_voltage_valid();
+}
+
+bool UpsHidComponent::is_low_battery() const {
+  std::lock_guard<std::mutex> lock(data_mutex_);
+  // Use battery's built-in low battery detection
+  return ups_data_.battery.is_low();
+}
+
+bool UpsHidComponent::is_charging() const {
+  std::lock_guard<std::mutex> lock(data_mutex_);
+  // Charging when online AND battery level is not 100%
+  return ups_data_.power.input_voltage_valid() && 
+         ups_data_.battery.is_valid() && 
+         !std::isnan(ups_data_.battery.level) && 
+         ups_data_.battery.level < 100.0f;
+}
+
+bool UpsHidComponent::has_fault() const {
+  std::lock_guard<std::mutex> lock(data_mutex_);
+  // Check for various fault conditions based on available data
+  return ups_data_.power.is_input_out_of_range() || 
+         (!ups_data_.power.is_valid() && !ups_data_.battery.is_valid());
+}
+
+bool UpsHidComponent::is_overloaded() const {
+  std::lock_guard<std::mutex> lock(data_mutex_);
+  // Use power's built-in overload detection
+  return ups_data_.power.is_overloaded();
+}
+
+float UpsHidComponent::get_battery_level() const {
+  std::lock_guard<std::mutex> lock(data_mutex_);
+  return ups_data_.battery.is_valid() ? ups_data_.battery.level : NAN;
+}
+
+float UpsHidComponent::get_input_voltage() const {
+  std::lock_guard<std::mutex> lock(data_mutex_);
+  return ups_data_.power.input_voltage;
+}
+
+float UpsHidComponent::get_output_voltage() const {
+  std::lock_guard<std::mutex> lock(data_mutex_);
+  return ups_data_.power.output_voltage;
+}
+
+float UpsHidComponent::get_load_percent() const {
+  std::lock_guard<std::mutex> lock(data_mutex_);
+  return ups_data_.power.load_percent;
+}
+
+float UpsHidComponent::get_runtime_minutes() const {
+  std::lock_guard<std::mutex> lock(data_mutex_);
+  return ups_data_.battery.runtime_minutes;
 }
 
 

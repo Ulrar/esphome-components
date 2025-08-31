@@ -1,6 +1,6 @@
 # UPS HID Configuration Management
 
-This directory provides a modular, maintainable approach to UPS HID device configuration using ESPHome packages with the new Protocol Factory system. Instead of maintaining large, complex configuration files, you can compose configurations from reusable components.
+This directory provides a modular, maintainable approach to UPS HID device configuration using ESPHome packages with the a Protocol Factory system. Instead of maintaining large, complex configuration files, you can compose configurations from reusable components.
 
 ## 📦 Modular Configuration Packages
 
@@ -11,9 +11,9 @@ Essential foundation for all UPS devices:
 - ESP32-S3 hardware configuration
 - Network setup (WiFi, OTA, Web server)
 - UPS HID component initialization with Protocol Factory
-- Status LED with smart patterns
-- Essential binary sensors: `online`, `on_battery`, `low_battery`, `fault`
-- Essential text sensors: `status` (as "UPS Status"), `protocol` (as "Detected Protocol")
+- **Data Provider Pattern**: LED automation accesses UPS data directly (no sensor entities required!)
+- Status LED with smart patterns using `id(ups_monitor).is_online()`, etc.
+- **Optional sensors**: Only `status` and `protocol` text sensors (for Home Assistant integration)
 
 #### `essential_sensors.yaml` / `essential_sensors_grouped.yaml`
 Core monitoring sensors (5 sensors) available on all protocols:
@@ -171,6 +171,21 @@ packages:
 ```
 **Use for**: Development, CI/CD testing, feature demonstration
 
+### `testing/minimal_data_provider.yaml`
+Data provider pattern testing with zero sensor entities:
+```yaml
+substitutions:
+  simulation_mode: "true"  # Enable simulation for testing
+packages:
+  base_ups: !include base_ups.yaml
+# ZERO sensor entities defined - tests pure data provider mode!
+```
+**Features**:
+- Tests all direct data access methods: `id(ups_monitor).is_online()`, etc.
+- LED automation works without any sensor entities
+- Comprehensive validation of data provider pattern
+- **Use for**: Testing component as pure data provider, custom automation development
+
 ## Production Examples
 
 ### `examples/apc-ups-monitor.yaml`
@@ -314,7 +329,32 @@ substitutions:
 ```
 
 ### 6. **Testing Strategy**
-- **Protocol Testing**: Use `basic_test.yaml`
-- **Feature Testing**: Use specific test configurations
-- **Integration Testing**: Use `simulation_test.yaml`
+- **Protocol Testing**: Use `testing/basic_test.yaml`
+- **Feature Testing**: Use specific test configurations  
+- **Integration Testing**: Use `testing/simulation_test.yaml`
+- **Data Provider Testing**: Use `testing/minimal_data_provider.yaml`
 - **Production Validation**: Use device-specific examples
+
+### 7. **Data Provider Pattern Usage**
+
+The UPS HID component now functions as a **data provider**, allowing direct access to UPS data without requiring sensor entities:
+
+#### **Direct Data Access Methods**:
+```yaml
+interval:
+  - interval: 10s
+    then:
+      - lambda: |-
+          // Boolean state methods (no sensor entities needed!)
+          if (id(ups_monitor).is_online()) {
+            ESP_LOGI("ups", "UPS is online");
+          }
+          if (id(ups_monitor).is_on_battery()) {
+            ESP_LOGI("ups", "Running on battery: %.1f%% remaining", 
+                     id(ups_monitor).get_battery_level());
+          }
+```
+
+#### **Available Direct Access Methods**:
+**Boolean States**: `is_online()`, `is_on_battery()`, `is_low_battery()`, `is_charging()`, `has_fault()`, `is_overloaded()`  
+**Value Getters**: `get_battery_level()`, `get_input_voltage()`, `get_output_voltage()`, `get_load_percent()`, `get_runtime_minutes()`

@@ -104,22 +104,23 @@ light:
           min_brightness: 20%
           max_brightness: 60%
 
-# LED control automation
+# LED control automation (no sensor entities required!)
 interval:
   - interval: 2s
     then:
       - lambda: |-
-          if (id(low_battery).state || id(ups_fault).state) {
+          // Direct access to UPS data - no sensor entities needed
+          if (id(ups_monitor).is_low_battery() || id(ups_monitor).has_fault()) {
             auto call = id(ups_status_led).turn_on();
             call.set_rgb(1.0, 0.0, 0.0);
             call.set_effect("Critical Alert");
             call.perform();
-          } else if (id(on_battery).state) {
+          } else if (id(ups_monitor).is_on_battery()) {
             auto call = id(ups_status_led).turn_on();
             call.set_rgb(1.0, 0.5, 0.0);
             call.set_effect("Battery Warning");
             call.perform();
-          } else if (id(ups_online).state) {
+          } else if (id(ups_monitor).is_online()) {
             auto call = id(ups_status_led).turn_on();
             call.set_rgb(0.0, 1.0, 0.0);
             call.set_effect("Normal Status");
@@ -128,35 +129,9 @@ interval:
             id(ups_status_led).turn_off().perform();
           }
 
-# Essential binary sensors (required for LED automation)
-binary_sensor:
-  - platform: ups_hid
-    ups_hid_id: ups_monitor
-    name: "UPS Online"
-    id: ups_online
-    type: online
-    device_class: connectivity
-    
-  - platform: ups_hid
-    ups_hid_id: ups_monitor
-    name: "On Battery Power"
-    id: on_battery
-    type: on_battery
-    device_class: battery
-    
-  - platform: ups_hid
-    ups_hid_id: ups_monitor
-    name: "Low Battery Warning"
-    id: low_battery
-    type: low_battery
-    device_class: battery
-    
-  - platform: ups_hid
-    ups_hid_id: ups_monitor
-    name: "UPS Fault"
-    id: ups_fault
-    type: fault
-    device_class: problem
+# Note: Binary sensors are now completely OPTIONAL!
+# Only define them if you need Home Assistant entities
+# The LED automation above works without any sensor entities
 
 # Essential text sensors
 text_sensor:

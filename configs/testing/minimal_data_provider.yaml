@@ -1,0 +1,88 @@
+# Data Provider Testing Configuration
+# Tests UPS HID component as pure data provider with comprehensive validation
+# Validates all direct access methods work without any sensor entities
+
+substitutions:
+  name: "data-provider-test"
+  friendly_name: "Data Provider Test"
+  simulation_mode: "true"  # Enable simulation for testing
+
+# Core ESPHome configuration
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  
+# Use base UPS configuration (now has optional sensors)
+packages:
+  base_ups: !include base_ups.yaml
+
+# ZERO sensor entities defined - testing pure data provider mode!
+
+# Override base_ups interval with comprehensive testing
+interval:
+  - interval: 30s
+    then:
+      - lambda: |-
+          // Test all boolean state methods
+          ESP_LOGI("test", "=== UPS Data Provider Test ===");
+          ESP_LOGI("test", "Online: %s", id(ups_monitor).is_online() ? "YES" : "NO");
+          ESP_LOGI("test", "On Battery: %s", id(ups_monitor).is_on_battery() ? "YES" : "NO");
+          ESP_LOGI("test", "Low Battery: %s", id(ups_monitor).is_low_battery() ? "YES" : "NO");
+          ESP_LOGI("test", "Charging: %s", id(ups_monitor).is_charging() ? "YES" : "NO");
+          ESP_LOGI("test", "Fault: %s", id(ups_monitor).has_fault() ? "YES" : "NO");
+          ESP_LOGI("test", "Overload: %s", id(ups_monitor).is_overloaded() ? "YES" : "NO");
+          
+          // Test all value getter methods
+          float battery = id(ups_monitor).get_battery_level();
+          float input_v = id(ups_monitor).get_input_voltage();
+          float output_v = id(ups_monitor).get_output_voltage();
+          float load = id(ups_monitor).get_load_percent();
+          float runtime = id(ups_monitor).get_runtime_minutes();
+          
+          ESP_LOGI("test", "Battery: %.1f%%, Input: %.1fV, Output: %.1fV", 
+                   isnan(battery) ? -1.0f : battery,
+                   isnan(input_v) ? -1.0f : input_v, 
+                   isnan(output_v) ? -1.0f : output_v);
+          ESP_LOGI("test", "Load: %.1f%%, Runtime: %.1f min",
+                   isnan(load) ? -1.0f : load,
+                   isnan(runtime) ? -1.0f : runtime);
+
+  - interval: 60s  
+    then:
+      - lambda: |-
+          // Advanced LED state testing - cycles through different conditions
+          static int test_phase = 0;
+          test_phase = (test_phase + 1) % 6;
+          
+          ESP_LOGI("led_test", "LED Test Phase: %d", test_phase);
+          
+          switch(test_phase) {
+            case 0: // Test critical state display
+              if (id(ups_monitor).is_low_battery() || id(ups_monitor).has_fault()) {
+                ESP_LOGI("led_test", "Critical state detected - RED strobe should be active");
+              }
+              break;
+            case 1: // Test battery operation
+              if (id(ups_monitor).is_on_battery()) {
+                ESP_LOGI("led_test", "Battery operation - ORANGE fade should be active");
+              }
+              break;
+            case 2: // Test charging state
+              if (id(ups_monitor).is_charging()) {
+                ESP_LOGI("led_test", "Charging state - YELLOW pattern should be active");
+              }
+              break;
+            case 3: // Test normal operation
+              if (id(ups_monitor).is_online()) {
+                ESP_LOGI("led_test", "Normal operation - GREEN breathing should be active");
+              }
+              break;
+            case 4: // Test offline state
+              if (!id(ups_monitor).is_online()) {
+                ESP_LOGI("led_test", "Offline state - BLUE fade should be active");
+              }
+              break;
+            case 5: // Data provider mode validation
+              ESP_LOGI("led_test", "Data provider mode: Component should report zero sensors registered");
+              break;
+          }

@@ -4,9 +4,22 @@
 #include "esphome/core/defines.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
+
+// Forward declarations for optional sensor platforms
+#ifdef USE_SENSOR
 #include "sensor_numeric.h"
+namespace esphome { namespace sensor { class Sensor; } }
+#endif
+
+#ifdef USE_BINARY_SENSOR  
 #include "sensor_binary.h"
-#include "sensor_text.h"
+namespace esphome { namespace binary_sensor { class BinarySensor; } }
+#endif
+
+#ifdef USE_TEXT_SENSOR
+#include "sensor_text.h" 
+namespace esphome { namespace text_sensor { class TextSensor; } }
+#endif
 
 #include <memory>
 #include <vector>
@@ -84,6 +97,19 @@ namespace esphome
       uint32_t get_protocol_timeout() const { return protocol_timeout_ms_; }
       float get_fallback_nominal_voltage() const { return fallback_nominal_voltage_; }
       
+      // Convenient state getters for lambda expressions (no sensor entities required)
+      bool is_online() const;
+      bool is_on_battery() const;  
+      bool is_low_battery() const;
+      bool is_charging() const;
+      bool has_fault() const;
+      bool is_overloaded() const;
+      float get_battery_level() const;
+      float get_input_voltage() const;
+      float get_output_voltage() const;
+      float get_load_percent() const;
+      float get_runtime_minutes() const;
+      
       // Test control methods
       bool start_battery_test_quick();
       bool start_battery_test_deep();
@@ -103,10 +129,16 @@ namespace esphome
       bool set_reboot_delay(int seconds);
       void request_delay_refresh() { /* No-op for now - could trigger update if needed */ }
 
-      // Sensor registration methods
+      // Sensor registration methods (conditional on platform availability)
+#ifdef USE_SENSOR      
       void register_sensor(sensor::Sensor *sens, const std::string &type);
+#endif
+#ifdef USE_BINARY_SENSOR
       void register_binary_sensor(binary_sensor::BinarySensor *sens, const std::string &type);
+#endif
+#ifdef USE_TEXT_SENSOR
       void register_text_sensor(text_sensor::TextSensor *sens, const std::string &type);
+#endif
       void register_delay_number(class UpsDelayNumber *number);
       
       // Protocol access for button components
@@ -146,9 +178,17 @@ namespace esphome
       // Clean architecture members
       std::unique_ptr<IUsbTransport> transport_;
       std::unique_ptr<UpsProtocolBase> active_protocol_;
+      
+      // Sensor storage (conditional on platform availability)
+#ifdef USE_SENSOR      
       std::unordered_map<std::string, sensor::Sensor *> sensors_;
+#endif
+#ifdef USE_BINARY_SENSOR
       std::unordered_map<std::string, binary_sensor::BinarySensor *> binary_sensors_;
+#endif
+#ifdef USE_TEXT_SENSOR
       std::unordered_map<std::string, text_sensor::TextSensor *> text_sensors_;
+#endif
       std::vector<class UpsDelayNumber *> delay_numbers_;
 
       // Core methods
