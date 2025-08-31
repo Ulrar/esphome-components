@@ -71,67 +71,14 @@ ups_hid:
   fallback_nominal_voltage: 230V  # European standard (IEC 60038) for better international compatibility
   simulation_mode: ${simulation_mode}
 
-# Status LED configuration
-light:
-  - platform: esp32_rmt_led_strip
-    chipset: WS2812
-    pin: ${led_pin}
-    num_leds: 1
-    rgb_order: GRB
-    name: "UPS Status LED"
-    id: ups_status_led
-    restore_mode: ALWAYS_OFF
-    effects:
-      - strobe:
-          name: "Critical Alert"
-          colors:
-            - state: true
-              brightness: 100%
-              red: 100%
-              green: 0%
-              blue: 0%
-              duration: 200ms
-            - state: false
-              duration: 200ms
-      - pulse:
-          name: "Battery Warning"
-          transition_length: 1.5s
-          min_brightness: 10%
-          max_brightness: 90%
-      - pulse:
-          name: "Normal Status"
-          transition_length: 3s
-          min_brightness: 20%
-          max_brightness: 60%
-
-# LED control automation (no sensor entities required!)
-interval:
-  - interval: 2s
-    then:
-      - lambda: |-
-          // Direct access to UPS data - no sensor entities needed
-          if (id(ups_monitor).is_low_battery() || id(ups_monitor).has_fault()) {
-            auto call = id(ups_status_led).turn_on();
-            call.set_rgb(1.0, 0.0, 0.0);
-            call.set_effect("Critical Alert");
-            call.perform();
-          } else if (id(ups_monitor).is_on_battery()) {
-            auto call = id(ups_status_led).turn_on();
-            call.set_rgb(1.0, 0.5, 0.0);
-            call.set_effect("Battery Warning");
-            call.perform();
-          } else if (id(ups_monitor).is_online()) {
-            auto call = id(ups_status_led).turn_on();
-            call.set_rgb(0.0, 1.0, 0.0);
-            call.set_effect("Normal Status");
-            call.perform();
-          } else {
-            id(ups_status_led).turn_off().perform();
-          }
-
-# Note: Binary sensors are now completely OPTIONAL!
-# Only define them if you need Home Assistant entities
-# The LED automation above works without any sensor entities
+# Note: Status LED has been moved to a separate package for better modularity
+# To enable automatic LED status indication, include the ups_status_led package:
+#
+# packages:
+#   status_led: !include ups_status_led.yaml
+#
+# This provides automatic LED control with night mode, Home Assistant integration,
+# and smart pattern management - no manual automation needed!
 
 # Essential text sensors
 text_sensor:

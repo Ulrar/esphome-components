@@ -18,84 +18,18 @@ Monitor UPS devices via direct USB connection on ESP32-S3. Supports APC, CyberPo
 
 [📖 Full Documentation](components/ups_hid/README.md)
 
-## Installation
+### 💡 UPS Status LED Component (`ups_status_led`)
 
-### Using External Components (Recommended)
+Smart LED status indicator for UPS monitoring with automatic pattern management and night mode. Provides visual status indication using solid colors with thread-safe runtime configuration.
 
-Add to your ESPHome configuration:
+**Key Features:**
+- **7 solid color patterns**: Critical (red), Battery (orange), Charging (yellow), Normal (green), Offline (blue), No Data (purple), Error (white)
+- **Night mode**: Time-based brightness dimming with color compensation for WS2812 LEDs
+- **Home Assistant controls**: Enable/disable, brightness, night mode settings via web UI
+- **Thread-safe operation**: Safe concurrent access from web UI and main loop
+- **Minimum brightness logic**: 20% minimum ensures meaningful enable/disable distinction
 
-```yaml
-external_components:
-  - source: github://bullshit/esphome-components
-    components: [ ups_hid ]  # Add more components as needed
-```
-
-### Manual Installation
-
-1. Clone this repository:
-   ```bash
-   git clone https://github.com/bullshit/esphome-components.git
-   ```
-
-2. Copy component directories to your ESPHome project:
-   ```bash
-   cp -r esphome-components/components/* /config/esphome/components/
-   ```
-
-3. Use local components in your configuration:
-   ```yaml
-   external_components:
-     - source:
-         type: local
-         path: components
-   ```
-
-## Quick Start
-
-### UPS HID Component Example
-
-```yaml
-esphome:
-  name: ups-monitor
-  platform: ESP32
-  board: esp32-s3-devkitc-1
-
-external_components:
-  - source:
-      type: local
-      path: components
-
-# Configure UPS monitoring
-ups_hid:
-  id: ups_monitor
-  update_interval: 30s
-  simulation_mode: false  # Set to true for testing
-
-# Monitor battery level
-sensor:
-  - platform: ups_hid
-    ups_hid_id: ups_monitor
-    type: battery_level
-    name: "UPS Battery Level"
-
-# Monitor UPS status
-binary_sensor:
-  - platform: ups_hid
-    ups_hid_id: ups_monitor
-    type: online
-    name: "UPS Online"
-
-# Control UPS beeper
-button:
-  - platform: ups_hid
-    ups_hid_id: ups_monitor
-    beeper_action: enable
-    name: "UPS Beeper Enable"
-  - platform: ups_hid
-    ups_hid_id: ups_monitor
-    beeper_action: mute
-    name: "UPS Beeper Mute"
-```
+[📖 Full Documentation](components/ups_status_led/README.md)
 
 ## Development
 
@@ -112,6 +46,11 @@ components/
 │   ├── binary_sensor.py    # Binary sensor platform
 │   ├── text_sensor.py      # Text sensor platform
 │   └── ...                 # Protocol implementations
+├── ups_status_led/         # Smart LED status indicator component
+│   ├── README.md           # Component documentation
+│   ├── __init__.py         # Component configuration
+│   ├── ups_status_led.h    # Component header
+│   └── ups_status_led.cpp  # Component implementation
 ├── [future_component]/      # Additional components
 │   └── ...
 └── ...
@@ -156,6 +95,7 @@ tools/
 Component-specific requirements are documented in each component's README:
 
 - **UPS HID**: ESP32-S3-DevKitC-1 v1.1 with USB OTG support
+- **UPS Status LED**: WS2812 LED strip (1 LED), requires time component for night mode
 - **Future components**: Requirements will be listed here
 
 ## License
@@ -167,7 +107,6 @@ Copyright bullshit <coding@ow-software.pl>
 ### Planned Components
 
 - 🌐 **NUT Server** (`nut_server`): A NUT (Network UPS Tools) server implementation that uses the ups_hid component for network-accessible UPS monitoring and supports minimal NUT commands with authentication
-- 💡 **UPS Status LED** (`ups_status_led`): Smart LED status indicator component for UPS monitoring
 
 ### Current Status
 
@@ -178,6 +117,12 @@ Copyright bullshit <coding@ow-software.pl>
   - ✅ **Real-world tested** - APC Back-UPS ES 700G with USB power cycling
   - ✅ **Advanced protocols** - 15+ sensors per device with comprehensive monitoring
   - ✅ **UPS control** - Beeper control and battery testing via HID write operations
+- ✅ **UPS Status LED Component**: Thread-safe LED indicator with night mode
+  - ✅ **SOLID architecture** - Clean separation of concerns within ESPHome constraints
+  - ✅ **Thread-safe operation** - Safe concurrent web UI and main loop access
+  - ✅ **Smart brightness** - 20% minimum hardware brightness for meaningful controls
+  - ✅ **Night mode** - Time-based dimming with WS2812 color compensation
+  - ✅ **Home Assistant integration** - Full web UI controls and status reporting
 - ✅ **ESP-IDF Framework**: Fully migrated to v5.4.2 with enhanced stability
 - ✅ **Documentation**: Comprehensive component and API documentation
 - ✅ **Development Tools**: VSCode integration, USB scanning, vendor management

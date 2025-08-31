@@ -1,0 +1,112 @@
+# LED Status Component Testing Configuration
+# Tests the ups_status_led component with all features enabled
+# Uses simulation mode for testing without physical UPS hardware
+
+substitutions:
+  name: "led-status-test"
+  friendly_name: "LED Status Test"
+  
+  # Enable simulation for testing
+  simulation_mode: "true"
+  update_interval: "5s"  # Fast updates for testing
+  
+  # LED testing configuration
+  led_pin: "GPIO48"
+  led_brightness: "75%"
+  led_color_mode: "gradient"  # Test gradient mode
+  
+  # Night mode testing
+  led_night_mode_enabled: "true"
+  led_night_brightness: "20%"
+  led_night_start: "20:00"  # Early for testing
+  led_night_end: "08:00"
+  
+  # Timezone for night mode testing
+  timezone: "UTC"  # Use UTC for consistent testing
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+# Use minimal base UPS configuration (without all packages)
+packages:
+  base_ups: !include ../base_ups.yaml
+
+# Add time component for LED night mode (required by ups_status_led)
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: ${timezone}
+    servers:
+      - pool.ntp.org
+      - time.nist.gov
+
+# Add LED package manually for testing
+light:
+  - platform: esp32_rmt_led_strip
+    chipset: WS2812
+    pin: ${led_pin}
+    num_leds: 1
+    rgb_order: GRB
+    name: "UPS Status LED Hardware"
+    id: ups_status_led_hw
+    internal: true
+    restore_mode: ALWAYS_OFF
+
+# UPS Status LED Component
+ups_status_led:
+  id: ups_led_controller
+  ups_hid_id: ups_monitor
+  light_id: ups_status_led_hw
+  time_id: sntp_time
+  
+  enabled: true
+  brightness: ${led_brightness}
+  battery_color_mode: ${led_color_mode}
+  battery_low_threshold: 20
+  battery_warning_threshold: 50
+  
+  night_mode:
+    enabled: ${led_night_mode_enabled}
+    brightness: ${led_night_brightness}
+    start_time: ${led_night_start}
+    end_time: ${led_night_end}
+
+# Enable required platforms for UPS HID component
+sensor:
+binary_sensor:
+button:
+
+# Testing features:
+#
+# LED Pattern Testing (automatic, priority-based, solid colors):
+# LED Patterns:
+# 🔴 Critical Alert (solid red) - Low battery/fault/overload
+# 🟠 Battery Power (solid orange) - Running on battery
+# 🟡 Charging (solid yellow) - Battery charging
+# 🟢 Normal (solid green) - Normal operation  
+# 🔵 UPS Offline (solid blue) - UPS disconnected
+# 🟣 No Data (solid purple) - Component connected but no data
+# ⚪ Error (solid white) - Component error
+#
+# Home Assistant Entities (auto-created):
+# - switch.led_status_test_enabled_switch (master LED control)
+# - switch.led_status_test_night_switch (night mode toggle)
+# - number.led_status_test_brightness_number (brightness slider)
+# - text_sensor.led_status_test_status_sensor (current pattern)
+#
+# Testing Capabilities:
+# ✅ All 7 LED patterns with simulated UPS states
+# ✅ Battery-aware gradient color calculation
+# ✅ Night mode with time-based scheduling
+# ✅ Home Assistant integration and control
+# ✅ Data provider pattern usage (no sensors required)
+# ✅ Performance optimization verification (10Hz updates, solid colors)
+# ✅ Hardware abstraction (WS2812 LED strip)
+#
+# Usage:
+# 1. Compile: esphome config configs/testing/led_status_test.yaml
+# 2. Flash to ESP32-S3 with connected WS2812 LED
+# 3. Monitor patterns change based on simulated UPS states
+# 4. Test Home Assistant controls through web interface
+# 5. Verify night mode activation/deactivation

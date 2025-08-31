@@ -31,6 +31,11 @@ web_server:
       name: "⚙️ Configuration"
       sorting_weight: 60
       
+    # LED status indication
+    - id: ups_led_controls
+      name: "💡 LED Status Controls"
+      sorting_weight: 65
+      
     # Control groups
     - id: ups_beeper_controls
       name: "🔔 Beeper Controls"

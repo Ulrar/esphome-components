@@ -21,8 +21,8 @@ packages:
   # Uncomment to enable organized entity groups in ESPHome web interface
   entity_groups: !include ../entity_groups.yaml
   
-  # Core functionality  
-  base_ups: !include ../base_ups.yaml
+  # Core functionality with LED status indication
+  base_with_led: !include ../base_ups_with_led.yaml
   
   # Choose EITHER grouped OR standard sensor packages (not both):
   # Standard packages (current default):

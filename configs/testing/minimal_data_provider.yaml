@@ -14,7 +14,7 @@ esphome:
   
 # Use base UPS configuration (now has optional sensors)
 packages:
-  base_ups: !include base_ups.yaml
+  base_ups: !include ../base_ups.yaml
 
 # ZERO sensor entities defined - testing pure data provider mode!
 
@@ -59,27 +59,27 @@ interval:
           switch(test_phase) {
             case 0: // Test critical state display
               if (id(ups_monitor).is_low_battery() || id(ups_monitor).has_fault()) {
-                ESP_LOGI("led_test", "Critical state detected - RED strobe should be active");
+                ESP_LOGI("led_test", "Critical state detected - RED solid should be active");
               }
               break;
             case 1: // Test battery operation
               if (id(ups_monitor).is_on_battery()) {
-                ESP_LOGI("led_test", "Battery operation - ORANGE fade should be active");
+                ESP_LOGI("led_test", "Battery operation - ORANGE solid should be active");
               }
               break;
             case 2: // Test charging state
               if (id(ups_monitor).is_charging()) {
-                ESP_LOGI("led_test", "Charging state - YELLOW pattern should be active");
+                ESP_LOGI("led_test", "Charging state - YELLOW solid should be active");
               }
               break;
             case 3: // Test normal operation
               if (id(ups_monitor).is_online()) {
-                ESP_LOGI("led_test", "Normal operation - GREEN breathing should be active");
+                ESP_LOGI("led_test", "Normal operation - GREEN solid should be active");
               }
               break;
             case 4: // Test offline state
               if (!id(ups_monitor).is_online()) {
-                ESP_LOGI("led_test", "Offline state - BLUE fade should be active");
+                ESP_LOGI("led_test", "Offline state - BLUE solid should be active");
               }
               break;
             case 5: // Data provider mode validation

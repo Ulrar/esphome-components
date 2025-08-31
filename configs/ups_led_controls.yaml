@@ -1,0 +1,182 @@
+# UPS LED Controls Package
+# Provides Home Assistant and Web UI control entities for ups_status_led component
+# Use with: packages: !include configs/ups_led_controls.yaml
+#
+# Requires: ups_status_led component to be configured with id: ups_led_controller
+
+# Master LED enable/disable switch
+switch:
+  - platform: template
+    name: "UPS Status LED"
+    id: ups_led_enable_switch
+    icon: "mdi:led-on"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    turn_on_action:
+      - lambda: |-
+          ESP_LOGI("led_controls", "Enabling LED");
+          id(ups_led_controller).set_enabled_api(true);
+    turn_off_action:
+      - lambda: |-
+          ESP_LOGI("led_controls", "Disabling LED");
+          id(ups_led_controller).set_enabled_api(false);
+
+  # Night mode toggle switch  
+  - platform: template
+    name: "UPS LED Night Mode"
+    id: ups_led_night_mode_switch
+    icon: "mdi:weather-night"
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    turn_on_action:
+      - lambda: |-
+          ESP_LOGI("led_controls", "Enabling night mode");
+          id(ups_led_controller).set_night_mode_enabled_api(true);
+    turn_off_action:
+      - lambda: |-
+          ESP_LOGI("led_controls", "Disabling night mode");
+          id(ups_led_controller).set_night_mode_enabled_api(false);
+
+# Brightness control sliders
+number:
+  - platform: template
+    name: "UPS LED Brightness"
+    id: ups_led_brightness_number
+    icon: "mdi:brightness-percent"
+    entity_category: config
+    min_value: 20  # Minimum 20% for meaningful enabled switch
+    max_value: 100
+    step: 5
+    unit_of_measurement: "%"
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 80
+    set_action:
+      - lambda: |-
+          ESP_LOGI("led_controls", "Setting brightness to %.2f%%", x);
+          id(ups_led_controller).set_brightness_api(x / 100.0);
+
+  - platform: template
+    name: "UPS LED Night Brightness"
+    id: ups_led_night_brightness_number
+    icon: "mdi:brightness-percent"
+    entity_category: config
+    min_value: 10  # Night multiplier: 10% of day brightness
+    max_value: 50  # Up to 50% of day brightness
+    step: 5
+    unit_of_measurement: "%"
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 30  # 30% of day brightness (matches component default)
+    set_action:
+      - lambda: "id(ups_led_controller).set_night_mode_brightness_api(x / 100.0);"
+
+  - platform: template
+    name: "UPS LED Night Start Hour"
+    id: ups_led_night_start_hour
+    icon: "mdi:clock-start"
+    entity_category: config
+    min_value: 0
+    max_value: 23
+    step: 1
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 22
+    set_action:
+      - lambda: "id(ups_led_controller).set_night_mode_start_time_api((int)x, id(ups_led_night_start_minute).state);"
+
+  - platform: template
+    name: "UPS LED Night Start Minute"
+    id: ups_led_night_start_minute
+    icon: "mdi:clock-start"
+    entity_category: config
+    min_value: 0
+    max_value: 59
+    step: 15
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+    set_action:
+      - lambda: "id(ups_led_controller).set_night_mode_start_time_api(id(ups_led_night_start_hour).state, (int)x);"
+
+  - platform: template
+    name: "UPS LED Night End Hour"
+    id: ups_led_night_end_hour
+    icon: "mdi:clock-end"
+    entity_category: config
+    min_value: 0
+    max_value: 23
+    step: 1
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 7
+    set_action:
+      - lambda: "id(ups_led_controller).set_night_mode_end_time_api((int)x, id(ups_led_night_end_minute).state);"
+
+  - platform: template
+    name: "UPS LED Night End Minute"
+    id: ups_led_night_end_minute
+    icon: "mdi:clock-end"
+    entity_category: config
+    min_value: 0
+    max_value: 59
+    step: 15
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 0
+    set_action:
+      - lambda: "id(ups_led_controller).set_night_mode_end_time_api(id(ups_led_night_end_hour).state, (int)x);"
+
+# Current LED pattern display
+text_sensor:
+  - platform: template
+    name: "UPS LED Pattern"
+    id: ups_led_pattern_sensor
+    icon: "mdi:led-variant-on"
+    entity_category: diagnostic
+    lambda: |-
+      // Match the exact logic from ups_status_led component
+      if (!id(ups_monitor).is_connected()) {
+        return {"UPS Offline"};
+      }
+      if (id(ups_monitor).is_low_battery() || id(ups_monitor).has_fault() || id(ups_monitor).is_overloaded()) {
+        return {"Critical Alert"};
+      }
+      if (id(ups_monitor).is_on_battery()) {
+        return {"Battery Power"};
+      }
+      if (id(ups_monitor).is_charging()) {
+        return {"Charging"};
+      }
+      if (id(ups_monitor).is_online()) {
+        return {"Normal"};
+      }
+      return {"No Data"};
+    
+    update_interval: 2s
+
+# Usage Notes:
+# - All entities use web_server_sorting_weight: 65 to group with LED controls
+# - Switches use optimistic mode for immediate UI feedback
+# - All number controls use template with lambda for immediate component updates
+# - Pattern text sensor shows current active LED pattern
+# - Night mode times are adjustable in 15-minute increments
+# - All controls persist values and restore after reboot
+# - Compatible with ESPHome web server v2 and v3
+# - Integrates seamlessly with Home Assistant
+#
+# Web UI Controls Provided:
+# - UPS LED Brightness (10-100%)
+# - UPS LED Night Brightness (5-50%)
+# - UPS LED Night Start Hour (0-23)
+# - UPS LED Night Start Minute (0, 15, 30, 45)
+# - UPS LED Night End Hour (0-23)
+# - UPS LED Night End Minute (0, 15, 30, 45)

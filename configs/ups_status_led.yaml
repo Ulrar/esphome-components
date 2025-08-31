@@ -1,0 +1,56 @@
+# UPS Status LED Package
+# Smart LED status indicator using the new ups_status_led component
+# Replaces the manual interval-based LED control with automatic pattern management
+#
+# Note: Requires 'sntp_time' time component to be defined elsewhere
+# (e.g., via regional configuration packages)
+
+# Physical LED configuration (hardware abstraction)
+light:
+  - platform: esp32_rmt_led_strip
+    chipset: WS2812
+    pin: ${led_pin}
+    num_leds: 1
+    rgb_order: GRB
+    name: "UPS Status LED Hardware"
+    id: ups_status_led_hw
+    internal: true  # Hide from HA since controlled by ups_status_led
+    restore_mode: ALWAYS_OFF
+    # No effects needed - handled by ups_status_led component
+    
+# UPS Status LED Controller Component
+ups_status_led:
+  id: ups_led_controller
+  ups_hid_id: ups_monitor           # Reference to UPS data provider
+  light_id: ups_status_led_hw       # Reference to physical LED
+  time_id: sntp_time                # Time for night mode scheduling
+  
+  enabled: true                     # Master enable (controllable via HA)
+  brightness: ${led_brightness}  # Default brightness with substitution
+  
+  # Battery color behavior
+  battery_color_mode: ${led_color_mode}  # discrete or gradient
+  battery_low_threshold: 20         # Below = critical red
+  battery_warning_threshold: 50     # Below = warning orange
+  
+  # Night mode configuration
+  night_mode:
+    enabled: ${led_night_mode_enabled}
+    brightness: ${led_night_brightness}
+    start_time: ${led_night_start}
+    end_time: ${led_night_end}
+
+# Home Assistant entities automatically created:
+# - switch.ups_status_led (enable/disable)
+# - switch.ups_led_night_mode (night mode toggle)
+# - number.ups_led_brightness (brightness 10-100%)
+# - text_sensor.ups_led_pattern (current pattern)
+
+# LED Patterns (automatic, priority-based, solid colors):
+# 1. CRITICAL (solid red) - Low battery/fault/overload
+# 2. BATTERY (solid orange) - On battery power
+# 3. CHARGING (solid yellow) - Charging
+# 4. NORMAL (solid green) - Normal operation
+# 5. OFFLINE (solid blue) - UPS disconnected
+# 6. NO DATA (solid purple) - No data from UPS
+# 7. ERROR (solid white) - Component error

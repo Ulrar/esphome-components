@@ -11,9 +11,17 @@ Essential foundation for all UPS devices:
 - ESP32-S3 hardware configuration
 - Network setup (WiFi, OTA, Web server)
 - UPS HID component initialization with Protocol Factory
-- **Data Provider Pattern**: LED automation accesses UPS data directly (no sensor entities required!)
-- Status LED with smart patterns using `id(ups_monitor).is_online()`, etc.
+- **Data Provider Pattern**: Components can access UPS data directly (no sensor entities required!)
 - **Optional sensors**: Only `status` and `protocol` text sensors (for Home Assistant integration)
+
+#### `base_ups_with_led.yaml`
+Complete UPS monitoring with automatic LED status indication:
+- Includes all `base_ups.yaml` functionality
+- **Automatic LED Package**: Integrates `ups_status_led.yaml` 
+- **Smart Status Display**: 7 priority-based LED patterns
+- **Night Mode**: Time-based dimming with Home Assistant control
+- **Zero Configuration**: Works immediately with substitution customization
+- **Hardware Flexible**: Compatible with any ESPHome light component
 
 #### `essential_sensors.yaml` / `essential_sensors_grouped.yaml`
 Core monitoring sensors (5 sensors) available on all protocols:
@@ -25,6 +33,35 @@ Core monitoring sensors (5 sensors) available on all protocols:
 - Compatible with APC, CyberPower, and Generic protocols
 
 ### **Optional Enhancement Packages**
+
+#### `ups_status_led.yaml`
+Automatic LED status indication using smart patterns:
+
+**Hardware Integration**:
+- Works with any ESPHome light component (WS2812, FastLED, etc.)
+- Hardware abstraction layer for maximum compatibility
+
+**Smart Pattern System** (priority-based, automatic selection with solid colors):
+- **🔴 Critical Alert** (solid red) - Low battery/fault/overload
+- **🟠 Battery Power** (solid orange) - Running on battery
+- **🟡 Charging** (solid yellow) - Battery charging
+- **🟢 Normal** (solid green) - Normal operation
+- **🔵 UPS Offline** (solid blue) - UPS disconnected
+- **🟣 No Data** (solid purple) - Component connected but no data
+- **⚪ Error** (solid white) - Component error
+
+**Advanced Features**:
+- **Battery-aware Colors**: Discrete thresholds or smooth gradients
+- **Night Mode**: Time-based dimming with Home Assistant control
+- **Home Assistant Integration**: Auto-created entities for complete control
+
+**Automatic Entity Creation**:
+- `switch.ups_status_led` (master enable/disable)
+- `switch.ups_led_night_mode` (night mode toggle)  
+- `number.ups_led_brightness` (brightness 10-100%)
+- `text_sensor.ups_led_pattern` (current pattern name)
+
+**Uses Data Provider Pattern**: No sensor entities required - accesses UPS data directly via `id(ups_monitor).is_online()`, etc.
 
 #### `extended_sensors.yaml` / `extended_sensors_grouped.yaml` 
 Advanced monitoring (17 additional sensors) for feature-rich devices:
@@ -186,22 +223,57 @@ packages:
 - Comprehensive validation of data provider pattern
 - **Use for**: Testing component as pure data provider, custom automation development
 
+### `testing/led_status_test.yaml`
+UPS Status LED component comprehensive testing:
+```yaml
+substitutions:
+  simulation_mode: "true"  # Test without hardware
+  led_color_mode: "gradient"  # Test gradient colors
+packages:
+  base_with_led: !include ../base_ups_with_led.yaml
+```
+**Features**:
+- Tests all 7 LED patterns with simulated UPS states
+- Battery-aware gradient color calculation verification
+- Night mode with time-based scheduling testing
+- Home Assistant integration validation (4 auto-created entities)
+- Performance optimization verification (10Hz updates)
+- **Use for**: LED component development, pattern testing, HA integration validation
+
+### `testing/ups_with_smart_led.yaml`
+Complete smart LED integration testing:
+```yaml
+substitutions:
+  led_brightness: "90%"
+  led_color_mode: "gradient"
+  timezone: "America/New_York"
+packages:
+  base_with_led: !include ../base_ups_with_led.yaml
+  essential: !include ../essential_sensors.yaml
+```
+**Features**:
+- Full LED + sensor integration testing
+- Customizable substitutions validation
+- Advanced features testing (battery gradients, timezone support)
+- Complete Home Assistant entity creation
+- **Use for**: Integration testing, configuration validation
+
 ## Production Examples
 
 ### `examples/apc-ups-monitor.yaml`
-Complete APC UPS production configuration:
-- Modular package composition
-- Device-specific optimizations
-- Custom automation examples
-- Network and notification setup
+Complete APC UPS production configuration with LED status indication:
+- **Smart LED Integration**: Uses `base_ups_with_led.yaml` for automatic status display
+- Modular package composition with device-specific optimizations
+- Custom automation examples and notification setup
 - Choice of standard or grouped entity layout
+- APC-specific timer monitoring and power outage handling
 
 ### `examples/rack-ups-monitor.yaml`
-Complete CyberPower UPS production configuration:
-- Advanced sensor utilization
-- Smart threshold monitoring
-- Rich data analysis
-- Enhanced automation
+Complete CyberPower UPS production configuration with LED status indication:
+- **Smart LED Integration**: Uses `base_ups_with_led.yaml` for automatic status display
+- Advanced sensor utilization with rich CyberPower data
+- Smart threshold monitoring and power analysis
+- Enhanced automation with battery threshold alerts
 - Choice of standard or grouped entity layout
 
 ### `examples/grouped-ups-monitor.yaml`
@@ -221,7 +293,15 @@ packages:
 ```
 **Result**: ~150 lines → Essential monitoring only
 
-### 2. Full-Featured UPS
+### 2. UPS with Smart LED Status
+```yaml
+packages:
+  base_with_led: !include configs/base_ups_with_led.yaml
+  essential: !include configs/essential_sensors.yaml
+```
+**Result**: ~200 lines → Essential monitoring + automatic LED status indication
+
+### 3. Full-Featured UPS
 ```yaml
 packages:
   base_ups: !include configs/base_ups.yaml
@@ -234,7 +314,7 @@ packages:
 ```
 **Result**: ~380 lines → Complete functionality with UPS configuration
 
-### 3. Organized Interface UPS
+### 4. Organized Interface UPS
 ```yaml
 packages:
   # Enable organized web interface
@@ -251,7 +331,7 @@ packages:
 ```
 **Result**: Same functionality with organized web interface layout
 
-### 4. Custom Configuration
+### 5. Custom Configuration
 ```yaml
 substitutions:
   name: "my-custom-ups"

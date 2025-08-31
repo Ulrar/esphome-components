@@ -1,0 +1,31 @@
+# Base UPS Configuration with Status LED
+# Combines base_ups.yaml with the new ups_status_led component
+# Use this for complete UPS monitoring with automatic LED indication
+
+packages:
+  base: !include base_ups.yaml
+  led: !include ups_status_led.yaml
+  led_controls: !include ups_led_controls.yaml
+
+# Optional substitutions for LED customization
+substitutions:
+  # LED hardware configuration
+  led_pin: "GPIO48"                    # LED data pin
+  
+  # LED behavior
+  led_brightness: "80%"                # Default brightness
+  led_color_mode: "gradient"          # gradient or discrete
+  
+  # Night mode settings
+  led_night_mode_enabled: "true"      # Enable night mode
+  led_night_brightness: "30%"         # Dimmed brightness (30% of day brightness)
+  led_night_start: "22:00"           # Night mode start
+  led_night_end: "07:00"             # Night mode end
+  
+# This configuration provides:
+# - All base UPS functionality
+# - Automatic LED status indication with 7 solid color patterns
+# - Night mode with time-based dimming
+# - Home Assistant controls for LED
+# - Battery-aware color display (discrete/gradient modes)
+# - No manual automation required!
