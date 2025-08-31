@@ -1,5 +1,5 @@
-#include "button.h"
-#include "ups_constants.h"
+#include "control_button.h"
+#include "constants_ups.h"
 #include "esphome/core/log.h"
 
 namespace esphome {

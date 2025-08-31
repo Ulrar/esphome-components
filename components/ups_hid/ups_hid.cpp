@@ -1,15 +1,15 @@
 #include "ups_hid.h"
-#include "ups_constants.h"
-#include "usb_transport_factory.h"
-#include "simulated_transport.h"
+#include "constants_ups.h"
+#include "transport_factory.h"
+#include "transport_simulation.h"
 #ifdef USE_ESP32
-#include "esp32_usb_transport.h"
+#include "transport_esp32.h"
 #endif
 #include "protocol_factory.h"
-#include "apc_hid_protocol.h"
-#include "cyberpower_protocol.h"
-#include "number.h" 
-#include "generic_hid_protocol.h"
+#include "protocol_apc.h"
+#include "protocol_cyberpower.h"
+ 
+#include "protocol_generic.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 #include <functional>

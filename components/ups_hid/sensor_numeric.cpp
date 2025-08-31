@@ -1,4 +1,4 @@
-#include "sensor.h"
+#include "sensor_numeric.h"
 #include "esphome/core/log.h"
 
 namespace esphome

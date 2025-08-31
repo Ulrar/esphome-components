@@ -1,4 +1,4 @@
-#include "binary_sensor.h"
+#include "sensor_binary.h"
 #include "esphome/core/log.h"
 
 namespace esphome {

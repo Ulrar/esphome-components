@@ -1,8 +1,8 @@
-#include "usb_transport_factory.h"
-#include "usb_transport_interface.h"
-#include "simulated_transport.h"
+#include "transport_factory.h"
+#include "transport_interface.h"
+#include "transport_simulation.h"
 #ifdef USE_ESP32
-#include "esp32_usb_transport.h"
+#include "transport_esp32.h"
 #endif
 
 namespace esphome {

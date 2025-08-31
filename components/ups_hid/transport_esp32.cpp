@@ -1,5 +1,5 @@
-#include "esp32_usb_transport.h"
-#include "ups_constants.h"
+#include "transport_esp32.h"
+#include "constants_ups.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 

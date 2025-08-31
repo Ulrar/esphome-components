@@ -1,6 +1,6 @@
 #pragma once
 
-#include "usb_transport_interface.h"
+#include "transport_interface.h"
 
 #ifdef USE_ESP32
 #include "usb/usb_host.h"

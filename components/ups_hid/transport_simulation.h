@@ -1,6 +1,6 @@
 #pragma once
 
-#include "usb_transport_interface.h"
+#include "transport_interface.h"
 #include <map>
 #include <chrono>
 

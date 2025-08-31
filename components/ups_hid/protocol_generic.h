@@ -1,8 +1,8 @@
 #pragma once
 
 #include "ups_hid.h"
-#include "ups_composite_data.h"
-#include "device_info.h"
+#include "data_composite.h"
+#include "data_device.h"
 #include <set>
 #include <map>
 

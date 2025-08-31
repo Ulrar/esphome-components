@@ -8,6 +8,14 @@ namespace ups_hid {
 // APC HID Protocol implementation for modern APC UPS devices
 class ApcHidProtocol : public UpsProtocolBase {
 public:
+  // Public struct for use by report parsers
+  struct HidReport {
+    uint8_t report_id;
+    std::vector<uint8_t> data;
+    
+    HidReport() : report_id(0) {}
+  };
+  
   explicit ApcHidProtocol(UpsHidComponent *parent);
   
   bool detect() override;
@@ -38,12 +46,6 @@ public:
   bool set_reboot_delay(int seconds) override;
 
 private:
-  struct HidReport {
-    uint8_t report_id;
-    std::vector<uint8_t> data;
-    
-    HidReport() : report_id(0) {}
-  };
 
   bool init_hid_communication();
   bool read_hid_report(uint8_t report_id, HidReport &report);

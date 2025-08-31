@@ -1,4 +1,4 @@
-#include "number.h"
+#include "control_number.h"
 #include "esphome/core/log.h"
 
 namespace esphome {

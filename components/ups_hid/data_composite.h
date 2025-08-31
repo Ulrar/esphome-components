@@ -1,10 +1,10 @@
 #pragma once
 
-#include "battery_data.h"
-#include "power_data.h"
-#include "device_info.h"
-#include "test_status.h"
-#include "config_data.h"
+#include "data_battery.h"
+#include "data_power.h"
+#include "data_device.h"
+#include "data_test.h"
+#include "data_config.h"
 #include <cstdint>
 #include <cstring>  // For memcmp
 

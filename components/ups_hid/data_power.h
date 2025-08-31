@@ -2,7 +2,7 @@
 
 #include <string>
 #include <cmath>
-#include "hid_constants.h"
+#include "constants_hid.h"
 
 namespace esphome {
 namespace ups_hid {

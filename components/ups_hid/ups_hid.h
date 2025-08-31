@@ -4,9 +4,9 @@
 #include "esphome/core/defines.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
-#include "sensor.h"
-#include "binary_sensor.h"
-#include "text_sensor.h"
+#include "sensor_numeric.h"
+#include "sensor_binary.h"
+#include "sensor_text.h"
 
 #include <memory>
 #include <vector>
@@ -32,10 +32,10 @@
 #endif
 
 // Include the clean refactored architecture
-#include "ups_composite_data.h"
-#include "usb_transport_interface.h"
+#include "data_composite.h"
+#include "transport_interface.h"
 #include "protocol_factory.h"
-#include "hid_constants.h"
+#include "constants_hid.h"
 
 namespace esphome
 {

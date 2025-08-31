@@ -1,4 +1,4 @@
-#include "text_sensor.h"
+#include "sensor_text.h"
 #include "esphome/core/log.h"
 
 namespace esphome

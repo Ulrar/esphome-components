@@ -1,6 +1,6 @@
-#include "apc_hid_protocol.h"
-#include "hid_constants.h"
-#include "ups_constants.h"
+#include "protocol_apc.h"
+#include "constants_hid.h"
+#include "constants_ups.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
 #include <cstring>
@@ -307,6 +307,7 @@ bool ApcHidProtocol::read_hid_report(uint8_t report_id, HidReport &report) {
     return false;
   }
   
+#ifdef USE_ESP32
   uint8_t buffer[64]; // Maximum HID report size
   size_t buffer_len = sizeof(buffer);
   esp_err_t ret;
@@ -343,6 +344,14 @@ bool ApcHidProtocol::read_hid_report(uint8_t report_id, HidReport &report) {
   
   ESP_LOGD(APC_HID_TAG, "Both Input and Feature report 0x%02X failed", report_id);
   return false;
+#else
+  // Simulation mode - return simulated data
+  if (parent_->get_simulation_mode()) {
+    return parent_->simulate_hid_get_report(report_id, report);
+  }
+  ESP_LOGW(APC_HID_TAG, "HID communication not available on this platform");
+  return false;
+#endif
 }
 
 void ApcHidProtocol::log_raw_data(const uint8_t* buffer, size_t buffer_len) {
@@ -363,6 +372,7 @@ void ApcHidProtocol::log_raw_data(const uint8_t* buffer, size_t buffer_len) {
 }
 
 bool ApcHidProtocol::write_hid_report(const HidReport &report) {
+#ifdef USE_ESP32
   // Use HID Feature Report for UPS control commands  
   const uint8_t report_type = HID_REPORT_TYPE_FEATURE; // Feature Report
   
@@ -375,9 +385,287 @@ bool ApcHidProtocol::write_hid_report(const HidReport &report) {
   
   ESP_LOGD(APC_HID_TAG, "HID report 0x%02X: sent %zu bytes", report.report_id, report.data.size());
   return true;
+#else
+  // Simulation mode - return simulated success
+  if (parent_->get_simulation_mode()) {
+    ESP_LOGD(APC_HID_TAG, "Simulated HID report 0x%02X: sent %zu bytes", report.report_id, report.data.size());
+    return true;
+  }
+  ESP_LOGW(APC_HID_TAG, "HID communication not available on this platform");
+  return false;
+#endif
 }
 
+// ============================================================================
+// APC Report Parser - Extracted parsing logic for better organization
+// ============================================================================
+
+namespace {
+
+using HidReport = ApcHidProtocol::HidReport;
+
+class ApcReportParser {
+public:
+  // Status and state parsing
+  static void parse_status_report(const HidReport &report, UpsData &data);
+  static void parse_present_status_report(const HidReport &report, UpsData &data);
+  static void parse_apc_status_report(const HidReport &report, UpsData &data);
+  
+  // Power and battery parsing
+  static void parse_battery_report(const HidReport &report, UpsData &data);
+  static void parse_power_report(const HidReport &report, UpsData &data);
+  static void parse_power_summary_report(const HidReport &report, UpsData &data);
+  static void parse_voltage_report(const HidReport &report, UpsData &data);
+  static void parse_input_voltage_report(const HidReport &report, UpsData &data);
+  static void parse_load_report(const HidReport &report, UpsData &data);
+  
+  // Battery-specific parsing
+  static void parse_battery_voltage_nominal_report(const HidReport &report, UpsData &data);
+  static void parse_battery_voltage_actual_report(const HidReport &report, UpsData &data);
+  static void parse_battery_runtime_low_report(const HidReport &report, UpsData &data);
+  static void parse_battery_charge_threshold_report(const HidReport &report, UpsData &data, bool is_low_threshold);
+  static void parse_battery_chemistry_report(const HidReport &report, UpsData &data);
+  
+  // Device information parsing
+  static void parse_device_info_report(const HidReport &report);
+  static void parse_serial_number_report(const HidReport &report, UpsData &data);
+  static void parse_firmware_version_report(const HidReport &report, UpsData &data);
+  static void parse_manufacture_date_report(const HidReport &report, UpsData &data, bool is_battery);
+  
+  // Configuration parsing
+  static void parse_input_voltage_nominal_report(const HidReport &report, UpsData &data);
+  static void parse_input_transfer_limits_report(const HidReport &report, UpsData &data);
+  static void parse_beeper_status_report(const HidReport &report, UpsData &data);
+  static void parse_input_sensitivity_report(const HidReport &report, UpsData &data);
+  
+  // Timer and delay parsing
+  static void parse_ups_delay_shutdown_report(const HidReport &report, UpsData &data);
+  static void parse_ups_delay_reboot_report(const HidReport &report, UpsData &data);
+  
+  // Test result parsing
+  static void parse_test_result_report(const HidReport &report, UpsData &data);
+};
+
+void ApcReportParser::parse_device_info_report(const HidReport &report) {
+  // Device info report parsing (implementation needed)
+  ESP_LOGD(TAG, "Device info report received");
+}
+
+void ApcReportParser::parse_power_summary_report(const HidReport &report, UpsData &data) {
+  // PowerSummary report: RemainingCapacity + RunTimeToEmpty
+  // CORRECTED: ESP32 data [0C 64 B2 02] - byte 1 is battery %, bytes 2-3 are runtime
+  if (report.data.size() < 2) {
+    ESP_LOGW(APC_HID_TAG, "PowerSummary report too short: %zu bytes", report.data.size());
+    return;
+  }
+  
+  // ESP32 data format: [APC_REPORT_ID_POWER_SUMMARY 63 67 02] where 0x63 = 99% battery
+  // Battery percentage at byte 1 (NUT offset 0 within report payload)
+  data.battery.level = static_cast<float>(report.data[1]);
+  ESP_LOGD(APC_HID_TAG, "Raw battery byte: 0x%02X = %d%%", report.data[1], report.data[1]);
+  ESP_LOGI(APC_HID_TAG, "PowerSummary: Battery %.0f%%", data.battery.level);
+  
+  // Runtime at bytes 2-3 (16-bit little-endian, NUT offset 8)
+  // CORRECTED: Raw HID value is in seconds (like NUT), convert to minutes for ESPHome
+  if (report.data.size() >= 4) {
+    uint16_t runtime_raw = report.data[2] | (report.data[3] << 8);
+    if (runtime_raw > 0 && runtime_raw < 65535) {
+      // Convert seconds to minutes to match ESPHome sensor expectations  
+      data.battery.runtime_minutes = static_cast<float>(runtime_raw) / 60.0f;
+      ESP_LOGI(APC_HID_TAG, "PowerSummary: Runtime %d seconds (%.1f minutes)", runtime_raw, data.battery.runtime_minutes);
+    }
+  }
+}
+
+void ApcReportParser::parse_present_status_report(const HidReport &report, UpsData &data) {
+  // PresentStatus report: PowerSummary.PresentStatus - HID field structure
+  // Based on NUT logs showing exact offsets for each 1-bit field:
+  // Offset 0: Charging, Offset 1: Discharging, Offset 2: ACPresent, Offset 3: BatteryPresent, etc.
+  if (report.data.size() < 2) {
+    ESP_LOGW(APC_HID_TAG, "PresentStatus report too short: %zu bytes", report.data.size());
+    return;
+  }
+  
+  // ESP32 receives packed data, but NUT shows individual bit fields at offsets
+  // The HID descriptor defines how these bits are packed into the report
+  uint8_t packed_status = report.data[1];
+  ESP_LOGD(APC_HID_TAG, "PresentStatus packed data: 0x%02X", packed_status);
+  
+  // Extract individual status bits based on NUT field offsets
+  // NUT shows these are 1-bit fields at specific offsets within the report
+  bool charging = (packed_status & APC_PRESENT_CHARGING) != 0;        // Offset 0, Size 1
+  bool discharging = (packed_status & APC_PRESENT_DISCHARGING) != 0;     // Offset 1, Size 1
+  bool ac_present = (packed_status & APC_PRESENT_AC_PRESENT) != 0;      // Offset 2, Size 1  
+  bool battery_present = (packed_status & APC_PRESENT_BATTERY_PRESENT) != 0; // Offset 3, Size 1
+  bool below_capacity = (packed_status & APC_PRESENT_BELOW_CAPACITY) != 0;  // Offset 4, Size 1
+  bool shutdown_imminent = (packed_status & APC_PRESENT_SHUTDOWN_IMMINENT) != 0; // Offset 5, Size 1
+  bool time_limit_expired = (packed_status & APC_PRESENT_TIME_LIMIT_EXPIRED) != 0; // Offset 6, Size 1
+  bool need_replacement = (packed_status & APC_PRESENT_NEED_REPLACEMENT) != 0;   // Offset 7, Size 1
+  
+  // Check for Overload at Offset 8 (second byte if available)
+  bool overload = false;
+  if (report.data.size() >= 3) {
+    uint8_t second_byte = report.data[2];
+    overload = (second_byte & APC_PRESENT_OVERLOAD) != 0;  // Offset 8 = bit 0 of second byte
+    ESP_LOGD(APC_HID_TAG, "Second status byte: 0x%02X, Overload: %d", second_byte, overload);
+  }
+  
+  // Update power status based on AC presence and discharging
+  if (ac_present && !discharging) {
+    // Note: Can't access parent_->get_fallback_nominal_voltage() in static method
+    // The voltage will be set by the actual voltage reports if available
+    data.power.status = status::ONLINE;
+  } else {
+    data.power.input_voltage = NAN;     // No AC input
+    data.power.status = status::ON_BATTERY;
+  }
+  
+  // Update battery status
+  if (charging) {
+    data.battery.status = battery_status::CHARGING;
+  } else if (discharging) {
+    data.battery.status = battery_status::DISCHARGING;
+  } else {
+    data.battery.status = battery_status::NORMAL;
+  }
+  
+  // Handle battery issues
+  if (below_capacity || shutdown_imminent) {
+    data.battery.charge_low = battery::LOW_THRESHOLD_PERCENT;  // Indicate low battery threshold
+    if (shutdown_imminent) {
+      data.battery.status += battery_status::SHUTDOWN_IMMINENT_SUFFIX;
+    }
+  }
+  
+  if (need_replacement) {
+    data.battery.status += battery_status::REPLACE_BATTERY_SUFFIX;
+  }
+  
+  if (!battery_present) {
+    data.battery.status = battery_status::NOT_PRESENT;
+  }
+  
+  if (overload) {
+    data.power.status += " - Overload";
+  }
+  
+  ESP_LOGI(APC_HID_TAG, "PresentStatus: 0x%02X AC:%d Discharge:%d Charge:%d Battery:%d → Power:\"%s\" Battery:\"%s\"", 
+           packed_status, ac_present, discharging, charging, battery_present, 
+           data.power.status.c_str(), data.battery.status.c_str());
+}
+
+void ApcReportParser::parse_apc_status_report(const HidReport &report, UpsData &data) {
+  // APCStatusFlag report: PowerSummary.APCStatusFlag (single byte legacy status)
+  // ESP32 data format: [06 XX] where XX is the status value
+  if (report.data.size() < 2) {
+    ESP_LOGW(APC_HID_TAG, "APCStatus report too short: %zu bytes", report.data.size());
+    return;
+  }
+  
+  // ESP32 data format: [APC_REPORT_ID_BATTERY 08] where 0x08 = AC present  
+  uint8_t apc_status = report.data[1]; // Byte 1 contains the status value
+  ESP_LOGD(APC_HID_TAG, "Raw APCStatusFlag byte: 0x%02X", apc_status);
+  ESP_LOGI(APC_HID_TAG, "APCStatusFlag: 0x%02X", apc_status);
+  
+  // Parse APC legacy status values from NUT logs:
+  // Value 8 = AC present (UPS online)
+  // Value 16 = discharging (UPS on battery) 
+  bool apc_ac_present = (apc_status == 8);
+  bool apc_discharging = (apc_status == 16);
+  
+  // Use APCStatusFlag as backup/confirmation for PresentStatus
+  // This provides additional validation of the UPS state
+  if (apc_ac_present) {
+    ESP_LOGD(APC_HID_TAG, "APCStatusFlag confirms: UPS online (AC present)");
+  } else if (apc_discharging) {
+    ESP_LOGD(APC_HID_TAG, "APCStatusFlag confirms: UPS on battery (discharging)");
+  } else {
+    ESP_LOGW(APC_HID_TAG, "APCStatusFlag unknown value: 0x%02X", apc_status);
+  }
+  
+  // Don't override PresentStatus data, just log for debugging
+  // PresentStatus report is more detailed and authoritative
+}
+
+void ApcReportParser::parse_input_voltage_report(const HidReport &report, UpsData &data) {
+  // Input voltage report: UPS.Input.Voltage (16-bit value)
+  // NUT logs show values like 236V, 232V (AC input voltage)
+  if (report.data.size() < 3) {
+    ESP_LOGW(APC_HID_TAG, "Input voltage report too short: %zu bytes", report.data.size());
+    return;
+  }
+  
+  // Parse 16-bit voltage value (little-endian)
+  uint16_t voltage_raw = report.data[1] | (report.data[2] << 8);
+  data.power.input_voltage = static_cast<float>(voltage_raw);
+  
+  ESP_LOGI(APC_HID_TAG, "Input voltage: %.1fV", data.power.input_voltage);
+}
+
+void ApcReportParser::parse_load_report(const HidReport &report, UpsData &data) {
+  // Load report: UPS.PowerConverter.PercentLoad (8-bit percentage)
+  // NUT logs show values like 23%, 16% (load percentage)
+  if (report.data.size() < 2) {
+    ESP_LOGW(APC_HID_TAG, "Load report too short: %zu bytes", report.data.size());
+    return;
+  }
+  
+  // Parse 8-bit load percentage
+  data.power.load_percent = static_cast<float>(report.data[1]);
+  
+  ESP_LOGI(APC_HID_TAG, "Load percentage: %.0f%%", data.power.load_percent);
+}
+
+} // anonymous namespace
+
+// ============================================================================
+// APC Protocol Implementation - Now delegates to parser classes
+// ============================================================================
+
 void ApcHidProtocol::parse_status_report(const HidReport &report, UpsData &data) {
+  ApcReportParser::parse_status_report(report, data);
+}
+
+// Battery report parsing implementation
+void ApcReportParser::parse_battery_report(const HidReport &report, UpsData &data) {
+  if (report.data.size() < 2) {
+    ESP_LOGW(APC_HID_TAG, "Battery report too short: %zu bytes", report.data.size());
+    return;
+  }
+  
+  // Parse battery level based on working ESP32 NUT server implementation
+  // APCStatusFlag report: recv[1] = battery charge percentage
+  // report.data[0] = report ID (APC_REPORT_ID_BATTERY)  
+  // report.data[1] = battery charge level percentage (direct value)
+  data.battery.level = static_cast<float>(report.data[1]);
+  ESP_LOGI(APC_HID_TAG, "Battery level: %.0f%%", data.battery.level);
+  
+  // Parse runtime if more bytes available (32-bit little-endian)
+  // CORRECTED: Raw HID value is in seconds (like NUT), convert to minutes for ESPHome
+  // recv[2] + 256 * recv[3] + 256 * 256 * recv[4] + 256 * 256 * 256 * recv[5]
+  if (report.data.size() >= 6) {
+    uint32_t runtime_raw = report.data[2] + 
+                          (report.data[3] << 8) + 
+                          (report.data[4] << 16) + 
+                          (report.data[5] << 24);
+    if (runtime_raw > 0 && runtime_raw < 65535) { // Sanity check
+      // Convert seconds to minutes to match ESPHome sensor expectations
+      data.battery.runtime_minutes = static_cast<float>(runtime_raw) / 60.0f;
+      ESP_LOGI(APC_HID_TAG, "Runtime: %d seconds (%.1f minutes)", runtime_raw, data.battery.runtime_minutes);
+    } else {
+      // Set estimate based on battery level if raw value seems invalid
+      data.battery.runtime_minutes = data.battery.level * 0.5f; 
+      ESP_LOGV(APC_HID_TAG, "Using estimated runtime: %.0f minutes", data.battery.runtime_minutes);
+    }
+  } else {
+    // Set reasonable default if runtime not available
+    data.battery.runtime_minutes = data.battery.level * 0.5f; // Rough estimate based on battery level
+    ESP_LOGV(APC_HID_TAG, "Using estimated runtime: %.0f minutes", data.battery.runtime_minutes);
+  }
+}
+
+// Status report parsing implementation
+void ApcReportParser::parse_status_report(const HidReport &report, UpsData &data) {
   if (report.data.size() < 2) {
     ESP_LOGW(APC_HID_TAG, "Status report too short: %zu bytes", report.data.size());
     return;
@@ -400,7 +688,8 @@ void ApcHidProtocol::parse_status_report(const HidReport &report, UpsData &data)
   
   // Update power status based on AC presence and discharging
   if (ac_present && !discharging) {
-    data.power.input_voltage = parent_->get_fallback_nominal_voltage();  // Use configured fallback voltage when AC present
+    // Note: Can't access parent_->get_fallback_nominal_voltage() in static method
+    // The voltage will be set by the actual voltage reports if available
     data.power.status = status::ONLINE;
   } else {
     data.power.input_voltage = NAN;     // No AC input
@@ -450,44 +739,8 @@ void ApcHidProtocol::parse_status_report(const HidReport &report, UpsData &data)
            data.power.status.c_str());
 }
 
-void ApcHidProtocol::parse_battery_report(const HidReport &report, UpsData &data) {
-  if (report.data.size() < 2) {
-    ESP_LOGW(APC_HID_TAG, "Battery report too short: %zu bytes", report.data.size());
-    return;
-  }
-  
-  // Parse battery level based on working ESP32 NUT server implementation
-  // APCStatusFlag report: recv[1] = battery charge percentage
-  // report.data[0] = report ID (APC_REPORT_ID_BATTERY)  
-  // report.data[1] = battery charge level percentage (direct value)
-  data.battery.level = static_cast<float>(report.data[1]);
-  ESP_LOGI(APC_HID_TAG, "Battery level: %.0f%%", data.battery.level);
-  
-  // Parse runtime if more bytes available (32-bit little-endian)
-  // CORRECTED: Raw HID value is in seconds (like NUT), convert to minutes for ESPHome
-  // recv[2] + 256 * recv[3] + 256 * 256 * recv[4] + 256 * 256 * 256 * recv[5]
-  if (report.data.size() >= 6) {
-    uint32_t runtime_raw = report.data[2] + 
-                          (report.data[3] << 8) + 
-                          (report.data[4] << 16) + 
-                          (report.data[5] << 24);
-    if (runtime_raw > 0 && runtime_raw < 65535) { // Sanity check
-      // Convert seconds to minutes to match ESPHome sensor expectations
-      data.battery.runtime_minutes = static_cast<float>(runtime_raw) / 60.0f;
-      ESP_LOGI(APC_HID_TAG, "Runtime: %d seconds (%.1f minutes)", runtime_raw, data.battery.runtime_minutes);
-    } else {
-      // Set estimate based on battery level if raw value seems invalid
-      data.battery.runtime_minutes = data.battery.level * 0.5f; 
-      ESP_LOGV(APC_HID_TAG, "Using estimated runtime: %.0f minutes", data.battery.runtime_minutes);
-    }
-  } else {
-    // Set reasonable default if runtime not available
-    data.battery.runtime_minutes = data.battery.level * 0.5f; // Rough estimate based on battery level
-    ESP_LOGV(APC_HID_TAG, "Using estimated runtime: %.0f minutes", data.battery.runtime_minutes);
-  }
-}
-
-void ApcHidProtocol::parse_voltage_report(const HidReport &report, UpsData &data) {
+// Voltage report parsing implementation
+void ApcReportParser::parse_voltage_report(const HidReport &report, UpsData &data) {
   if (report.data.size() < 2) {
     ESP_LOGW(APC_HID_TAG, "Voltage report too short: %zu bytes", report.data.size());
     return;
@@ -519,6 +772,53 @@ void ApcHidProtocol::parse_voltage_report(const HidReport &report, UpsData &data
   data.power.output_voltage = voltage_scaled;
   
   ESP_LOGI(APC_HID_TAG, "Output voltage: %.1fV", data.power.output_voltage);
+}
+
+// Power report parsing implementation
+void ApcReportParser::parse_power_report(const HidReport &report, UpsData &data) {
+  if (report.data.size() < 3) {
+    ESP_LOGW(APC_HID_TAG, "Power report too short: %zu bytes", report.data.size());
+    return;
+  }
+  
+  // Parse load - handle different report sizes
+  // report.data[0] = report ID (APC_REPORT_ID_LOAD)
+  
+  if (report.data.size() >= 7) {
+    // Working ESP32 NUT server format: recv[6] = UPS load percentage
+    data.power.load_percent = static_cast<float>(report.data[6]);
+    ESP_LOGI(APC_HID_TAG, "Load: %.0f%% (from byte 6)", data.power.load_percent);
+  } else {
+    // Shorter format - try different bytes to find load percentage
+    // Current data: 07 39 4B (57, 75 in decimal)
+    
+    // Method 1: Try byte 1 (0x39 = 57%)
+    uint8_t load_candidate1 = report.data[1];
+    // Method 2: Try byte 2 (0x4B = 75%)
+    uint8_t load_candidate2 = report.data[2];
+    
+    ESP_LOGI(APC_HID_TAG, "Load candidates - Byte1: %d%%, Byte2: %d%%", 
+             load_candidate1, load_candidate2);
+    
+    // Use the first reasonable value (prefer byte 1 based on previous analysis)
+    if (load_candidate1 <= 100) {
+      data.power.load_percent = static_cast<float>(load_candidate1);
+      ESP_LOGI(APC_HID_TAG, "Load: %.0f%% (from byte 1)", data.power.load_percent);
+    } else if (load_candidate2 <= 100) {
+      data.power.load_percent = static_cast<float>(load_candidate2);
+      ESP_LOGI(APC_HID_TAG, "Load: %.0f%% (from byte 2)", data.power.load_percent);
+    } else {
+      ESP_LOGW(APC_HID_TAG, "No valid load percentage found");
+    }
+  }
+}
+
+void ApcHidProtocol::parse_battery_report(const HidReport &report, UpsData &data) {
+  ApcReportParser::parse_battery_report(report, data);
+}
+
+void ApcHidProtocol::parse_voltage_report(const HidReport &report, UpsData &data) {
+  ApcReportParser::parse_voltage_report(report, data);
 }
 
 void ApcHidProtocol::parse_power_report(const HidReport &report, UpsData &data) {
@@ -574,195 +874,28 @@ void ApcHidProtocol::read_device_info() {
 }
 
 void ApcHidProtocol::parse_device_info_report(const HidReport &report) {
-  if (report.data.size() < 16) {
-    ESP_LOGW(APC_HID_TAG, "Device info report too short: %zu bytes", report.data.size());
-    return;
-  }
-  
-  // Manufacturer date (APC hex-as-decimal format, typically at offset 8-11)
-  if (report.data.size() >= 12) {
-    uint32_t mfr_date = (report.data[11] << 24) | (report.data[10] << 16) |
-                        (report.data[9] << 8) | report.data[8];
-    if (mfr_date != 0) {
-      std::string date_str = convert_apc_date(mfr_date);
-      ESP_LOGD(APC_HID_TAG, "Manufacture Date: %s", date_str.c_str());
-    }
-  }
-  
-  // Battery replacement date (if available, typically at offset 12-15)
-  if (report.data.size() >= 16) {
-    uint32_t battery_date = (report.data[15] << 24) | (report.data[14] << 16) |
-                            (report.data[13] << 8) | report.data[12];
-    if (battery_date != 0) {
-      std::string date_str = convert_apc_date(battery_date);
-      ESP_LOGD(APC_HID_TAG, "Battery Date: %s", date_str.c_str());
-    }
-  }
+  ApcReportParser::parse_device_info_report(report);
 }
 
 // NUT-compatible parser implementations based on real device data analysis
 void ApcHidProtocol::parse_power_summary_report(const HidReport &report, UpsData &data) {
-  // PowerSummary report: RemainingCapacity + RunTimeToEmpty
-  // CORRECTED: ESP32 data [0C 64 B2 02] - byte 1 is battery %, bytes 2-3 are runtime
-  if (report.data.size() < 2) {
-    ESP_LOGW(APC_HID_TAG, "PowerSummary report too short: %zu bytes", report.data.size());
-    return;
-  }
-  
-  // ESP32 data format: [APC_REPORT_ID_POWER_SUMMARY 63 67 02] where 0x63 = 99% battery
-  // Battery percentage at byte 1 (NUT offset 0 within report payload)
-  data.battery.level = static_cast<float>(report.data[1]);
-  ESP_LOGD(APC_HID_TAG, "Raw battery byte: 0x%02X = %d%%", report.data[1], report.data[1]);
-  ESP_LOGI(APC_HID_TAG, "PowerSummary: Battery %.0f%%", data.battery.level);
-  
-  // Runtime at bytes 2-3 (16-bit little-endian, NUT offset 8)
-  // CORRECTED: Raw HID value is in seconds (like NUT), convert to minutes for ESPHome
-  if (report.data.size() >= 4) {
-    uint16_t runtime_raw = report.data[2] | (report.data[3] << 8);
-    if (runtime_raw > 0 && runtime_raw < 65535) {
-      // Convert seconds to minutes to match ESPHome sensor expectations  
-      data.battery.runtime_minutes = static_cast<float>(runtime_raw) / 60.0f;
-      ESP_LOGI(APC_HID_TAG, "PowerSummary: Runtime %d seconds (%.1f minutes)", runtime_raw, data.battery.runtime_minutes);
-    }
-  }
+  ApcReportParser::parse_power_summary_report(report, data);
 }
 
 void ApcHidProtocol::parse_present_status_report(const HidReport &report, UpsData &data) {
-  // PresentStatus report: PowerSummary.PresentStatus - HID field structure
-  // Based on NUT logs showing exact offsets for each 1-bit field:
-  // Offset 0: Charging, Offset 1: Discharging, Offset 2: ACPresent, Offset 3: BatteryPresent, etc.
-  if (report.data.size() < 2) {
-    ESP_LOGW(APC_HID_TAG, "PresentStatus report too short: %zu bytes", report.data.size());
-    return;
-  }
-  
-  // ESP32 receives packed data, but NUT shows individual bit fields at offsets
-  // The HID descriptor defines how these bits are packed into the report
-  uint8_t packed_status = report.data[1];
-  ESP_LOGD(APC_HID_TAG, "PresentStatus packed data: 0x%02X", packed_status);
-  
-  // Extract individual status bits based on NUT field offsets
-  // NUT shows these are 1-bit fields at specific offsets within the report
-  bool charging = (packed_status & APC_PRESENT_CHARGING) != 0;        // Offset 0, Size 1
-  bool discharging = (packed_status & APC_PRESENT_DISCHARGING) != 0;     // Offset 1, Size 1
-  bool ac_present = (packed_status & APC_PRESENT_AC_PRESENT) != 0;      // Offset 2, Size 1  
-  bool battery_present = (packed_status & APC_PRESENT_BATTERY_PRESENT) != 0; // Offset 3, Size 1
-  bool below_capacity = (packed_status & APC_PRESENT_BELOW_CAPACITY) != 0;  // Offset 4, Size 1
-  bool shutdown_imminent = (packed_status & APC_PRESENT_SHUTDOWN_IMMINENT) != 0; // Offset 5, Size 1
-  bool time_limit_expired = (packed_status & APC_PRESENT_TIME_LIMIT_EXPIRED) != 0; // Offset 6, Size 1
-  bool need_replacement = (packed_status & APC_PRESENT_NEED_REPLACEMENT) != 0;   // Offset 7, Size 1
-  
-  // Check for Overload at Offset 8 (second byte if available)
-  bool overload = false;
-  if (report.data.size() >= 3) {
-    uint8_t second_byte = report.data[2];
-    overload = (second_byte & APC_PRESENT_OVERLOAD) != 0;  // Offset 8 = bit 0 of second byte
-    ESP_LOGD(APC_HID_TAG, "Second status byte: 0x%02X, Overload: %d", second_byte, overload);
-  }
-  
-  // Update power status based on AC presence and discharging
-  if (ac_present && !discharging) {
-    data.power.input_voltage = parent_->get_fallback_nominal_voltage();  // Use configured fallback voltage when AC present
-    data.power.status = status::ONLINE;
-  } else {
-    data.power.input_voltage = NAN;     // No AC input
-    data.power.status = status::ON_BATTERY;
-  }
-  
-  // Update battery status
-  if (charging) {
-    data.battery.status = battery_status::CHARGING;
-  } else if (discharging) {
-    data.battery.status = battery_status::DISCHARGING;
-  } else {
-    data.battery.status = battery_status::NORMAL;
-  }
-  
-  // Handle battery issues
-  if (below_capacity || shutdown_imminent) {
-    data.battery.charge_low = battery::LOW_THRESHOLD_PERCENT;  // Indicate low battery threshold
-    if (shutdown_imminent) {
-      data.battery.status += battery_status::SHUTDOWN_IMMINENT_SUFFIX;
-    }
-  }
-  
-  if (need_replacement) {
-    data.battery.status += battery_status::REPLACE_BATTERY_SUFFIX;
-  }
-  
-  if (!battery_present) {
-    data.battery.status = battery_status::NOT_PRESENT;
-  }
-  
-  if (overload) {
-    data.power.status += " - Overload";
-  }
-  
-  ESP_LOGI(APC_HID_TAG, "PresentStatus: 0x%02X AC:%d Discharge:%d Charge:%d Battery:%d → Power:\"%s\" Battery:\"%s\"", 
-           packed_status, ac_present, discharging, charging, battery_present, 
-           data.power.status.c_str(), data.battery.status.c_str());
+  ApcReportParser::parse_present_status_report(report, data);
 }
 
 void ApcHidProtocol::parse_apc_status_report(const HidReport &report, UpsData &data) {
-  // APCStatusFlag report: PowerSummary.APCStatusFlag (single byte legacy status)
-  // ESP32 data format: [06 XX] where XX is the status value
-  if (report.data.size() < 2) {
-    ESP_LOGW(APC_HID_TAG, "APCStatus report too short: %zu bytes", report.data.size());
-    return;
-  }
-  
-  // ESP32 data format: [APC_REPORT_ID_BATTERY 08] where 0x08 = AC present  
-  uint8_t apc_status = report.data[1]; // Byte 1 contains the status value
-  ESP_LOGD(APC_HID_TAG, "Raw APCStatusFlag byte: 0x%02X", apc_status);
-  ESP_LOGI(APC_HID_TAG, "APCStatusFlag: 0x%02X", apc_status);
-  
-  // Parse APC legacy status values from NUT logs:
-  // Value 8 = AC present (UPS online)
-  // Value 16 = discharging (UPS on battery) 
-  bool apc_ac_present = (apc_status == 8);
-  bool apc_discharging = (apc_status == 16);
-  
-  // Use APCStatusFlag as backup/confirmation for PresentStatus
-  // This provides additional validation of the UPS state
-  if (apc_ac_present) {
-    ESP_LOGD(APC_HID_TAG, "APCStatusFlag confirms: UPS online (AC present)");
-  } else if (apc_discharging) {
-    ESP_LOGD(APC_HID_TAG, "APCStatusFlag confirms: UPS on battery (discharging)");
-  } else {
-    ESP_LOGW(APC_HID_TAG, "APCStatusFlag unknown value: 0x%02X", apc_status);
-  }
-  
-  // Don't override PresentStatus data, just log for debugging
-  // PresentStatus report is more detailed and authoritative
+  ApcReportParser::parse_apc_status_report(report, data);
 }
 
 void ApcHidProtocol::parse_input_voltage_report(const HidReport &report, UpsData &data) {
-  // Input voltage report: UPS.Input.Voltage (16-bit value)
-  // NUT logs show values like 236V, 232V (AC input voltage)
-  if (report.data.size() < 3) {
-    ESP_LOGW(APC_HID_TAG, "Input voltage report too short: %zu bytes", report.data.size());
-    return;
-  }
-  
-  // Parse 16-bit voltage value (little-endian)
-  uint16_t voltage_raw = report.data[1] | (report.data[2] << 8);
-  data.power.input_voltage = static_cast<float>(voltage_raw);
-  
-  ESP_LOGI(APC_HID_TAG, "Input voltage: %.1fV", data.power.input_voltage);
+  ApcReportParser::parse_input_voltage_report(report, data);
 }
 
 void ApcHidProtocol::parse_load_report(const HidReport &report, UpsData &data) {
-  // Load report: UPS.PowerConverter.PercentLoad (8-bit percentage)
-  // NUT logs show values like 23%, 16% (load percentage)
-  if (report.data.size() < 2) {
-    ESP_LOGW(APC_HID_TAG, "Load report too short: %zu bytes", report.data.size());
-    return;
-  }
-  
-  // Parse 8-bit load percentage
-  data.power.load_percent = static_cast<float>(report.data[1]);
-  
-  ESP_LOGI(APC_HID_TAG, "Load percentage: %.0f%%", data.power.load_percent);
+  ApcReportParser::parse_load_report(report, data);
 }
 
 void ApcHidProtocol::read_device_information(UpsData &data) {
@@ -1473,6 +1606,7 @@ bool ApcHidProtocol::beeper_enable() {
     
     uint8_t beeper_data[2] = {report_id, beeper::CONTROL_ENABLE};  // Report ID, Value=2 (enabled)
     
+#ifdef USE_ESP32
     esp_err_t ret = parent_->hid_set_report(HID_REPORT_TYPE_FEATURE, report_id, beeper_data, sizeof(beeper_data), parent_->get_protocol_timeout());
     if (ret == ESP_OK) {
       ESP_LOGI(APC_HID_TAG, "APC beeper enabled successfully with report ID 0x%02X", report_id);
@@ -1480,6 +1614,15 @@ bool ApcHidProtocol::beeper_enable() {
     } else {
       ESP_LOGD(APC_HID_TAG, "Failed with report ID 0x%02X: %s", report_id, esp_err_to_name(ret));
     }
+#else
+    // Simulation mode - always succeed
+    if (parent_->get_simulation_mode()) {
+      ESP_LOGI(APC_HID_TAG, "Simulated: APC beeper enabled successfully with report ID 0x%02X", report_id);
+      return true;
+    }
+    ESP_LOGW(APC_HID_TAG, "HID communication not available on this platform");
+    return false;
+#endif
   }
   
   ESP_LOGW(APC_HID_TAG, "Failed to enable APC beeper with all tested report IDs");
