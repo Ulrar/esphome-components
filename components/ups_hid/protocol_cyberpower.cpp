@@ -404,7 +404,8 @@ void CyberPowerProtocol::parse_input_voltage_report(const HidReport &report, Ups
   // NUT debug: Report 0x0f, Value: 231 (matches our 0x00E6 = 230)
   // Data format: [ID, volt_low, volt_high] - 16-bit little endian
   uint16_t voltage_raw = report.data[1] | (report.data[2] << 8);
-  data.power.input_voltage = static_cast<float>(voltage_raw) / battery::VOLTAGE_SCALE_FACTOR;
+  // Input voltage is in volts directly, no scaling needed (unlike battery voltage)
+  data.power.input_voltage = static_cast<float>(voltage_raw);
   
   ESP_LOGD(CP_TAG, "Input voltage: %.1fV (raw: 0x%02X%02X = %d)", 
            data.power.input_voltage, report.data[2], report.data[1], voltage_raw);
@@ -419,7 +420,8 @@ void CyberPowerProtocol::parse_output_voltage_report(const HidReport &report, Up
   // NUT debug: Report 0x12, Value: 231 (matches our 0x00E6 = 230)
   // Data format: [ID, volt_low, volt_high] - 16-bit little endian  
   uint16_t voltage_raw = report.data[1] | (report.data[2] << 8);
-  data.power.output_voltage = static_cast<float>(voltage_raw) / battery::VOLTAGE_SCALE_FACTOR;
+  // Output voltage is in volts directly, no scaling needed (unlike battery voltage)
+  data.power.output_voltage = static_cast<float>(voltage_raw);
   
   ESP_LOGD(CP_TAG, "Output voltage: %.1fV (raw: 0x%02X%02X = %d)", 
            data.power.output_voltage, report.data[2], report.data[1], voltage_raw);
