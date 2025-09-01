@@ -31,7 +31,9 @@ logger:
   baud_rate: 115200
   hardware_uart: UART0
   logs:
-    ups_hid: DEBUG
+    ups_hid: INFO
+    nut_server: DEBUG
+
 
 # Network configuration
 wifi:

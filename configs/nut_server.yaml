@@ -1,0 +1,147 @@
+# NUT Server Configuration Package
+# Network UPS Tools (NUT) TCP server for exposing UPS data over standard NUT protocol
+# Use with: packages: nut_server: !include configs/nut_server.yaml
+
+# Substitutions with sensible defaults (can be overridden in parent config)
+substitutions:
+  # NUT Server Configuration
+  nut_port: "3493"                    # Standard NUT port
+  nut_username: "nutuser"             # Username for authentication
+  nut_password: "nutpass"             # Password (leave empty to disable auth)
+  nut_max_clients: "4"                # Maximum simultaneous clients (1-10)
+  # UPS name is now automatically derived from the ups_hid component ID
+  
+  # Network Configuration (static IP recommended for servers)
+  use_static_ip: "false"              # Set to "true" to enable static IP
+  static_ip: "192.168.1.100"          # Static IP address
+  static_gateway: "192.168.1.1"       # Gateway address
+  static_subnet: "255.255.255.0"      # Subnet mask
+  static_dns1: "192.168.1.1"          # Primary DNS server
+
+# NUT Server Component
+nut_server:
+  ups_hid_id: ups_monitor
+  port: ${nut_port}
+  username: "${nut_username}"
+  password: "${nut_password}"
+  max_clients: ${nut_max_clients}
+  # UPS name is automatically derived from ups_hid component ID (ups_monitor)
+
+# Static IP configuration (uncomment to enable)
+# Recommended for NUT server to ensure consistent network access
+# Uncomment the following wifi section and customize the IP addresses:
+#
+# wifi:
+#   manual_ip:
+#     static_ip: ${static_ip}
+#     gateway: ${static_gateway}  
+#     subnet: ${static_subnet}
+#     dns1: ${static_dns1}
+
+# Enhanced logging for NUT server
+logger:
+  logs:
+    nut_server: DEBUG                  # Set to DEBUG for troubleshooting
+
+# Status indicators for NUT server
+binary_sensor:
+  # Template sensors to indicate NUT server status
+  - platform: template
+    name: "NUT Server Active"
+    id: nut_server_status
+    icon: "mdi:network-outline"
+    lambda: |-
+      // NUT server is active if UPS is connected and has valid data
+      return id(ups_monitor).is_connected();
+    on_state:
+      then:
+        - if:
+            condition:
+              binary_sensor.is_on: nut_server_status
+            then:
+              - logger.log:
+                  format: "NUT Server: Online - Serving UPS on port ${nut_port}"
+                  level: INFO
+            else:
+              - logger.log: "NUT Server: Offline - UPS not connected or no valid data"
+
+text_sensor:
+  # NUT server connection info
+  - platform: template
+    name: "NUT Server Info"
+    id: nut_server_info
+    icon: "mdi:information-outline"
+    lambda: |-
+      std::string info = "UPS: ups_monitor, Port: ${nut_port}";
+      if (std::string("${nut_password}").empty()) {
+        info += ", Auth: Disabled";
+      } else {
+        info += ", Auth: Enabled (${nut_username})";
+      }
+      info += ", Max Clients: ${nut_max_clients}";
+      return info;
+
+# Automation for NUT server status monitoring
+script:
+  - id: nut_server_status_check
+    then:
+      - lambda: |-
+          // Log current NUT server status and UPS data availability using data provider pattern
+          if (id(ups_monitor).is_connected()) {
+            ESP_LOGI("nut_server", "Status Check: UPS Connected=YES, Data Available=YES"); 
+            ESP_LOGI("nut_server", "Available Data: Battery=%.1f%%, Input=%.1fV, Load=%.1f%%, Status=%s",
+                     id(ups_monitor).get_battery_level(),
+                     id(ups_monitor).get_input_voltage(), 
+                     id(ups_monitor).get_load_percent(),
+                     id(ups_monitor).is_online() ? "Online" : "On Battery");
+          } else {
+            ESP_LOGW("nut_server", "Status Check: UPS not connected - NUT server inactive");
+          }
+
+# Status monitoring interval
+interval:
+  - interval: 60s
+    then:
+      - script.execute: nut_server_status_check
+
+# Client connection examples and documentation (commented)
+# 
+# Connect with NUT client tools:
+# 
+# 1. Using upsc command:
+#    upsc ups_monitor@<esp32_ip>:${nut_port}
+#    upsc -u ${nut_username} -p ${nut_password} ups_monitor@<esp32_ip>:${nut_port}
+#
+# 2. Using telnet for testing:
+#    telnet <esp32_ip> ${nut_port}
+#    Commands: HELP, VERSION, LOGIN ${nut_username} ${nut_password}, LIST UPS, LIST VAR ups_monitor
+#
+# 3. Home Assistant NUT integration:
+#    sensor:
+#      - platform: nut
+#        host: <esp32_ip>
+#        port: ${nut_port}
+#        username: ${nut_username}
+#        password: ${nut_password}
+#        resources:
+#          - battery.charge
+#          - battery.runtime
+#          - input.voltage
+#          - ups.load
+#          - ups.status
+#
+# 4. Python client example:
+#    import socket
+#    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+#    sock.connect(('<esp32_ip>', ${nut_port}))
+#    sock.send(b"LOGIN ${nut_username} ${nut_password}\n")
+#    sock.send(b"LIST VAR ups_monitor\n")
+#    response = sock.recv(4096).decode()
+#    print(response)
+#    sock.close()
+#
+# Security Notes:
+# - Use strong passwords in production
+# - Consider firewall rules to limit access
+# - Static IP recommended for consistent server access
+# - Monitor logs for authentication failures

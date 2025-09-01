@@ -8,6 +8,35 @@ This folder contains development tools for ESP32 ESPHome component development a
 
 Lists ESP32, UPS, and related USB devices connected to the system. Useful for identifying device paths and vendor/product IDs during development.
 
+## NUT Server Testing
+
+### test_nut_server.py
+
+Comprehensive test script for validating the NUT server component functionality. Tests NUT protocol commands, authentication, and concurrent connections.
+
+**Usage:**
+```bash
+# Basic test with default settings
+./test_nut_server.py 192.168.1.200
+
+# Full test with custom parameters
+./test_nut_server.py 192.168.1.200 --port 3493 --username nutmon --password nutsecret --ups test_ups
+
+# Run specific test
+./test_nut_server.py 192.168.1.200 --test auth
+
+# Test concurrent connections
+./test_nut_server.py 192.168.1.200 --test concurrent
+```
+
+**Test Categories:**
+- `basic` - Test unauthenticated commands (HELP, VERSION, UPSDVER)
+- `auth` - Test authenticated commands (LIST, GET VAR)
+- `instant` - Test instant commands (beeper control)
+- `error` - Test error handling with invalid commands
+- `concurrent` - Test multiple simultaneous connections
+- `all` - Run all tests (default)
+
 ## Protocol Development
 
 The UPS HID component uses a modern self-registering protocol system. New protocols automatically register themselves using macros:

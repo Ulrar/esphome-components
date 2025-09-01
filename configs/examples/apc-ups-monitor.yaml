@@ -42,6 +42,13 @@ packages:
   
   # APC-specific optimizations
   apc_device: !include ../device_types/apc_backups_es.yaml
+  
+  # NUT Server (Network UPS Tools) - uncomment to enable TCP server
+  # Exposes UPS data via standard NUT protocol for monitoring tools
+  # Standard package:
+  nut_server: !include ../nut_server.yaml
+  # OR grouped package (with NUT Server group in web interface):
+  # nut_server_grouped: !include ../nut_server_grouped.yaml
 
 # Optional: Home Assistant API (uncomment to enable)
 # api:

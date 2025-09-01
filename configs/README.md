@@ -108,6 +108,40 @@ UPS delay configuration package (3 number entities + automation scripts):
 **Scripts**: Default delay application and configuration reading
 **Home Assistant**: Number entities with proper device classes and validation
 
+#### `nut_server.yaml` / `nut_server_grouped.yaml`
+Network UPS Tools (NUT) TCP server for standard protocol integration:
+
+**Server Features**:
+- **Standard NUT Protocol**: v1.3 compliant TCP server on port 3493
+- **Authentication**: Optional username/password protection
+- **Multi-client Support**: Up to 4 simultaneous connections
+- **Dynamic UPS Discovery**: Automatically exposes connected UPS data
+
+**Protocol Support**:
+- `LIST UPS` - Available UPS devices with dynamic description
+- `LIST VAR` - All UPS variables with real-time data
+- `LIST CMD` - Available instant commands
+- `LIST CLIENT` - Connected monitoring clients
+- `INSTCMD` - Execute UPS commands (beeper, tests)
+- `NETVER` - Protocol version negotiation
+
+**Data Integration**:
+- Uses Data Provider Pattern from ups_hid component
+- Maps UPS data to standard NUT variables (battery.charge, input.voltage, etc.)
+- Dynamic manufacturer/model detection from connected device
+
+**Client Compatibility**:
+- Standard NUT tools (`upsc`, `upscmd`)
+- Home Assistant NUT integration
+- Any NUT-compatible monitoring software
+- TCP plain-text protocol (no SSL/TLS required)
+
+**Grouped Version Features**:
+- **NUT Server Group**: All NUT-related entities in dedicated "🌐 NUT Server" section
+- **Enhanced Sensors**: Connection string helper, client counter placeholder
+- **Entity Categories**: Marked as diagnostic for proper Home Assistant organization
+- **Web Interface**: Clean separation from UPS monitoring sensors
+
 #### `entity_groups.yaml`
 ESPHome Web Server v3 entity organization (10 logical groups):
 
@@ -144,6 +178,7 @@ CyberPower CP1500 series optimizations:
 | **Minimal** | `base_ups` + `essential_sensors` | **9 sensors** | Basic monitoring |
 | **Complete** | + `extended_sensors` + `ups_controls` + `timer_sensors` | **32 sensors + 10 controls** | Full featured |
 | **Complete + Config** | + `delay_config` | **32 sensors + 10 controls + 3 number entities** | With UPS configuration |
+| **Complete + NUT Server** | + `nut_server` | **32 sensors + 10 controls + TCP server** | Network monitoring integration |
 | **Device-Optimized** | + device-specific package | **33+ sensors + 13+ controls** | Production ready |
 | **Organized Interface** | Use `*_grouped.yaml` + `entity_groups.yaml` | **Same sensors, better layout** | Enhanced web interface |
 

@@ -1,0 +1,66 @@
+# NUT Server Test Configuration
+# Tests the NUT server component with UPS HID integration
+#
+# This configuration exposes UPS data via NUT protocol on port 3493
+# Connect with: upsc test_ups@<esp32_ip>
+# Or telnet: telnet <esp32_ip> 3493
+
+substitutions:
+  name: "ups-nut-server"
+  friendly_name: "UPS NUT Server"
+  simulation_mode: true
+
+esphome:
+  name: "${name}"
+  friendly_name: "${friendly_name}"
+  
+# External components
+external_components:
+  - source:
+      type: local
+      path: ../../components
+
+# Logging
+logger:
+  level: DEBUG
+  logs:
+    nut_server: DEBUG
+    ups_hid: INFO
+
+
+# Use base UPS configuration (now has optional sensors)
+packages:
+  base_ups: !include ../base_ups.yaml
+
+# NUT Server Component Configuration
+nut_server:
+  ups_hid_id: ups_monitor
+  port: 3493
+  username: "nutmon"
+  password: "nutsecret"
+  max_clients: 4
+
+# Add basic sensors to ensure sensor platform is loaded
+sensor:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Test Battery Level"
+    type: battery_level
+
+binary_sensor:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Test UPS Online"
+    type: online
+
+text_sensor:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Test UPS Status"
+    type: status
+
+button:
+  - platform: ups_hid
+    ups_hid_id: ups_monitor
+    name: "Test Beeper Mute"
+    beeper_action: mute

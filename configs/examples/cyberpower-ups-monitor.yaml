@@ -17,26 +17,38 @@ packages:
   # Regional defaults (North American voltage/frequency standards)
   regional_defaults: !include ../regional/north_american_base.yaml
   
+  # OPTIONAL: Entity grouping (improves web interface organization)
+  # Uncomment to enable organized entity groups in ESPHome web interface
+  # entity_groups: !include ../entity_groups.yaml
+  
   # Core functionality  
   base_ups: !include ../base_ups.yaml
+  
+  # Choose EITHER grouped OR standard sensor packages (not both):
+  # Standard packages (current default):
   essential: !include ../essential_sensors.yaml
+  extended: !include ../extended_sensors.yaml  # Recommended for CyberPower - rich sensor support
+  timers: !include ../timer_sensors.yaml        # Real-time shutdown/startup monitoring
+  controls: !include ../ups_controls.yaml        # Recommended - full beeper/test control
   
-  # Extended monitoring (recommended for CyberPower - rich sensor support)
-  extended: !include ../extended_sensors.yaml
-  
-  # Timer countdown sensors (Real-time shutdown/startup monitoring)
-  timers: !include ../timer_sensors.yaml
-  
-  # Control buttons (recommended - full beeper/test control)  
-  controls: !include ../ups_controls.yaml
+  # OR grouped packages (better organization):
+  # essential_grouped: !include ../essential_sensors_grouped.yaml
+  # extended_grouped: !include ../extended_sensors_grouped.yaml
+  # timers_grouped: !include ../timer_sensors_grouped.yaml
+  # controls_grouped: !include ../ups_controls_grouped.yaml
   
   # Delay configuration (Shutdown/Start/Reboot timers)
   delay_config: !include ../delay_config.yaml
   
   # CyberPower-specific optimizations
   cyberpower_device: !include ../device_types/cyberpower_cp1500.yaml
-
-  controls_grouped: !include ../ups_controls_grouped.yaml
+  
+  # NUT Server (Network UPS Tools) - uncomment to enable TCP server
+  # Exposes UPS data via standard NUT protocol for monitoring tools
+  # Standard package:
+  # nut_server: !include ../nut_server.yaml
+  # OR grouped package (with NUT Server group in web interface):
+  # nut_server_grouped: !include ../nut_server_grouped.yaml
   
 # Optional: Home Assistant API (uncomment to enable)
 # api:
