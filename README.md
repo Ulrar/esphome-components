@@ -31,6 +31,33 @@ Smart LED status indicator for UPS monitoring with automatic pattern management 
 
 [📖 Full Documentation](components/ups_status_led/README.md)
 
+### 🌐 NUT Server Component (`nut_server`)
+
+Network UPS Tools (NUT) protocol TCP server for exposing UPS data to standard monitoring tools. Provides NUT v1.3 compliant server for integration with existing infrastructure.
+
+**Key Features:**
+- **Standard NUT Protocol**: v1.3 compliant TCP server on port 3493
+- **Multi-client support**: Up to 4 simultaneous monitoring connections
+- **Full protocol implementation**: LIST UPS/VAR/CMD/CLIENT, INSTCMD, NETVER
+- **Dynamic UPS detection**: Automatically exposes connected UPS manufacturer/model
+- **Authentication support**: Optional username/password protection
+- **Data Provider Pattern**: Direct access to UPS data without sensor overhead
+
+[📖 Full Documentation](components/nut_server/README.md)
+
+## 📦 Configuration Management
+
+Modular, maintainable ESPHome configuration system using packages. Build configurations by combining reusable components instead of maintaining large monolithic files.
+
+**Key Features:**
+- **Modular packages**: Core, sensors, controls, device-specific optimizations
+- **Grouped organization**: Optional entity grouping for cleaner web interface
+- **Example configurations**: Production-ready configs for APC, CyberPower, and rack UPS
+- **Regional defaults**: Voltage/frequency presets for different regions
+- **Smart LED integration**: Automatic visual status indication
+
+[📖 Configuration Guide](configs/README.md)
+
 ## Development
 
 ### Project Structure
@@ -51,9 +78,25 @@ components/
 │   ├── __init__.py         # Component configuration
 │   ├── ups_status_led.h    # Component header
 │   └── ups_status_led.cpp  # Component implementation
-├── [future_component]/      # Additional components
-│   └── ...
+├── nut_server/             # Network UPS Tools (NUT) TCP server component
+│   ├── README.md           # Component documentation
+│   ├── __init__.py         # Component configuration
+│   ├── nut_server.h        # Component header
+│   └── nut_server.cpp      # Component implementation
 └── ...
+
+configs/
+├── README.md               # Configuration management documentation
+├── base_ups.yaml           # Core UPS configuration
+├── essential_sensors.yaml  # Essential monitoring sensors
+├── extended_sensors.yaml   # Extended monitoring sensors
+├── ups_controls.yaml       # UPS control buttons
+├── nut_server.yaml         # NUT server configuration
+├── examples/               # Example device configurations
+│   ├── apc-ups-monitor.yaml
+│   ├── cyberpower-ups-monitor.yaml
+│   └── rack-ups-monitor.yaml
+└── ...                     # Additional modular packages
 
 tools/
 ├── scan-usb.sh             # USB device scanning utility
@@ -101,29 +144,3 @@ Component-specific requirements are documented in each component's README:
 ## License
 
 Copyright bullshit <coding@ow-software.pl>
-
-## Roadmap
-
-### Planned Components
-
-- 🌐 **NUT Server** (`nut_server`): A NUT (Network UPS Tools) server implementation that uses the ups_hid component for network-accessible UPS monitoring and supports minimal NUT commands with authentication
-
-### Current Status
-
-- ✅ **UPS HID Component**: ESP-IDF v5.4 compatible  
-  - ✅ **Hardware validated** - 100% success in stale data prevention testing
-  - ✅ **Robust USB management** - Clean disconnect detection and graceful state corruption recovery  
-  - ✅ **Safety-critical** - All sensors immediately show "unavailable" after disconnect (never stale data)
-  - ✅ **Real-world tested** - APC Back-UPS ES 700G with USB power cycling
-  - ✅ **Advanced protocols** - 15+ sensors per device with comprehensive monitoring
-  - ✅ **UPS control** - Beeper control and battery testing via HID write operations
-- ✅ **UPS Status LED Component**: Thread-safe LED indicator with night mode
-  - ✅ **SOLID architecture** - Clean separation of concerns within ESPHome constraints
-  - ✅ **Thread-safe operation** - Safe concurrent web UI and main loop access
-  - ✅ **Smart brightness** - 20% minimum hardware brightness for meaningful controls
-  - ✅ **Night mode** - Time-based dimming with WS2812 color compensation
-  - ✅ **Home Assistant integration** - Full web UI controls and status reporting
-- ✅ **ESP-IDF Framework**: Fully migrated to v5.4.2 with enhanced stability
-- ✅ **Documentation**: Comprehensive component and API documentation
-- ✅ **Development Tools**: VSCode integration, USB scanning, vendor management
-- 📋 **Future Components**: Planning and design phase
