@@ -9,7 +9,7 @@ substitutions:
   nut_username: "nutuser"             # Username for authentication
   nut_password: "nutpass"             # Password (leave empty to disable auth)
   nut_max_clients: "4"                # Maximum simultaneous clients (1-10)
-  # UPS name is now automatically derived from the ups_hid component ID
+  nut_ups_name: "ups_monitor"         # NUT protocol UPS name (optional, defaults to component ID)
   
   # Network Configuration (static IP recommended for servers)
   use_static_ip: "false"              # Set to "true" to enable static IP
@@ -25,7 +25,7 @@ nut_server:
   username: "${nut_username}"
   password: "${nut_password}"
   max_clients: ${nut_max_clients}
-  # UPS name is automatically derived from ups_hid component ID (ups_monitor)
+  ups_name: "${nut_ups_name}"            # Custom NUT protocol name (optional)
 
 # Static IP configuration (uncomment to enable)
 # Recommended for NUT server to ensure consistent network access
@@ -80,7 +80,7 @@ text_sensor:
       sorting_group_id: nut_server_group
       sorting_weight: 2
     lambda: |-
-      std::string info = "UPS: ups_monitor, Port: ${nut_port}";
+      std::string info = "UPS: ${nut_ups_name}, Port: ${nut_port}";
       if (std::string("${nut_password}").empty()) {
         info += ", Auth: Disabled";
       } else {
@@ -100,7 +100,7 @@ text_sensor:
       sorting_weight: 3
     lambda: |-
       // Provide ready-to-use connection string for clients
-      return "ups_monitor@" + WiFi.localIP().toString().c_str() + ":${nut_port}";
+      return "${nut_ups_name}@" + WiFi.localIP().toString().c_str() + ":${nut_port}";
 
 sensor:
   # NUT server connected clients counter (future feature placeholder)
@@ -157,12 +157,12 @@ interval:
 # Connect with NUT client tools:
 # 
 # 1. Using upsc command:
-#    upsc ups_monitor@<esp32_ip>:${nut_port}
-#    upsc -u ${nut_username} -p ${nut_password} ups_monitor@<esp32_ip>:${nut_port}
+#    upsc ${nut_ups_name}@<esp32_ip>:${nut_port}
+#    upsc -u ${nut_username} -p ${nut_password} ${nut_ups_name}@<esp32_ip>:${nut_port}
 #
 # 2. Using telnet for testing:
 #    telnet <esp32_ip> ${nut_port}
-#    Commands: HELP, VERSION, LOGIN ${nut_username} ${nut_password}, LIST UPS, LIST VAR ups_monitor
+#    Commands: HELP, VERSION, LOGIN ${nut_username} ${nut_password}, LIST UPS, LIST VAR ${nut_ups_name}
 #
 # 3. Home Assistant NUT integration:
 #    sensor:
@@ -183,7 +183,7 @@ interval:
 #    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 #    sock.connect(('<esp32_ip>', ${nut_port}))
 #    sock.send(b"LOGIN ${nut_username} ${nut_password}\n")
-#    sock.send(b"LIST VAR ups_monitor\n")
+#    sock.send(b"LIST VAR ${nut_ups_name}\n")
 #    response = sock.recv(4096).decode()
 #    print(response)
 #    sock.close()

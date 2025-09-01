@@ -10,6 +10,10 @@ substitutions:
   # Override timezone if needed (defaults to Europe/Warsaw from regional template)
   timezone: "Europe/Vienna"       # Austrian timezone
 
+  # My QNAP NAS acts as a slave and forces these settings
+  nut_password: ""     # disable nutpassword
+  nut_ups_name: "qnapups"  # Custom name for NUT protocol (different from component ID)
+
 esphome:
   name: "${name}"
   friendly_name: "${friendly_name}"

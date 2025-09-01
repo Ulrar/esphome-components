@@ -15,6 +15,7 @@ MULTI_CONF = False
 
 CONF_UPS_HID_ID = "ups_hid_id"
 CONF_MAX_CLIENTS = "max_clients"
+CONF_UPS_NAME = "ups_name"
 
 nut_server_ns = cg.esphome_ns.namespace("nut_server")
 NutServerComponent = nut_server_ns.class_("NutServerComponent", cg.Component)
@@ -31,6 +32,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_USERNAME, default="nutuser"): cv.string,
         cv.Optional(CONF_PASSWORD, default=""): cv.string,
         cv.Optional(CONF_MAX_CLIENTS, default=4): cv.int_range(min=1, max=10),
+        cv.Optional(CONF_UPS_NAME): cv.string,
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -67,6 +69,9 @@ async def to_code(config):
     # Set max clients
     cg.add(var.set_max_clients(config[CONF_MAX_CLIENTS]))
     
-    # Set UPS name automatically from the UPS HID component ID
-    ups_name = str(config[CONF_UPS_HID_ID])
+    # Set UPS name - use custom name if provided, otherwise use component ID
+    if CONF_UPS_NAME in config:
+        ups_name = config[CONF_UPS_NAME]
+    else:
+        ups_name = str(config[CONF_UPS_HID_ID])
     cg.add(var.set_ups_name(ups_name))
