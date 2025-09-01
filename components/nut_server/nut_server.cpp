@@ -450,10 +450,12 @@ void NutServerComponent::handle_list_var(NutClient &client, const std::string &a
   
   // Standard NUT variables mapping to actual UPS data
   std::vector<std::string> variables = {
-    "ups.mfr", "ups.model", "ups.status", 
-    "battery.charge", "battery.voltage", "battery.runtime",
-    "input.voltage", "input.frequency", 
-    "output.voltage", "ups.load"
+    "ups.mfr", "ups.model", "ups.status", "ups.serial", "ups.firmware",
+    "battery.charge", "battery.voltage", "battery.voltage.nominal", "battery.runtime",
+    "input.voltage", "input.voltage.nominal", "input.frequency", 
+    "input.transfer.low", "input.transfer.high",
+    "output.voltage", "output.voltage.nominal", 
+    "ups.load", "ups.realpower.nominal", "ups.power.nominal"
   };
   
   for (const auto &var : variables) {
@@ -740,29 +742,69 @@ std::string NutServerComponent::get_ups_var(const std::string &var_name) {
   if (var_name == "ups.model") return get_ups_model();
   
   if (ups_hid_) {
+    auto ups_data = ups_hid_->get_ups_data();
+    
+    // Device information variables
+    if (var_name == "ups.serial" && !ups_data.device.serial_number.empty()) {
+      return ups_data.device.serial_number;
+    }
+    if (var_name == "ups.firmware" && !ups_data.device.firmware_version.empty()) {
+      return ups_data.device.firmware_version;
+    }
+    
+    // Battery variables
     if (var_name == "battery.charge") {
       float battery_level = ups_hid_->get_battery_level();
       if (battery_level >= 0) return std::to_string(static_cast<int>(battery_level));
     }
+    if (var_name == "battery.voltage" && !std::isnan(ups_data.battery.voltage)) {
+      return format_nut_value(std::to_string(ups_data.battery.voltage));
+    }
+    if (var_name == "battery.voltage.nominal" && !std::isnan(ups_data.battery.voltage_nominal)) {
+      return format_nut_value(std::to_string(ups_data.battery.voltage_nominal));
+    }
+    if (var_name == "battery.runtime") {
+      float runtime_minutes = ups_hid_->get_runtime_minutes();
+      if (runtime_minutes > 0) return std::to_string(static_cast<int>(runtime_minutes * 60));
+    }
     
+    // Input power variables
     if (var_name == "input.voltage") {
       float input_voltage = ups_hid_->get_input_voltage();
       if (input_voltage > 0) return format_nut_value(std::to_string(input_voltage));
     }
+    if (var_name == "input.voltage.nominal" && !std::isnan(ups_data.power.input_voltage_nominal)) {
+      return format_nut_value(std::to_string(ups_data.power.input_voltage_nominal));
+    }
+    if (var_name == "input.frequency" && !std::isnan(ups_data.power.frequency)) {
+      return format_nut_value(std::to_string(ups_data.power.frequency));
+    }
+    if (var_name == "input.transfer.low" && !std::isnan(ups_data.power.input_transfer_low)) {
+      return format_nut_value(std::to_string(ups_data.power.input_transfer_low));
+    }
+    if (var_name == "input.transfer.high" && !std::isnan(ups_data.power.input_transfer_high)) {
+      return format_nut_value(std::to_string(ups_data.power.input_transfer_high));
+    }
     
+    // Output power variables
     if (var_name == "output.voltage") {
       float output_voltage = ups_hid_->get_output_voltage();
       if (output_voltage > 0) return format_nut_value(std::to_string(output_voltage));
     }
+    if (var_name == "output.voltage.nominal" && !std::isnan(ups_data.power.output_voltage_nominal)) {
+      return format_nut_value(std::to_string(ups_data.power.output_voltage_nominal));
+    }
     
+    // Load and power variables
     if (var_name == "ups.load") {
       float load_percent = ups_hid_->get_load_percent();
       if (load_percent >= 0) return std::to_string(static_cast<int>(load_percent));
     }
-    
-    if (var_name == "battery.runtime") {
-      float runtime_minutes = ups_hid_->get_runtime_minutes();
-      if (runtime_minutes > 0) return std::to_string(static_cast<int>(runtime_minutes * 60));
+    if (var_name == "ups.realpower.nominal" && !std::isnan(ups_data.power.realpower_nominal)) {
+      return std::to_string(static_cast<int>(ups_data.power.realpower_nominal));
+    }
+    if (var_name == "ups.power.nominal" && !std::isnan(ups_data.power.apparent_power_nominal)) {
+      return std::to_string(static_cast<int>(ups_data.power.apparent_power_nominal));
     }
   }
   
