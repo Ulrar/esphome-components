@@ -143,4 +143,13 @@ Component-specific requirements are documented in each component's README:
 
 ## License
 
-Copyright bullshit <coding@ow-software.pl>
+This project follows the ESPHome dual-license model:
+
+- **C++ Runtime Code** (`.c`, `.cpp`, `.h`, `.hpp`, `.tcc`, `.ino`): Licensed under [GNU GPLv3](LICENSE)
+- **Python Code** (`.py`) and other files: Licensed under [MIT License](LICENSE)
+
+See the [LICENSE](LICENSE) file for complete license text.
+
+### Third-Party Components
+
+This project is built as ESPHome external components and follows ESPHome's licensing structure. The components are designed to work within the ESPHome ecosystem.
