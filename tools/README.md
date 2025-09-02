@@ -2,6 +2,37 @@
 
 This folder contains development tools for ESP32 ESPHome component development and debugging utilities.
 
+## Protocol Debug Collection
+
+### collect-protocol-debug.sh
+
+Automated collection of debug information for new UPS protocol support requests. This tool gathers all necessary data for implementing new UPS protocols.
+
+**Usage:**
+```bash
+./tools/collect-protocol-debug.sh <ups_name>
+```
+
+**Features:**
+- Collects USB device information and descriptors
+- Captures NUT driver debug output for different states (online, battery, charging)
+- Extracts HID paths and report IDs automatically
+- Documents UPS variables and supported commands
+- Creates organized output directory with all debug files
+- Generates markdown-formatted summary ready for GitHub issues
+
+**Requirements:**
+- NUT (Network UPS Tools) installed
+- UPS configured in `/etc/nut/ups.conf`
+- sudo access for USB device access
+
+**Output:**
+Creates a timestamped directory containing:
+- USB device descriptors and IDs
+- HID report captures for each power state
+- Complete UPS variable listings
+- Summary report for issue creation
+
 ## USB Device Management
 
 ### scan-usb.sh

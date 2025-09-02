@@ -1,0 +1,224 @@
+name: New UPS Protocol Request
+description: Request support for a new UPS device protocol
+title: "[Protocol Request] <Manufacturer> <Model>"
+labels: ["enhancement", "new-protocol"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Thank you for requesting a new UPS protocol!
+        This form collects all necessary debug information to implement support for your UPS device.
+        Please ensure you have NUT (Network UPS Tools) installed and your device is connected via USB.
+
+  - type: input
+    id: manufacturer
+    attributes:
+      label: Manufacturer
+      description: UPS manufacturer name
+      placeholder: "e.g., APC, CyberPower, Eaton"
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: Complete model number
+      placeholder: "e.g., Back-UPS ES 700, CP1500EPFCLCD"
+    validations:
+      required: true
+
+  - type: input
+    id: usb_ids
+    attributes:
+      label: USB IDs
+      description: "Vendor ID and Product ID (run: lsusb | grep -i ups)"
+      placeholder: "Vendor: 0x051d, Product: 0x0002"
+    validations:
+      required: true
+
+  - type: textarea
+    id: lsusb_verbose
+    attributes:
+      label: USB Device Details
+      description: "Output of: lsusb -v -d <vendor>:<product>"
+      placeholder: "Paste the complete lsusb -v output here"
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: nut_initial
+    attributes:
+      label: NUT Initial Discovery
+      description: |
+        Run: sudo /lib/nut/usbhid-ups -DD -a <ups_name> 2>&1 | head -500
+        This shows HID descriptor parsing and initial device setup
+      placeholder: "Paste NUT debug output during initial connection"
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: nut_online
+    attributes:
+      label: NUT Debug - Online State (AC Power)
+      description: |
+        Run: sudo /lib/nut/usbhid-ups -DD -a <ups_name> 2>&1 | grep -A2 -B2 "Report"
+        Capture for ~30 seconds while UPS is connected to AC power
+      placeholder: "Paste NUT debug output showing HID reports during normal operation"
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: nut_battery
+    attributes:
+      label: NUT Debug - On Battery State
+      description: |
+        Run: sudo /lib/nut/usbhid-ups -DD -a <ups_name> 2>&1 | grep -A2 -B2 "Report"
+        Capture for ~30 seconds after unplugging AC power
+      placeholder: "Paste NUT debug output showing HID reports while on battery"
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: nut_charging
+    attributes:
+      label: NUT Debug - Charging State
+      description: |
+        Run: sudo /lib/nut/usbhid-ups -DD -a <ups_name> 2>&1 | grep -A2 -B2 "Report"
+        Capture for ~30 seconds after reconnecting AC power (battery charging)
+      placeholder: "Paste NUT debug output showing HID reports during charging"
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: hid_paths
+    attributes:
+      label: HID Path Mappings
+      description: |
+        Run: sudo /lib/nut/usbhid-ups -DD -a <ups_name> 2>&1 | grep "Path:"
+        Shows all HID paths discovered by NUT
+      placeholder: "Paste all HID path mappings"
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: upsc_full
+    attributes:
+      label: UPS Variables (upsc output)
+      description: |
+        Run: upsc <ups_name>
+        Complete list of all UPS variables
+      placeholder: "Paste complete upsc output"
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: state_transitions
+    attributes:
+      label: Variable Changes During State Transitions
+      description: |
+        Document how key variables change between states:
+        1. Run: upsc <ups_name> | grep -E "battery|status|input" (on AC power)
+        2. Unplug UPS, wait 10 seconds, run command again
+        3. Plug UPS back in, wait 10 seconds, run command again
+      placeholder: |
+        === On AC Power ===
+        battery.charge: 100
+        battery.runtime: 3825
+        ups.status: OL
+        
+        === On Battery ===
+        battery.charge: 99
+        battery.runtime: 3700
+        ups.status: OB DISCHRG
+        
+        === Charging ===
+        battery.charge: 99
+        battery.runtime: 3750
+        ups.status: OL CHRG
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: report_analysis
+    attributes:
+      label: HID Report Analysis
+      description: |
+        Based on debug output, identify report IDs and their purpose.
+        Include example hex data for each report type.
+      placeholder: |
+        Report 0x0C (7 bytes): Power Summary
+        Example: [0C 64 00 58 02 00 00]
+        - Byte 1: Battery percentage (0x64 = 100%)
+        - Bytes 2-3: Runtime in seconds (little-endian)
+        
+        Report 0x16 (5 bytes): Present Status
+        Example: [16 01 00 00 00]
+        - Byte 1, Bit 0: AC present (1=yes)
+        - Byte 1, Bit 1: Discharging (1=yes)
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: upscmd_output
+    attributes:
+      label: Supported Commands
+      description: |
+        Run: upscmd -l <ups_name>
+        List of commands the UPS supports
+      placeholder: "Paste upscmd -l output, or write 'No commands supported'"
+      render: shell
+
+  - type: checkboxes
+    id: features
+    attributes:
+      label: Device Features
+      description: Check all features your UPS supports
+      options:
+        - label: Battery test commands (test.battery.start)
+        - label: Beeper control (beeper.enable/disable)
+        - label: Reports nominal values (voltage.nominal, power.nominal)
+        - label: Configuration changes (shutdown.delay, etc.)
+        - label: LCD/LED panel test capability
+        - label: Multiple battery information
+        - label: Temperature monitoring
+        - label: Frequency monitoring
+
+  - type: textarea
+    id: additional_debug
+    attributes:
+      label: Additional Debug Information
+      description: |
+        Optional but helpful:
+        Run: sudo /lib/nut/usbhid-ups -DD -a <ups_name> -x explore 2>&1 | head -1000
+      placeholder: "Paste additional HID exploration data if available"
+      render: shell
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Implementation Notes
+      description: Any device-specific quirks, observations, or additional context
+      placeholder: |
+        - Device only has IN endpoint (no OUT endpoint for commands)
+        - Beeper control requires special sequence
+        - Runtime calculation seems to be off by factor of 60
+
+  - type: textarea
+    id: priority
+    attributes:
+      label: Priority Information
+      description: Help us understand the impact of this implementation
+      placeholder: |
+        - This is a popular budget UPS model sold worldwide
+        - Would also support models X, Y, Z from same manufacturer
+        - Currently affects 10+ users in our community
