@@ -33,6 +33,36 @@ Creates a timestamped directory containing:
 - Complete UPS variable listings
 - Summary report for issue creation
 
+### debug-protocol-issue.sh
+
+Automated debug collection for existing protocol implementation issues. Captures real-time data from running ESP32 devices.
+
+**Usage:**
+```bash
+./tools/debug-protocol-issue.sh <esp32_ip> [ups_name]
+```
+
+**Features:**
+- Tests ESP32 connectivity and ESPHome API
+- Captures real-time sensor values via web API
+- Interactive state testing (normal, battery, charging)
+- Collects logs during issue reproduction
+- Analyzes logs for common problems (USB errors, HID issues, memory)
+- Creates structured bug report with all debug data
+
+**Requirements:**
+- ESP32 running ESPHome with UPS HID component
+- Network access to ESP32 device
+- ESPHome CLI tool (optional, for log capture)
+- Web API enabled in ESPHome config (recommended)
+
+**Output:**
+Creates timestamped directory with:
+- JSON sensor states for each test condition
+- ESPHome logs (if available)
+- Structured bug report ready for GitHub
+- Analysis summary with quick diagnostics
+
 ## USB Device Management
 
 ### scan-usb.sh

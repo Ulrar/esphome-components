@@ -8,7 +8,23 @@ Thank you for your interest in contributing to this project! This guide will hel
 
 If you have a UPS device that isn't currently supported, please use our **New UPS Protocol Request** issue template. This template guides you through collecting all necessary debug information.
 
-#### Quick Start: Automated Debug Collection
+### Protocol Implementation Bugs
+
+For issues with existing protocol support, use the **Protocol Implementation Bug Report** template. This helps us quickly identify and fix problems with supported devices.
+
+#### Quick Start: Bug Debug Collection
+
+For existing protocol issues, use our debug tool:
+
+```bash
+# Collect debug data from running ESP32
+./tools/debug-protocol-issue.sh 192.168.1.100 my_ups
+
+# Follow interactive prompts to test different states
+# Tool will create a complete bug report
+```
+
+#### Quick Start: New Protocol Debug Collection
 
 We provide a tool to automatically collect all required debug information:
 

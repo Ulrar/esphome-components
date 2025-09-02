@@ -1,0 +1,205 @@
+name: Protocol Implementation Bug Report
+description: Report incorrect behavior or issues with existing UPS protocol support
+title: "[Bug] <Protocol/Model>: <Brief description>"
+labels: ["bug", "protocol"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Thank you for reporting this issue!
+        Please provide detailed information to help us diagnose and fix the problem.
+
+  - type: dropdown
+    id: protocol
+    attributes:
+      label: Affected Protocol
+      description: Which UPS protocol has the issue?
+      options:
+        - APC HID Protocol
+        - CyberPower Protocol
+        - Generic HID Protocol
+        - Unknown/Not Sure
+    validations:
+      required: true
+
+  - type: input
+    id: device_info
+    attributes:
+      label: Device Information
+      description: "Format: Manufacturer Model (VID:PID)"
+      placeholder: "e.g., APC Back-UPS ES 700 (0x051d:0x0002)"
+    validations:
+      required: true
+
+  - type: input
+    id: esphome_version
+    attributes:
+      label: ESPHome Version
+      placeholder: "e.g., 2024.12.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: Clear and concise description of what's wrong
+      placeholder: |
+        What happens: Battery level shows 255% instead of actual percentage
+        Expected: Battery level between 0-100%
+        When: Always after switching from battery to AC power
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: occurrence
+    attributes:
+      label: When does the issue occur?
+      description: Check all situations where you've observed the issue
+      options:
+        - label: During normal operation (on AC power)
+        - label: When switching to battery power
+        - label: When returning to AC power (charging)
+        - label: During low battery condition
+        - label: After USB disconnect/reconnect
+        - label: After ESP32 restart
+        - label: At random times
+        - label: Immediately on startup
+
+  - type: textarea
+    id: esphome_config
+    attributes:
+      label: ESPHome Configuration
+      description: Your ups_hid component configuration
+      render: yaml
+      placeholder: |
+        ups_hid:
+          - id: my_ups
+            auto_restart: true
+            
+        sensor:
+          - platform: ups_hid
+            ups_id: my_ups
+            battery_level:
+              name: "UPS Battery"
+    validations:
+      required: true
+
+  - type: textarea
+    id: debug_logs
+    attributes:
+      label: Debug Logs
+      description: |
+        ESPHome logs when the issue occurs. 
+        Enable debug logging by adding to your config:
+        ```yaml
+        logger:
+          level: DEBUG
+          logs:
+            ups_hid: DEBUG
+        ```
+      render: text
+      placeholder: |
+        [D][ups_hid:123]: Reading report 0x0C
+        [W][ups_hid:456]: Unexpected value in battery report: 0xFF
+        [E][ups_hid:789]: Failed to parse status report
+    validations:
+      required: true
+
+  - type: textarea
+    id: sensor_values
+    attributes:
+      label: Sensor Values During Issue
+      description: What do the sensors show when the problem occurs?
+      placeholder: |
+        Battery Level: 255%
+        Runtime: -1 seconds
+        Load: 0%
+        Input Voltage: 0V
+        Online: true
+        Status: "Unknown"
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often does this occur?
+      options:
+        - Always (100% reproducible)
+        - Frequently (>50% of the time)
+        - Sometimes (10-50% of the time)
+        - Rarely (<10% of the time)
+        - Only happened once
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce_steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce this issue?
+      placeholder: |
+        1. Start with UPS on AC power
+        2. Unplug UPS from wall outlet
+        3. Wait 30 seconds
+        4. Plug UPS back in
+        5. Observe battery sensor showing 255%
+
+  - type: textarea
+    id: nut_comparison
+    attributes:
+      label: Comparison with NUT (optional)
+      description: If you have NUT working with this UPS, how do the values compare?
+      placeholder: |
+        NUT battery.charge: 100
+        ESPHome battery_level: 255
+        
+        NUT ups.status: OL
+        ESPHome status: "Unknown"
+
+  - type: checkboxes
+    id: workarounds
+    attributes:
+      label: Workarounds Attempted
+      description: What have you tried to fix or work around the issue?
+      options:
+        - label: Restarted ESP32
+        - label: Unplugged/replugged USB cable
+        - label: Used different USB cable
+        - label: Power cycled the UPS
+        - label: Changed ESPHome configuration
+        - label: Downgraded ESPHome version
+        - label: Added delays/timeouts in config
+
+  - type: textarea
+    id: workaround_results
+    attributes:
+      label: Workaround Results
+      description: Did any workarounds help? What was the effect?
+      placeholder: "Restarting ESP32 temporarily fixes it for about 10 minutes"
+
+  - type: textarea
+    id: additional_info
+    attributes:
+      label: Additional Information
+      description: |
+        Any other relevant details:
+        - Previous working version (if this is a regression)
+        - USB cable length or type
+        - Power setup (UPS load, battery age, etc.)
+        - Related issues or discussions
+      placeholder: "This started after updating from ESPHome 2024.11.0 to 2024.12.0"
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Confirmation
+      description: Please confirm you've provided the necessary information
+      options:
+        - label: I've included debug-level logs showing the issue
+          required: true
+        - label: I've included my ESPHome configuration
+          required: true
+        - label: I've described when and how often the issue occurs
+          required: true
+        - label: I've checked for similar existing issues
+          required: true
