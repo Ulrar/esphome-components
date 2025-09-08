@@ -397,11 +397,28 @@ void NutServerComponent::process_command(NutClient &client, const std::string &c
 
 void NutServerComponent::handle_login(NutClient &client, const std::string &args) {
   auto parts = split_args(args);
-  if (parts.size() != 2) {
+  // client could already submitted login information through its correspondening commands
+  if (client.state == ClientState::AUTHENTICATED)
+  {
+    client.login_attempts++;
+    if (client.login_attempts >= MAX_LOGIN_ATTEMPTS)
+    {
+      ESP_LOGW(TAG, "Max login attempts exceeded, disconnecting client");
+      disconnect_client(client);
+      return;
+    }
+    send_response(client, "OK\n");
+    ESP_LOGD(TAG, "Client already connected");
+    return;
+  }
+
+  // client isn't authenticated and did not provide any credentials
+  if (parts.size() != 2)
+  {
     send_error(client, "INVALID-ARGUMENT");
     return;
   }
-  
+
   if (authenticate(parts[0], parts[1])) {
     client.state = ClientState::AUTHENTICATED;
     client.username = parts[0];
