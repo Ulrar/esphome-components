@@ -4,11 +4,23 @@
 #include "esphome/core/log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <cstdio>
+#include <string>
 
 namespace esphome {
 namespace ups_hid {
 
 static const char *const EATON_TAG = "ups_hid.eaton_5px";
+
+static std::string hex_dump(const std::vector<uint8_t> &v) {
+  std::string s;
+  char buf[6];
+  for (size_t i = 0; i < v.size(); ++i) {
+    snprintf(buf, sizeof(buf), "%02X%s", v[i], (i + 1 < v.size()) ? " " : "");
+    s += buf;
+  }
+  return s;
+}
 
 // Candidate report IDs to probe for Eaton 5PX (in practice seen in NUT mge-hid mappings)
 static const uint8_t EATON_TEST_REPORT_IDS[] = { 0x0C, 0x16, 0x06, 0x30, 0x31 };
@@ -121,25 +133,29 @@ bool Eaton5PxProtocol::read_data(UpsData &data) {
 
   // Try power summary
   if (read_hid_report(0x0C, buf)) {
-    parse_power_summary(buf, data);
+  ESP_LOGD(EATON_TAG, "Raw 0x0C: %s", hex_dump(buf).c_str());
+  parse_power_summary(buf, data);
     success = true;
   }
 
   // Try present/status
   if (read_hid_report(0x16, buf)) {
-    parse_present_status(buf, data);
+  ESP_LOGD(EATON_TAG, "Raw 0x16: %s", hex_dump(buf).c_str());
+  parse_present_status(buf, data);
     success = true;
   }
 
   // Try battery alternative report
   if (read_hid_report(0x06, buf)) {
-    parse_power_summary(buf, data);
+  ESP_LOGD(EATON_TAG, "Raw 0x06: %s", hex_dump(buf).c_str());
+  parse_power_summary(buf, data);
     success = true;
   }
 
   // Try input voltage
   if (read_hid_report(0x30, buf) && buf.size() >= 3) {
-    // Common Eaton pattern: 16-bit little-endian voltage in bytes 1-2
+  ESP_LOGD(EATON_TAG, "Raw 0x30: %s", hex_dump(buf).c_str());
+  // Common Eaton pattern candidate: 16-bit little-endian voltage in bytes 1-2
     uint16_t vraw = static_cast<uint16_t>(buf[1]) | (static_cast<uint16_t>(buf[2]) << 8);
     if (vraw != 0xFFFF && vraw != 0x0000) {
       float voltage = static_cast<float>(vraw);
@@ -160,6 +176,7 @@ bool Eaton5PxProtocol::read_data(UpsData &data) {
 
     // Try output voltage (report 0x31)
     if (read_hid_report(0x31, buf) && buf.size() >= 3) {
+      ESP_LOGD(EATON_TAG, "Raw 0x31: %s", hex_dump(buf).c_str());
       uint16_t vraw = static_cast<uint16_t>(buf[1]) | (static_cast<uint16_t>(buf[2]) << 8);
       if (vraw != 0xFFFF && vraw != 0x0000) {
         float voltage = static_cast<float>(vraw);
@@ -178,6 +195,7 @@ bool Eaton5PxProtocol::read_data(UpsData &data) {
 
     // Try load percentage (report 0x35)
     if (read_hid_report(0x35, buf) && buf.size() >= 2) {
+      ESP_LOGD(EATON_TAG, "Raw 0x35: %s", hex_dump(buf).c_str());
       uint8_t load_raw = buf[1];
       if (load_raw <= 100) {
         data.power.load_percent = static_cast<float>(load_raw);
