@@ -231,28 +231,53 @@ bool Eaton5PxProtocol::read_data(UpsData &data) {
   float c30 = find_best_voltage_candidate(buf30, nominal);
   float c31 = find_best_voltage_candidate(buf31, nominal);
 
-  // Choose input voltage from 0x30 candidates (prefer direct then scanned)
+  // Determine best candidates per-report
+  float chosen30 = NAN;
+  std::string src30;
   if (!std::isnan(d30) || !std::isnan(c30)) {
-    float chosen = !std::isnan(d30) ? d30 : c30;
-    std::string src = !std::isnan(d30) ? "direct_0x30" : "scan_0x30";
-    // If both exist, pick the one closer to nominal
+    chosen30 = !std::isnan(d30) ? d30 : c30;
+    src30 = !std::isnan(d30) ? "direct_0x30" : "scan_0x30";
     if (!std::isnan(d30) && !std::isnan(c30)) {
-      if (std::fabs(c30 - nominal) < std::fabs(d30 - nominal)) { chosen = c30; src = "scan_0x30"; }
+      if (std::fabs(c30 - nominal) < std::fabs(d30 - nominal)) { chosen30 = c30; src30 = "scan_0x30"; }
     }
-    data.power.input_voltage = chosen;
-    ESP_LOGD(EATON_TAG, "Selected input voltage candidate: %.1fV (source=%s)", data.power.input_voltage, src.c_str());
+  }
+
+  float chosen31 = NAN;
+  std::string src31;
+  if (!std::isnan(d31) || !std::isnan(c31)) {
+    chosen31 = !std::isnan(d31) ? d31 : c31;
+    src31 = !std::isnan(d31) ? "direct_0x31" : "scan_0x31";
+    if (!std::isnan(d31) && !std::isnan(c31)) {
+      if (std::fabs(c31 - nominal) < std::fabs(d31 - nominal)) { chosen31 = c31; src31 = "scan_0x31"; }
+    }
+  }
+
+  // Decide input voltage by comparing the two per-report candidates.
+  // Bias toward 0x30 unless 0x31 is significantly closer to nominal.
+  if (!std::isnan(chosen30) || !std::isnan(chosen31)) {
+    float best_val = NAN;
+    std::string best_src;
+    if (!std::isnan(chosen30) && std::isnan(chosen31)) {
+      best_val = chosen30; best_src = src30;
+    } else if (std::isnan(chosen30) && !std::isnan(chosen31)) {
+      best_val = chosen31; best_src = src31;
+    } else {
+      // both present: compare distances with bias
+      float dist30 = std::fabs(chosen30 - nominal);
+      float dist31 = std::fabs(chosen31 - nominal);
+      const float THRESHOLD_V = 8.0f;
+      if (dist31 + THRESHOLD_V < dist30) { best_val = chosen31; best_src = src31; }
+      else { best_val = chosen30; best_src = src30; }
+    }
+    data.power.input_voltage = best_val;
+    ESP_LOGD(EATON_TAG, "Selected input voltage candidate: %.1fV (source=%s)", data.power.input_voltage, best_src.c_str());
     success = true;
   }
 
-  // Choose output voltage from 0x31 candidates (prefer direct then scanned)
-  if (!std::isnan(d31) || !std::isnan(c31)) {
-    float chosen_out = !std::isnan(d31) ? d31 : c31;
-    std::string out_src = !std::isnan(d31) ? "direct_0x31" : "scan_0x31";
-    if (!std::isnan(d31) && !std::isnan(c31)) {
-      if (std::fabs(c31 - nominal) < std::fabs(d31 - nominal)) { chosen_out = c31; out_src = "scan_0x31"; }
-    }
-    data.power.output_voltage = chosen_out;
-    ESP_LOGD(EATON_TAG, "Parsed output voltage: %.1fV (source=%s)", data.power.output_voltage, out_src.c_str());
+  // Output: prefer 0x31 candidates
+  if (!std::isnan(chosen31)) {
+    data.power.output_voltage = chosen31;
+    ESP_LOGD(EATON_TAG, "Parsed output voltage: %.1fV (source=%s)", data.power.output_voltage, src31.c_str());
     success = true;
   }
 
