@@ -187,6 +187,15 @@ bool Eaton5PxProtocol::read_data(UpsData &data) {
     success = true;
   }
 
+  // Remember if present-status set input voltage to fallback nominal so we don't
+  // overwrite it with spurious candidates unless the candidate is very close.
+  bool input_from_status = false;
+  float fallback_nominal = parent_->get_fallback_nominal_voltage();
+  if (!std::isnan(data.power.input_voltage) && data.power.input_voltage == fallback_nominal) {
+    input_from_status = true;
+    ESP_LOGD(EATON_TAG, "Input voltage currently set from present status to fallback nominal %.1fV", fallback_nominal);
+  }
+
   // Try battery alternative report
   if (read_hid_report(0x06, buf)) {
   ESP_LOGD(EATON_TAG, "Raw 0x06: %s", hex_dump(buf).c_str());
@@ -285,9 +294,21 @@ bool Eaton5PxProtocol::read_data(UpsData &data) {
       if (dist31 + THRESHOLD_V < dist30) { best_val = chosen31; best_src = src31; }
       else { best_val = chosen30; best_src = src30; }
     }
+    // If present-status previously set input to nominal, only overwrite when the
+    // candidate is convincingly close to nominal to avoid spurious values.
     if (!hardcoded_voltage) {
-      data.power.input_voltage = best_val;
-      ESP_LOGD(EATON_TAG, "Selected input voltage candidate: %.1fV (source=%s)", data.power.input_voltage, best_src.c_str());
+      if (input_from_status) {
+        const float OVERWRITE_THRESHOLD = 8.0f;
+        if (!std::isnan(best_val) && std::fabs(best_val - fallback_nominal) <= OVERWRITE_THRESHOLD) {
+          data.power.input_voltage = best_val;
+          ESP_LOGD(EATON_TAG, "Overwrote status nominal with candidate: %.1fV (source=%s)", data.power.input_voltage, best_src.c_str());
+        } else {
+          ESP_LOGD(EATON_TAG, "Keeping status nominal input voltage %.1fV (candidate %s = %.1fV not within %.1fV)", fallback_nominal, best_src.c_str(), std::isnan(best_val)?NAN:best_val, OVERWRITE_THRESHOLD);
+        }
+      } else {
+        data.power.input_voltage = best_val;
+        ESP_LOGD(EATON_TAG, "Selected input voltage candidate: %.1fV (source=%s)", data.power.input_voltage, best_src.c_str());
+      }
     } else {
       ESP_LOGD(EATON_TAG, "Skipped input heuristic because hardcoded 5PX voltage is used: %.1fV", data.power.input_voltage);
     }
