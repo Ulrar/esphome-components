@@ -231,28 +231,28 @@ bool Eaton5PxProtocol::read_data(UpsData &data) {
   float c30 = find_best_voltage_candidate(buf30, nominal);
   float c31 = find_best_voltage_candidate(buf31, nominal);
 
-  // Collect all valid candidates and pick the one closest to nominal
-  std::vector<std::pair<float, std::string>> candidates;
-  if (!std::isnan(d30)) candidates.emplace_back(d30, "direct_0x30");
-  if (!std::isnan(d31)) candidates.emplace_back(d31, "direct_0x31");
-  if (!std::isnan(c30)) candidates.emplace_back(c30, "scan_0x30");
-  if (!std::isnan(c31)) candidates.emplace_back(c31, "scan_0x31");
-
-  if (!candidates.empty()) {
-    float best = candidates[0].first;
-    std::string best_src = candidates[0].second;
-    float best_score = std::fabs(best - nominal);
-    for (size_t i = 1; i < candidates.size(); ++i) {
-      float v = candidates[i].first;
-      float score = std::fabs(v - nominal);
-      if (score < best_score) {
-        best_score = score;
-        best = v;
-        best_src = candidates[i].second;
-      }
+  // Choose input voltage from 0x30 candidates (prefer direct then scanned)
+  if (!std::isnan(d30) || !std::isnan(c30)) {
+    float chosen = !std::isnan(d30) ? d30 : c30;
+    std::string src = !std::isnan(d30) ? "direct_0x30" : "scan_0x30";
+    // If both exist, pick the one closer to nominal
+    if (!std::isnan(d30) && !std::isnan(c30)) {
+      if (std::fabs(c30 - nominal) < std::fabs(d30 - nominal)) { chosen = c30; src = "scan_0x30"; }
     }
-    data.power.input_voltage = best;
-    ESP_LOGD(EATON_TAG, "Selected input voltage candidate: %.1fV (source=%s)", data.power.input_voltage, best_src.c_str());
+    data.power.input_voltage = chosen;
+    ESP_LOGD(EATON_TAG, "Selected input voltage candidate: %.1fV (source=%s)", data.power.input_voltage, src.c_str());
+    success = true;
+  }
+
+  // Choose output voltage from 0x31 candidates (prefer direct then scanned)
+  if (!std::isnan(d31) || !std::isnan(c31)) {
+    float chosen_out = !std::isnan(d31) ? d31 : c31;
+    std::string out_src = !std::isnan(d31) ? "direct_0x31" : "scan_0x31";
+    if (!std::isnan(d31) && !std::isnan(c31)) {
+      if (std::fabs(c31 - nominal) < std::fabs(d31 - nominal)) { chosen_out = c31; out_src = "scan_0x31"; }
+    }
+    data.power.output_voltage = chosen_out;
+    ESP_LOGD(EATON_TAG, "Parsed output voltage: %.1fV (source=%s)", data.power.output_voltage, out_src.c_str());
     success = true;
   }
 
@@ -313,6 +313,43 @@ bool Eaton5PxProtocol::read_data(UpsData &data) {
       data.power.load_percent = static_cast<float>(cand);
       success = true;
       ESP_LOGD(EATON_TAG, "Heuristic load percent: %d%%", cand);
+    }
+  }
+
+  // If still no load percent, try to derive from reported power (W or VA) in 0x31/0x06
+  if (data.power.load_percent <= 0.0f) {
+    // scan for 16-bit power candidates in 0x31 and 0x06
+    auto scan_power = [&](const std::vector<uint8_t> &b) -> float {
+      if (b.size() < 3) return NAN;
+      for (size_t i = 1; i + 1 < b.size(); ++i) {
+        uint16_t raw = static_cast<uint16_t>(b[i]) | (static_cast<uint16_t>(b[i+1]) << 8);
+        if (raw == 0x0000 || raw == 0xFFFF) continue;
+        // consider raw as watts directly or scaled (divide by 10)
+        float cand1 = static_cast<float>(raw);
+        float cand10 = static_cast<float>(raw) / 10.0f;
+        // plausible power range for a 1500W UPS: 1..3000 W
+        if (cand1 >= 1.0f && cand1 <= 3000.0f) return cand1;
+        if (cand10 >= 1.0f && cand10 <= 3000.0f) return cand10;
+      }
+      return NAN;
+    };
+
+    float p = scan_power(buf31);
+    if (std::isnan(p)) p = scan_power(buf06);
+    if (!std::isnan(p)) {
+      // Determine nominal power: prefer detected realpower_nominal, else fallback to 1500W for 1500i
+      float nominal_w = data.power.realpower_nominal;
+      if (std::isnan(nominal_w)) {
+        // Try to infer from model string
+        if (data.device.model.find("1500") != std::string::npos) nominal_w = 1500.0f;
+        else nominal_w = 1500.0f; // default fallback
+      }
+      float load = (p / nominal_w) * 100.0f;
+      if (load > 0.0f && load <= 200.0f) {
+        data.power.load_percent = load;
+        success = true;
+        ESP_LOGD(EATON_TAG, "Derived load from power: %.0fW nominal=%.0fW -> load=%.1f%% (power_raw=%.1f)", p, nominal_w, data.power.load_percent, p);
+      }
     }
   }
 
