@@ -227,26 +227,32 @@ bool Eaton5PxProtocol::read_data(UpsData &data) {
   float d30 = try_direct(buf30);
   float d31 = try_direct(buf31);
 
-  if (!std::isnan(d30)) best_candidate = d30;
-  if (!std::isnan(d31)) {
-    if (std::isnan(best_candidate)) best_candidate = d31;
-    else if (std::fabs(d31 - nominal) < std::fabs(best_candidate - nominal)) best_candidate = d31;
-  }
+  // Also compute scanned candidates
+  float c30 = find_best_voltage_candidate(buf30, nominal);
+  float c31 = find_best_voltage_candidate(buf31, nominal);
 
-  // If direct candidates look off or missing, use the buffer-scanning heuristic
-  if (std::isnan(best_candidate)) {
-    float c30 = find_best_voltage_candidate(buf30, nominal);
-    float c31 = find_best_voltage_candidate(buf31, nominal);
-    if (!std::isnan(c30)) best_candidate = c30;
-    if (!std::isnan(c31)) {
-      if (std::isnan(best_candidate)) best_candidate = c31;
-      else if (std::fabs(c31 - nominal) < std::fabs(best_candidate - nominal)) best_candidate = c31;
+  // Collect all valid candidates and pick the one closest to nominal
+  std::vector<std::pair<float, std::string>> candidates;
+  if (!std::isnan(d30)) candidates.emplace_back(d30, "direct_0x30");
+  if (!std::isnan(d31)) candidates.emplace_back(d31, "direct_0x31");
+  if (!std::isnan(c30)) candidates.emplace_back(c30, "scan_0x30");
+  if (!std::isnan(c31)) candidates.emplace_back(c31, "scan_0x31");
+
+  if (!candidates.empty()) {
+    float best = candidates[0].first;
+    std::string best_src = candidates[0].second;
+    float best_score = std::fabs(best - nominal);
+    for (size_t i = 1; i < candidates.size(); ++i) {
+      float v = candidates[i].first;
+      float score = std::fabs(v - nominal);
+      if (score < best_score) {
+        best_score = score;
+        best = v;
+        best_src = candidates[i].second;
+      }
     }
-  }
-
-  if (!std::isnan(best_candidate)) {
-    data.power.input_voltage = best_candidate;
-    ESP_LOGD(EATON_TAG, "Selected input voltage candidate: %.1fV", data.power.input_voltage);
+    data.power.input_voltage = best;
+    ESP_LOGD(EATON_TAG, "Selected input voltage candidate: %.1fV (source=%s)", data.power.input_voltage, best_src.c_str());
     success = true;
   }
 
