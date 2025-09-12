@@ -22,6 +22,47 @@ static std::string hex_dump(const std::vector<uint8_t> &v) {
   return s;
 }
 
+// Heuristic: scan a buffer for 16-bit LE values and try several scale factors
+// Return NAN if none found
+static float find_best_voltage_candidate(const std::vector<uint8_t> &buf, float nominal) {
+  if (buf.size() < 2) return NAN;
+  const float scales[] = {1.0f, 10.0f, 100.0f, 2.0f, 5.0f};
+  bool found = false;
+  float best = NAN;
+  float best_score = 1e9f;
+
+  for (size_t i = 1; i + 1 < buf.size(); ++i) {
+    uint16_t raw = static_cast<uint16_t>(buf[i]) | (static_cast<uint16_t>(buf[i+1]) << 8);
+    if (raw == 0xFFFF || raw == 0x0000) continue;
+    for (float s : scales) {
+      float v = static_cast<float>(raw) / s;
+      if (v < 50.0f || v > 300.0f) continue; // plausible mains range
+      float score = std::fabs(v - nominal);
+      if (score < best_score) {
+        best_score = score;
+        best = v;
+        found = true;
+      }
+    }
+  }
+
+  return found ? best : NAN;
+}
+
+// Heuristic: find a load percent in the buffer (1..100) prefer values >5
+static int find_load_percent_in_buf(const std::vector<uint8_t> &buf) {
+  for (size_t i = 1; i < buf.size(); ++i) {
+    uint8_t v = buf[i];
+    if (v > 5 && v <= 100) return static_cast<int>(v);
+  }
+  // fallback to any non-zero small value
+  for (size_t i = 1; i < buf.size(); ++i) {
+    uint8_t v = buf[i];
+    if (v > 0 && v <= 100) return static_cast<int>(v);
+  }
+  return -1;
+}
+
 // Candidate report IDs to probe for Eaton 5PX (in practice seen in NUT mge-hid mappings)
 static const uint8_t EATON_TEST_REPORT_IDS[] = { 0x0C, 0x16, 0x06, 0x30, 0x31 };
 
@@ -152,32 +193,24 @@ bool Eaton5PxProtocol::read_data(UpsData &data) {
     success = true;
   }
 
-  // Try input voltage
-  if (read_hid_report(0x30, buf) && buf.size() >= 3) {
-  ESP_LOGD(EATON_TAG, "Raw 0x30: %s", hex_dump(buf).c_str());
-  // Common Eaton pattern candidate: 16-bit little-endian voltage in bytes 1-2
-    uint16_t vraw = static_cast<uint16_t>(buf[1]) | (static_cast<uint16_t>(buf[2]) << 8);
-    if (vraw != 0xFFFF && vraw != 0x0000) {
-      float voltage = static_cast<float>(vraw);
-      // If value looks like a raw integer >1000 it may be in tenths of volts
-      if (voltage > 1000.0f) voltage /= battery::VOLTAGE_SCALE_FACTOR;
-      // Or if within 100-1000 try dividing by 10 to get usual mains range
-      else if (voltage > 100.0f && voltage < 1000.0f) {
-        float cand = voltage / battery::VOLTAGE_SCALE_FACTOR;
-        if (cand >= 80.0f && cand <= 300.0f) voltage = cand;
-      }
-      if (voltage >= 80.0f && voltage <= 300.0f) {
-        data.power.input_voltage = voltage;
-        success = true;
-        ESP_LOGD(EATON_TAG, "Parsed input voltage: %.1fV (raw=0x%04X)", data.power.input_voltage, vraw);
-      }
-    }
+  // Read input (0x30) and output (0x31) reports and use heuristics to pick best candidate
+  std::vector<uint8_t> buf30, buf31, buf35, buf06, buf0C;
+  if (read_hid_report(0x30, buf30) && buf30.size() > 0) {
+    ESP_LOGD(EATON_TAG, "Raw 0x30: %s", hex_dump(buf30).c_str());
+    success = true;
+  }
+  if (read_hid_report(0x31, buf31) && buf31.size() > 0) {
+    ESP_LOGD(EATON_TAG, "Raw 0x31: %s", hex_dump(buf31).c_str());
+    success = true;
   }
 
-    // Try output voltage (report 0x31)
-    if (read_hid_report(0x31, buf) && buf.size() >= 3) {
-      ESP_LOGD(EATON_TAG, "Raw 0x31: %s", hex_dump(buf).c_str());
-      uint16_t vraw = static_cast<uint16_t>(buf[1]) | (static_cast<uint16_t>(buf[2]) << 8);
+  // Prefer explicit 16-bit candidates but fall back to heuristic scan across both reports
+  float nominal = parent_->get_fallback_nominal_voltage();
+  float best_candidate = NAN;
+  // Try direct 16-bit little-endian at offsets [1,2] in each report first
+  auto try_direct = [&](const std::vector<uint8_t> &b) -> float {
+    if (b.size() >= 3) {
+      uint16_t vraw = static_cast<uint16_t>(b[1]) | (static_cast<uint16_t>(b[2]) << 8);
       if (vraw != 0xFFFF && vraw != 0x0000) {
         float voltage = static_cast<float>(vraw);
         if (voltage > 1000.0f) voltage /= battery::VOLTAGE_SCALE_FACTOR;
@@ -185,24 +218,97 @@ bool Eaton5PxProtocol::read_data(UpsData &data) {
           float cand = voltage / battery::VOLTAGE_SCALE_FACTOR;
           if (cand >= 80.0f && cand <= 300.0f) voltage = cand;
         }
-        if (voltage >= 80.0f && voltage <= 300.0f) {
-          data.power.output_voltage = voltage;
-          success = true;
-          ESP_LOGD(EATON_TAG, "Parsed output voltage: %.1fV (raw=0x%04X)", data.power.output_voltage, vraw);
+        if (voltage >= 50.0f && voltage <= 300.0f) return voltage;
+      }
+    }
+    return NAN;
+  };
+
+  float d30 = try_direct(buf30);
+  float d31 = try_direct(buf31);
+
+  if (!std::isnan(d30)) best_candidate = d30;
+  if (!std::isnan(d31)) {
+    if (std::isnan(best_candidate)) best_candidate = d31;
+    else if (std::fabs(d31 - nominal) < std::fabs(best_candidate - nominal)) best_candidate = d31;
+  }
+
+  // If direct candidates look off or missing, use the buffer-scanning heuristic
+  if (std::isnan(best_candidate)) {
+    float c30 = find_best_voltage_candidate(buf30, nominal);
+    float c31 = find_best_voltage_candidate(buf31, nominal);
+    if (!std::isnan(c30)) best_candidate = c30;
+    if (!std::isnan(c31)) {
+      if (std::isnan(best_candidate)) best_candidate = c31;
+      else if (std::fabs(c31 - nominal) < std::fabs(best_candidate - nominal)) best_candidate = c31;
+    }
+  }
+
+  if (!std::isnan(best_candidate)) {
+    data.power.input_voltage = best_candidate;
+    ESP_LOGD(EATON_TAG, "Selected input voltage candidate: %.1fV", data.power.input_voltage);
+    success = true;
+  }
+
+  // Verbose candidate logging to help map bytes -> voltage on real hardware
+  if (buf30.size() > 0 || buf31.size() > 0) {
+    const float scales[] = {1.0f, 2.0f, 5.0f, 10.0f, 100.0f};
+    for (const auto &bpair : {std::make_pair(std::string("0x30"), buf30), std::make_pair(std::string("0x31"), buf31)}) {
+      const auto &label = bpair.first;
+      const auto &bufx = bpair.second;
+      if (bufx.size() < 2) continue;
+      for (size_t i = 1; i + 1 < bufx.size(); ++i) {
+        uint16_t raw = static_cast<uint16_t>(bufx[i]) | (static_cast<uint16_t>(bufx[i+1]) << 8);
+        if (raw == 0xFFFF || raw == 0x0000) continue;
+        for (float s : scales) {
+          float v = static_cast<float>(raw) / s;
+          if (v >= 50.0f && v <= 300.0f) {
+            ESP_LOGD(EATON_TAG, "Candidate %s offset %zu raw=0x%04X scale=%.2f -> %.2fV", label.c_str(), i, raw, s, v);
+          }
         }
       }
     }
+  }
 
-    // Try load percentage (report 0x35)
-    if (read_hid_report(0x35, buf) && buf.size() >= 2) {
-      ESP_LOGD(EATON_TAG, "Raw 0x35: %s", hex_dump(buf).c_str());
-      uint8_t load_raw = buf[1];
-      if (load_raw <= 100) {
-        data.power.load_percent = static_cast<float>(load_raw);
-        success = true;
-        ESP_LOGD(EATON_TAG, "Parsed load percent: %d%% (raw=0x%02X)", load_raw, load_raw);
-      }
+  // For output voltage, prefer explicit parse from 0x31 (direct) then heuristic
+  if (!std::isnan(d31)) {
+    data.power.output_voltage = d31;
+    ESP_LOGD(EATON_TAG, "Parsed output voltage (direct): %.1fV", data.power.output_voltage);
+    success = true;
+  } else {
+    float out_c = find_best_voltage_candidate(buf31, nominal);
+    if (!std::isnan(out_c)) {
+      data.power.output_voltage = out_c;
+      ESP_LOGD(EATON_TAG, "Parsed output voltage (heuristic): %.1fV", data.power.output_voltage);
+      success = true;
     }
+  }
+
+  // Try load percentage (report 0x35) first, then scan other reports (0x31, 0x06, 0x0C)
+  if (read_hid_report(0x35, buf35) && buf35.size() >= 2) {
+    ESP_LOGD(EATON_TAG, "Raw 0x35: %s", hex_dump(buf35).c_str());
+    uint8_t load_raw = buf35[1];
+    if (load_raw <= 100 && load_raw > 0) {
+      data.power.load_percent = static_cast<float>(load_raw);
+      success = true;
+      ESP_LOGD(EATON_TAG, "Parsed load percent: %d%% (raw=0x%02X)", load_raw, load_raw);
+    }
+  }
+  // fallback: scan 0x31 and known battery/summary buffers
+  if (data.power.load_percent <= 0.0f) {
+    // ensure we have these buffers to scan
+    if (buf31.empty()) read_hid_report(0x31, buf31);
+    if (buf06.empty()) read_hid_report(0x06, buf06);
+    if (buf0C.empty()) read_hid_report(0x0C, buf0C);
+    int cand = find_load_percent_in_buf(buf31);
+    if (cand < 0) cand = find_load_percent_in_buf(buf06);
+    if (cand < 0) cand = find_load_percent_in_buf(buf0C);
+    if (cand > 0) {
+      data.power.load_percent = static_cast<float>(cand);
+      success = true;
+      ESP_LOGD(EATON_TAG, "Heuristic load percent: %d%%", cand);
+    }
+  }
 
   // Read USB descriptors for manufacturer/model if we got data
   if (success) {
