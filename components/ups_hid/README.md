@@ -132,6 +132,7 @@ ups_hid:
   # protocol: apc                # Force APC HID protocol
   # protocol: cyberpower         # Force CyberPower HID protocol  
   # protocol: generic            # Force Generic HID protocol
+  # protocol: "eaton 5px"       # Force Eaton 5PX protocol (targeted Eaton/MGE support)
 ```
 
 **Protocol Options:**
@@ -155,6 +156,11 @@ ups_hid:
   - Universal fallback for unknown UPS brands
   - Basic 5-sensor support with intelligent detection
   - Limited beeper/testing functionality
+
+- **`eaton 5px`**: Force Eaton 5PX Protocol
+  - Targeted support for Eaton / MGE 5PX series (vendor 0x0463)
+  - Basic battery, runtime, and status telemetry
+  - May require raw-report tuning for full coverage
 
 **When to use manual selection:**
 - Testing different protocols on the same device
