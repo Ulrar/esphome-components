@@ -21,6 +21,9 @@ bool Eaton5PxProtocol::detect() {
     return false;
   }
 
+  // Try output voltage (report 0x31)
+  
+
   // Allow device a short time to enumerate
   vTaskDelay(pdMS_TO_TICKS(timing::USB_INITIALIZATION_DELAY_MS));
 
@@ -136,22 +139,63 @@ bool Eaton5PxProtocol::read_data(UpsData &data) {
 
   // Try input voltage
   if (read_hid_report(0x30, buf) && buf.size() >= 3) {
-    // heuristic: voltage at offset 1 as raw value scaled by 0.1
-    uint8_t vraw = buf[1];
-    data.power.input_voltage = static_cast<float>(vraw) / battery::VOLTAGE_SCALE_FACTOR;
-    success = true;
-    ESP_LOGD(EATON_TAG, "Parsed input voltage: %.1fV (raw=0x%02X)", data.power.input_voltage, vraw);
+    // Common Eaton pattern: 16-bit little-endian voltage in bytes 1-2
+    uint16_t vraw = static_cast<uint16_t>(buf[1]) | (static_cast<uint16_t>(buf[2]) << 8);
+    if (vraw != 0xFFFF && vraw != 0x0000) {
+      float voltage = static_cast<float>(vraw);
+      // If value looks like a raw integer >1000 it may be in tenths of volts
+      if (voltage > 1000.0f) voltage /= battery::VOLTAGE_SCALE_FACTOR;
+      // Or if within 100-1000 try dividing by 10 to get usual mains range
+      else if (voltage > 100.0f && voltage < 1000.0f) {
+        float cand = voltage / battery::VOLTAGE_SCALE_FACTOR;
+        if (cand >= 80.0f && cand <= 300.0f) voltage = cand;
+      }
+      if (voltage >= 80.0f && voltage <= 300.0f) {
+        data.power.input_voltage = voltage;
+        success = true;
+        ESP_LOGD(EATON_TAG, "Parsed input voltage: %.1fV (raw=0x%04X)", data.power.input_voltage, vraw);
+      }
+    }
   }
+
+    // Try output voltage (report 0x31)
+    if (read_hid_report(0x31, buf) && buf.size() >= 3) {
+      uint16_t vraw = static_cast<uint16_t>(buf[1]) | (static_cast<uint16_t>(buf[2]) << 8);
+      if (vraw != 0xFFFF && vraw != 0x0000) {
+        float voltage = static_cast<float>(vraw);
+        if (voltage > 1000.0f) voltage /= battery::VOLTAGE_SCALE_FACTOR;
+        else if (voltage > 100.0f && voltage < 1000.0f) {
+          float cand = voltage / battery::VOLTAGE_SCALE_FACTOR;
+          if (cand >= 80.0f && cand <= 300.0f) voltage = cand;
+        }
+        if (voltage >= 80.0f && voltage <= 300.0f) {
+          data.power.output_voltage = voltage;
+          success = true;
+          ESP_LOGD(EATON_TAG, "Parsed output voltage: %.1fV (raw=0x%04X)", data.power.output_voltage, vraw);
+        }
+      }
+    }
+
+    // Try load percentage (report 0x35)
+    if (read_hid_report(0x35, buf) && buf.size() >= 2) {
+      uint8_t load_raw = buf[1];
+      if (load_raw <= 100) {
+        data.power.load_percent = static_cast<float>(load_raw);
+        success = true;
+        ESP_LOGD(EATON_TAG, "Parsed load percent: %d%% (raw=0x%02X)", load_raw, load_raw);
+      }
+    }
 
   // Read USB descriptors for manufacturer/model if we got data
   if (success) {
+    // iManufacturer is commonly index 1 and iProduct/index 3 holds the model string
     std::string mfr;
-    if (parent_->get_string_descriptor(3, mfr) == ESP_OK && !mfr.empty()) {
+    if (parent_->get_string_descriptor(1, mfr) == ESP_OK && !mfr.empty()) {
       data.device.manufacturer = mfr;
     }
     std::string prod;
-    if (parent_->get_string_descriptor(1, prod) == ESP_OK && !prod.empty()) {
-      // Trim trailing firmware tokens if present
+    if (parent_->get_string_descriptor(3, prod) == ESP_OK && !prod.empty()) {
+      // Trim trailing firmware tokens if present (often in product string)
       size_t pos = prod.find(" FW:");
       if (pos != std::string::npos) prod.resize(pos);
       data.device.model = prod;
