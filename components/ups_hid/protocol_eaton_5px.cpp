@@ -170,6 +170,7 @@ bool Eaton5PxProtocol::read_data(UpsData &data) {
   ESP_LOGV(EATON_TAG, "Reading Eaton 5PX data (minimal)");
 
   bool success = false;
+  bool hardcoded_voltage = false;
   std::vector<uint8_t> buf;
 
   // Try power summary
@@ -202,6 +203,21 @@ bool Eaton5PxProtocol::read_data(UpsData &data) {
   if (read_hid_report(0x31, buf31) && buf31.size() > 0) {
     ESP_LOGD(EATON_TAG, "Raw 0x31: %s", hex_dump(buf31).c_str());
     success = true;
+    // Eaton 5PX deterministic mapping: bytes [5..6] (LE) represent voltage in tenths of volts
+    // e.g. raw 0x091D -> 233.3V
+    if (buf31.size() > 6) {
+      uint16_t raw56 = static_cast<uint16_t>(buf31[5]) | (static_cast<uint16_t>(buf31[6]) << 8);
+      if (raw56 != 0xFFFF && raw56 != 0x0000) {
+        float v = static_cast<float>(raw56) / 10.0f;
+        if (v >= 50.0f && v <= 300.0f) {
+          data.power.output_voltage = v;
+          data.power.input_voltage = v; // on-grid these are identical; hardcode for 5PX
+          hardcoded_voltage = true;
+          ESP_LOGD(EATON_TAG, "Eaton 5PX hardcoded voltage from 0x31[5..6]: %.1fV", v);
+          success = true;
+        }
+      }
+    }
   }
 
   // Prefer explicit 16-bit candidates but fall back to heuristic scan across both reports
@@ -269,16 +285,22 @@ bool Eaton5PxProtocol::read_data(UpsData &data) {
       if (dist31 + THRESHOLD_V < dist30) { best_val = chosen31; best_src = src31; }
       else { best_val = chosen30; best_src = src30; }
     }
-    data.power.input_voltage = best_val;
-    ESP_LOGD(EATON_TAG, "Selected input voltage candidate: %.1fV (source=%s)", data.power.input_voltage, best_src.c_str());
+    if (!hardcoded_voltage) {
+      data.power.input_voltage = best_val;
+      ESP_LOGD(EATON_TAG, "Selected input voltage candidate: %.1fV (source=%s)", data.power.input_voltage, best_src.c_str());
+    } else {
+      ESP_LOGD(EATON_TAG, "Skipped input heuristic because hardcoded 5PX voltage is used: %.1fV", data.power.input_voltage);
+    }
     success = true;
   }
 
   // Output: prefer 0x31 candidates
-  if (!std::isnan(chosen31)) {
+  if (!hardcoded_voltage && !std::isnan(chosen31)) {
     data.power.output_voltage = chosen31;
     ESP_LOGD(EATON_TAG, "Parsed output voltage: %.1fV (source=%s)", data.power.output_voltage, src31.c_str());
     success = true;
+  } else if (hardcoded_voltage) {
+    ESP_LOGD(EATON_TAG, "Skipped output heuristic because hardcoded 5PX voltage is used: %.1fV", data.power.output_voltage);
   }
 
   // Verbose candidate logging to help map bytes -> voltage on real hardware
@@ -302,16 +324,18 @@ bool Eaton5PxProtocol::read_data(UpsData &data) {
   }
 
   // For output voltage, prefer explicit parse from 0x31 (direct) then heuristic
-  if (!std::isnan(d31)) {
-    data.power.output_voltage = d31;
-    ESP_LOGD(EATON_TAG, "Parsed output voltage (direct): %.1fV", data.power.output_voltage);
-    success = true;
-  } else {
-    float out_c = find_best_voltage_candidate(buf31, nominal);
-    if (!std::isnan(out_c)) {
-      data.power.output_voltage = out_c;
-      ESP_LOGD(EATON_TAG, "Parsed output voltage (heuristic): %.1fV", data.power.output_voltage);
+  if (!hardcoded_voltage) {
+    if (!std::isnan(d31)) {
+      data.power.output_voltage = d31;
+      ESP_LOGD(EATON_TAG, "Parsed output voltage (direct): %.1fV", data.power.output_voltage);
       success = true;
+    } else {
+      float out_c = find_best_voltage_candidate(buf31, nominal);
+      if (!std::isnan(out_c)) {
+        data.power.output_voltage = out_c;
+        ESP_LOGD(EATON_TAG, "Parsed output voltage (heuristic): %.1fV", data.power.output_voltage);
+        success = true;
+      }
     }
   }
 
